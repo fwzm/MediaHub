@@ -23,6 +23,8 @@ import com.mediahub.model.PlayerVisualEffectsPreferences
 import com.mediahub.model.ProfessionalInfoPreferences
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.SubtitleFormats
+import com.mediahub.model.AudioTrack
+import com.mediahub.model.SubtitleTrack
 import com.mediahub.model.UpNextResolver
 import com.mediahub.player.engine.EnginePreferenceHistory
 import com.mediahub.player.engine.ExternalSubtitle
@@ -40,6 +42,7 @@ import com.mediahub.player.compatibility.DeviceCapabilitiesProvider
 import com.mediahub.player.compatibility.DevicePlaybackAssessment
 import com.mediahub.player.compatibility.DevicePlaybackAssessor
 import com.mediahub.player.engine.SwitchablePlaybackEngine
+import com.mediahub.player.engine.TrackPreferencePolicy
 import com.mediahub.player.engine.TrackSelection
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.DiscoveredSubtitle
@@ -53,6 +56,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -63,6 +67,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
@@ -171,6 +176,32 @@ class PlayerViewModel @Inject constructor(
         get() = launchContainer.takeIf { it.isNotBlank() }
     /** 最新偏好缓存（modeProvider 同步读取，避免 play() 挂起读 DataStore）。 */
     private var latestPreferences: com.mediahub.model.UserPreferences = com.mediahub.model.UserPreferences()
+
+    /**
+     * 显式选轨记录（清单 78）：只记录用户手动选过的轨，换集时按语言/标题在新一集重放。
+     *
+     * 音轨没有"关闭"语义；字幕额外区分"用户明确关闭"，避免首选字幕语言在下一集
+     * 把用户刚关掉的字幕重新打开。
+     */
+    private var explicitAudioChoice: TrackIdentity? = null
+
+    private var explicitSubtitleChoice: SubtitleChoice = SubtitleChoice.Unset
+
+    private var trackPreferenceJob: Job? = null
+
+    private data class TrackIdentity(val language: String?, val title: String?) {
+        fun matches(language: String?, title: String?): Boolean {
+            val wanted = languageKey(this.language)
+            if (wanted != null && wanted == languageKey(language)) return true
+            return !this.title.isNullOrBlank() && this.title == title
+        }
+    }
+
+    private sealed interface SubtitleChoice {
+        data object Unset : SubtitleChoice
+        data object Off : SubtitleChoice
+        data class Selected(val identity: TrackIdentity) : SubtitleChoice
+    }
 
     /**
      * 引擎绑定到 ViewModel 作用域，onCleared 时释放；请求头上下文 per-engine（ADR-018）。
@@ -375,7 +406,22 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    /** 内嵌字幕轨手动选择：标记本会话手动优先，迟到的发现/记忆不再覆盖。 */
+    /**
+     * 音轨手动选择（清单 6/78）：立即生效并记录身份，供下一集自动继承。
+     */
+    fun onAudioTrackSelected(track: AudioTrack) {
+        if (stopped) return
+        val selection = PlayerTrackSelection.addressOf(engine.uiState.value, track, engine.kind) ?: return
+        if (!engine.isTrackSelectionCurrent(selection)) return
+        engine.selectAudioTrack(selection)
+        explicitAudioChoice = TrackIdentity(track.language, track.title)
+    }
+
+    /**
+     * 内嵌字幕轨手动选择：标记本会话手动优先，迟到的发现/记忆不再覆盖。
+     *
+     * null = 用户明确关闭字幕；该意图同样会被下一集继承（不会被首选字幕语言重新打开）。
+     */
     fun onEmbeddedSubtitleSelected(selection: TrackSelection?) {
         if (stopped) return
         if (!engine.isTrackSelectionCurrent(selection)) return
@@ -383,6 +429,81 @@ class PlayerViewModel @Inject constructor(
         engine.selectSubtitleTrack(selection)
         _subtitleCenter.update { it.copy(selectedExternalId = null) }
         persistMemory(subtitleId = null)
+        if (selection == null) explicitSubtitleChoice = SubtitleChoice.Off
+    }
+
+    /**
+     * 字幕行手动选择（清单 6/78）：立即生效，并把轨道身份记下来供下一集继承。
+     *
+     * null = 关闭字幕。
+     */
+    fun onSubtitleTrackSelected(track: SubtitleTrack?) {
+        if (stopped) return
+        val selection = PlayerTrackSelection.addressOf(engine.uiState.value, track, engine.kind)
+        if (track != null && selection == null) return
+        onEmbeddedSubtitleSelected(selection)
+        if (track != null) {
+            explicitSubtitleChoice = SubtitleChoice.Selected(TrackIdentity(track.language, track.title))
+        }
+    }
+
+    /** 会话音频语言：用户首选优先；未设置时沿用系统 Locale 顺序（既有行为）。 */
+    private fun sessionAudioLanguages(): List<String> {
+        val preferred = latestPreferences.preferredAudioLanguage?.takeIf { it.isNotBlank() }
+        return TrackPreferencePolicy.audioLanguages(
+            preferred?.let { listOf(it) } ?: TrackPreferencePolicy.systemLanguageTags(),
+        )
+    }
+
+    /** 会话字幕语言：未设置首选字幕语言时保持空列表（不自动开启字幕）。 */
+    private fun sessionTextLanguages(): List<String> =
+        TrackPreferencePolicy.textLanguages(latestPreferences.preferredSubtitleLanguage)
+
+    /**
+     * 新一集轨道就绪后重放用户意图（清单 78/82）：
+     * 1. 显式选中的音轨/字幕轨优先继承；
+     * 2. 显式关闭字幕保持关闭；
+     * 3. 否则按首选字幕语言选匹配轨，匹配不到不做任何事（不自动开启）。
+     */
+    private fun scheduleTrackPreferenceApply(generation: Long) {
+        trackPreferenceJob?.cancel()
+        val hasAudioChoice = explicitAudioChoice != null
+        val hasSubtitleChoice = explicitSubtitleChoice != SubtitleChoice.Unset
+        val hasPreferredSubtitle = !latestPreferences.preferredSubtitleLanguage.isNullOrBlank()
+        if (!hasAudioChoice && !hasSubtitleChoice && !hasPreferredSubtitle) return
+        trackPreferenceJob = viewModelScope.launch {
+            val state = withTimeoutOrNull(TRACK_PREFERENCE_TIMEOUT_MS) {
+                engine.uiState.first { it.audioTracks.isNotEmpty() || it.subtitleTracks.isNotEmpty() }
+            } ?: return@launch
+            if (stopped || resolveGeneration.get() != generation) return@launch
+            applyTrackPreferences(state)
+        }
+    }
+
+    private fun applyTrackPreferences(state: com.mediahub.player.engine.PlaybackUiState) {
+        explicitAudioChoice?.let { identity ->
+            state.audioTracks.firstOrNull { identity.matches(it.language, it.title) }
+                ?.let { PlayerTrackSelection.addressOf(state, it, engine.kind) }
+                ?.let(engine::selectAudioTrack)
+        }
+        when (val choice = explicitSubtitleChoice) {
+            SubtitleChoice.Unset -> {
+                val preferred = latestPreferences.preferredSubtitleLanguage
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let(::languageKey) ?: return
+                state.subtitleTracks
+                    .firstOrNull { languageKey(it.language) == preferred }
+                    ?.let { PlayerTrackSelection.addressOf(state, it, engine.kind) }
+                    ?.let(engine::selectSubtitleTrack)
+            }
+
+            SubtitleChoice.Off -> engine.selectSubtitleTrack(null)
+
+            is SubtitleChoice.Selected -> state.subtitleTracks
+                .firstOrNull { choice.identity.matches(it.language, it.title) }
+                ?.let { PlayerTrackSelection.addressOf(state, it, engine.kind) }
+                ?.let(engine::selectSubtitleTrack)
+        }
     }
 
     /**
@@ -698,8 +819,11 @@ class PlayerViewModel @Inject constructor(
                         itemType = item.type,
                         posterUrl = item.posterUrl,
                         trace = trace,
+                        preferredAudioLanguages = sessionAudioLanguages(),
+                        preferredTextLanguages = sessionTextLanguages(),
                     )
                 )
+                scheduleTrackPreferenceApply(generation)
 
                 if (!syncStarted) {
                     // engine.events 只允许被订阅一次：先 tap，再由 playbackEventBus 分发。
@@ -861,6 +985,7 @@ class PlayerViewModel @Inject constructor(
         resolveGeneration.incrementAndGet()
         resolveJob?.cancel()
         autoplayJob?.cancel()
+        trackPreferenceJob?.cancel()
         invalidateSubtitleSession()
         withContext(NonCancellable + Dispatchers.Main.immediate) {
             try {
@@ -891,6 +1016,7 @@ class PlayerViewModel @Inject constructor(
         resolveGeneration.incrementAndGet()
         resolveJob?.cancel()
         autoplayJob?.cancel()
+        trackPreferenceJob?.cancel()
         invalidateSubtitleSession()
         // 兜底：若未走 stopAndFlush（如进程销毁/异常路径），确保停止采样并释放资源。
         if (!stopped) {
@@ -899,5 +1025,20 @@ class PlayerViewModel @Inject constructor(
             finally { try { engine.release() } finally { stopCompleted.complete(Unit) } }
         }
         super.onCleared()
+    }
+}
+
+/** 等待新一集轨道发现的上限；超时表示容器没有可恢复的轨道，放弃本次重放。 */
+private const val TRACK_PREFERENCE_TIMEOUT_MS = 10_000L
+
+/** 语言标签收敛到语言子标签，并统一常见 ISO 639-2 三字码，便于跨引擎比较。 */
+private fun languageKey(tag: String?): String? {
+    val key = tag?.substringBefore('-')?.trim()?.lowercase() ?: return null
+    return when (key) {
+        "zho", "chi" -> "zh"
+        "eng" -> "en"
+        "jpn" -> "ja"
+        "kor" -> "ko"
+        else -> key.ifEmpty { null }
     }
 }

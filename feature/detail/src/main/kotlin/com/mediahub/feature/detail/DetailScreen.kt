@@ -24,7 +24,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,6 +34,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -81,6 +84,8 @@ fun DetailRoute(
     val seriesState by viewModel.seriesState.collectAsStateWithLifecycle()
     val sourceState by viewModel.sourceState.collectAsStateWithLifecycle()
     val favoriteState by viewModel.favoriteState.collectAsStateWithLifecycle()
+    val trackPreferences by viewModel.trackLanguagePreferences.collectAsStateWithLifecycle()
+    var showTrackPreferences by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -95,6 +100,13 @@ fun DetailRoute(
                     }
                 },
                 actions = {
+                    // 音轨/字幕语言偏好（清单 6）：详情页入口，选择持久化到 DataStore
+                    IconButton(onClick = { showTrackPreferences = true }) {
+                        Icon(
+                            Icons.Default.Language,
+                            contentDescription = stringResource(R.string.detail_track_preferences_action),
+                        )
+                    }
                     // 收藏开关（task-25 / A2）：只在该数据源具备 FAVORITE 能力时出现
                     val favorite = favoriteState
                     if (favorite != null) {
@@ -175,6 +187,99 @@ fun DetailRoute(
                 )
             }
         }
+    }
+
+    if (showTrackPreferences) {
+        TrackLanguagePreferencesDialog(
+            preferences = trackPreferences ?: TrackLanguagePreferences(),
+            onDismiss = { showTrackPreferences = false },
+            onSelectAudio = viewModel::updatePreferredAudioLanguage,
+            onSelectSubtitle = viewModel::updatePreferredSubtitleLanguage,
+        )
+    }
+}
+
+/** 详情页可选语言；tag = null 表示"跟随系统"（音频）/ "不自动开启"（字幕）。 */
+private data class TrackLanguageOption(val tag: String?, val labelRes: Int)
+
+private val TRACK_LANGUAGE_OPTIONS = listOf(
+    TrackLanguageOption("zh", R.string.detail_language_chinese),
+    TrackLanguageOption("en", R.string.detail_language_english),
+    TrackLanguageOption("ja", R.string.detail_language_japanese),
+    TrackLanguageOption("ko", R.string.detail_language_korean),
+)
+
+@Composable
+private fun TrackLanguagePreferencesDialog(
+    preferences: TrackLanguagePreferences,
+    onDismiss: () -> Unit,
+    onSelectAudio: (String?) -> Unit,
+    onSelectSubtitle: (String?) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.detail_track_preferences_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    stringResource(R.string.detail_preferred_audio_language),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                TrackLanguageChoice(
+                    label = stringResource(R.string.detail_language_follow_system),
+                    selected = preferences.preferredAudioLanguage == null,
+                    onClick = { onSelectAudio(null) },
+                )
+                TRACK_LANGUAGE_OPTIONS.forEach { option ->
+                    TrackLanguageChoice(
+                        label = stringResource(option.labelRes),
+                        selected = preferences.preferredAudioLanguage == option.tag,
+                        onClick = { onSelectAudio(option.tag) },
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    stringResource(R.string.detail_preferred_subtitle_language),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                TrackLanguageChoice(
+                    label = stringResource(R.string.detail_subtitle_auto_off),
+                    selected = preferences.preferredSubtitleLanguage == null,
+                    onClick = { onSelectSubtitle(null) },
+                )
+                TRACK_LANGUAGE_OPTIONS.forEach { option ->
+                    TrackLanguageChoice(
+                        label = stringResource(option.labelRes),
+                        selected = preferences.preferredSubtitleLanguage == option.tag,
+                        onClick = { onSelectSubtitle(option.tag) },
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.detail_track_preferences_done))
+            }
+        },
+    )
+}
+
+@Composable
+private fun TrackLanguageChoice(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = onClick)
+        Spacer(Modifier.width(8.dp))
+        Text(label)
     }
 }
 

@@ -29,6 +29,19 @@ data class UserPreferences(
     val playerVisualEffects: PlayerVisualEffectsPreferences = PlayerVisualEffectsPreferences.Default,
     /** 播放专业信息面板（默认专业）：expertMode 只控制面板信息密度，不影响播放本身。 */
     val professionalInfo: ProfessionalInfoPreferences = ProfessionalInfoPreferences.Default,
+    /**
+     * 首选音频语言（BCP-47 语言子标签，如 `zh` / `en`；null = 未指定）。
+     *
+     * 未指定时保持既有策略：按系统 LocaleList 顺序匹配音频轨。
+     */
+    val preferredAudioLanguage: String? = null,
+    /**
+     * 首选字幕语言（BCP-47 语言子标签；null = 未指定，不自动开启字幕）。
+     *
+     * 只有匹配到该语言的字幕轨时才会默认选中；匹配不到不自动开启，
+     * 仍沿用容器 default/forced 标记的既有行为。
+     */
+    val preferredSubtitleLanguage: String? = null,
 )
 
 /**

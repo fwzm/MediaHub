@@ -92,6 +92,30 @@ class UserPreferencesStoreTest {
     }
 
     @Test
+    fun `preferred audio and subtitle languages survive a store round trip`() = runBlocking {
+        store.update { current ->
+            current.copy(
+                preferredAudioLanguage = "ja",
+                preferredSubtitleLanguage = "zh",
+            )
+        }
+
+        val recreatedStore = UserPreferencesStore(dataStore)
+        val restored = recreatedStore.flow.first()
+
+        assertEquals("ja", restored.preferredAudioLanguage)
+        assertEquals("zh", restored.preferredSubtitleLanguage)
+    }
+
+    @Test
+    fun `clearing preferred subtitle language persists no auto subtitle preference`() = runBlocking {
+        store.update { it.copy(preferredSubtitleLanguage = "zh") }
+        store.update { it.copy(preferredSubtitleLanguage = null) }
+
+        assertNull(UserPreferencesStore(dataStore).flow.first().preferredSubtitleLanguage)
+    }
+
+    @Test
     fun `visual preferences survive a closed DataStore and a fresh disk reader`() = runBlocking {
         val expected = PlayerVisualEffectsPreferences.Default.copy(
             enabled = false,

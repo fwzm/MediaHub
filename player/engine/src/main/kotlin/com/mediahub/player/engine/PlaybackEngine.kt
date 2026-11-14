@@ -264,6 +264,12 @@ class PlaybackEngine(
         externalSubtitles.clear()
         lastSelectedSubtitle = null
         clearTextSelectionOverrides()
+        // 音轨/字幕语言偏好（清单 6/82）：空字幕偏好会清空文本偏好，回到不自动开启的默认行为。
+        TrackPreferencePolicy.prepare(
+            trackSelector,
+            session.preferredAudioLanguages,
+            session.preferredTextLanguages,
+        )
         session.trace?.record(PlaybackStartupTrace.Milestone.MEDIA_REQUEST_STARTED)
         session.trace?.record(PlaybackStartupTrace.Milestone.ENGINE_PREPARE_STARTED)
         headersHolder.setHeaders(buildRequestHeaders(session.source))
