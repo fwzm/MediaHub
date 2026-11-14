@@ -146,8 +146,9 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
    星标收藏只保存在本机（DataStore，按 serverId 隔离，不写服务器、不保存直播流地址）。
 3. 播放列表里的 `#EXTM3U url-tvg="..."` / `x-tvg-url` 声明会被读取为 XMLTV EPG 地址；
    EPG 时间按声明时区归一化为 epoch 毫秒，无时区按 UTC；带 `DOCTYPE` 的 XMLTV 会被拒绝（XXE 防护）。
-4. 当前只接入 M3U 源，**未接入 Xtream 接口**；直播专用起播与切台体验仍属后续交付，
-   现阶段点击频道会进入既有播放页并走 Provider 的直播直链解析。
+4. 当前只接入 M3U 源，**未接入 Xtream 接口**。点击频道进入播放页：直播走独立起播路径，
+   不读取续播位置（起播恒为 0），退出/切台不写观看进度、不上报 Provider 进度；
+   切台/重试时先停掉旧流并用不透明加载层覆盖，失败可在播放页直接重试。
 5. 验证只用 MockWebServer 与本地 M3U/XMLTV 夹具，未连接任何真实 IPTV 服务。
 
 ### 本地存储

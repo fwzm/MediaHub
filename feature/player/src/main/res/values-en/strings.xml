@@ -18,6 +18,8 @@
     <string name="player_battery">Battery %1$d%%</string>
     <string name="player_time_progress">%1$s / %2$s</string>
     <string name="player_time_progress_unknown">%1$s / --:--</string>
+    <string name="player_live_badge">LIVE</string>
+    <string name="player_live_loading">Loading live channel…</string>
     <string name="player_pause">Pause</string>
     <string name="player_play">Play</string>
     <string name="player_playback_speed">%1$.2f×</string>

@@ -147,6 +147,7 @@ fun PlayerRoute(
     val engineKind by viewModel.engineKind.collectAsStateWithLifecycle()
     val subtitleCenter by viewModel.subtitleCenter.collectAsStateWithLifecycle()
     val playbackSource by viewModel.playbackSource.collectAsStateWithLifecycle()
+    val isLive = viewModel.isLivePlayback
     val audioSpectrumBridge = rememberAudioSpectrumBridge(viewModel.engine.audioBands)
 
     // 兜底（系统返回手势/组合销毁）：异步 final flush；正常返回按钮走同步 stopAndFlush（ADR-023）。
@@ -516,10 +517,29 @@ fun PlayerRoute(
 
         when (resolve) {
             ResolveState.Resolving -> {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center),
-                    color = Color.White,
-                )
+                if (isLive) {
+                    // 直播起播/切台：用不透明底层盖住上一路画面，加载态不与旧流叠加。
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        CircularProgressIndicator(color = Color.White)
+                        Text(
+                            stringResource(R.string.player_live_loading),
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(top = 16.dp),
+                        )
+                    }
+                } else {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center),
+                        color = Color.White,
+                    )
+                }
             }
 
             is ResolveState.Failed -> {
@@ -549,6 +569,7 @@ fun PlayerRoute(
                     PlayerControls(
                         modifier = Modifier.matchParentSize(),
                         state = state,
+                        isLive = isLive,
                         serverDisplayName = serverDisplayName,
                         serverIcon = serverIcon,
                         downloadSpeedBps = downloadSpeedBps,
@@ -809,6 +830,7 @@ private const val BASE_SUBTITLE_FRACTION = 0.0533f
 private fun PlayerControls(
     modifier: Modifier = Modifier,
     state: PlayerCombinedState,
+    isLive: Boolean,
     serverDisplayName: String?,
     serverIcon: String?,
     downloadSpeedBps: Long,
@@ -988,19 +1010,24 @@ private fun PlayerControls(
                     // SEEK-A：进度条已抽成生产组件 PlayerSeekBar（本文件下方定义）。
                     // 抽取的唯一目的是让「拖动 → 提交」契约能被**真实组件**测试验证，
                     // 而不是在测试里复制一份 Slider 只验证框架行为（PR #53 的教训）。
-                    PlayerSeekBar(
-                        positionMs = state.positionMs,
-                        durationMs = state.durationMs,
-                        onSeek = onSeek,
-                        colors = seekBarColors,
-                    )
+                    // 直播是实时流：没有总时长与续播，不显示可拖动进度条。
+                    if (!isLive) {
+                        PlayerSeekBar(
+                            positionMs = state.positionMs,
+                            durationMs = state.durationMs,
+                            onSeek = onSeek,
+                            colors = seekBarColors,
+                        )
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text(
-                            if (state.durationMs > 0) {
+                            if (isLive) {
+                                stringResource(R.string.player_live_badge)
+                            } else if (state.durationMs > 0) {
                                 stringResource(
                                     R.string.player_time_progress,
                                     formatTime(state.positionMs),
@@ -1044,11 +1071,14 @@ private fun PlayerControls(
                                     modifier = Modifier.size(26.dp),
                                 )
                             }
-                            TextButton(onClick = onCycleSpeed) {
-                                Text(
-                                    stringResource(R.string.player_playback_speed, state.speed),
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
+                            // 直播不支持倍速/续播控制，隐藏速度入口。
+                            if (!isLive) {
+                                TextButton(onClick = onCycleSpeed) {
+                                    Text(
+                                        stringResource(R.string.player_playback_speed, state.speed),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
                             }
                         }
                     }

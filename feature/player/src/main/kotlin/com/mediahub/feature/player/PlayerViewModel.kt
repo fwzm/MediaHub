@@ -166,6 +166,13 @@ class PlayerViewModel @Inject constructor(
     private var launchPoster: String = savedStateHandle["poster"] ?: ""
     private var launchContainer: String = savedStateHandle["container"] ?: ""
 
+    /**
+     * 直播播放（条目 112）：直播不读续播、不写进度，重新解析前先停掉旧流。
+     * 以解析出的条目类型为准（自动连播清空启动快照后仍能保持正确）。
+     */
+    private var livePlayback: Boolean = launchType.equals(MediaType.LIVE_TV.name, ignoreCase = true)
+    val isLivePlayback: Boolean get() = livePlayback
+
     /** 启动快照携带的容器（详情页直传；可能为空串=未提供）。 */
     val launchContainerOrNull: String?
         get() = launchContainer.takeIf { it.isNotBlank() }
@@ -674,7 +681,14 @@ class PlayerViewModel @Inject constructor(
                 coroutineContext.ensureActive()
                 if (stopped || resolveGeneration.get() != generation) return@launch
                 updateArtworkPalette(item.posterUrl ?: item.backdropUrl)
-                val resume = progressStore.getResume(serverId, itemId)
+                val live = item.type == MediaType.LIVE_TV
+                livePlayback = live
+                if (live && currentItem != null) {
+                    // 切台/重试：先停旧直播流，新加载态不得叠加在旧画面上。
+                    runCatching { engine.stop() }
+                }
+                // 直播是实时流：没有"上次看到哪"，起播位置恒为 0。
+                val resume = if (live) 0L else progressStore.getResume(serverId, itemId)
                 coroutineContext.ensureActive()
                 if (stopped || resolveGeneration.get() != generation) return@launch
                 val source = playbackProvider.resolvePlayback(
@@ -701,8 +715,9 @@ class PlayerViewModel @Inject constructor(
                     )
                 )
 
-                if (!syncStarted) {
+                if (!live && !syncStarted) {
                     // engine.events 只允许被订阅一次：先 tap，再由 playbackEventBus 分发。
+                    // 直播不再启动进度管线（本地/远端都不写），也不订阅连播事件。
                     syncCoordinator.start(
                         progress = engine.progress,
                         events = playbackEventBus,
@@ -869,7 +884,8 @@ class PlayerViewModel @Inject constructor(
                 // final report. Navigation cancellation must not strand the native engine.
                 syncCoordinator.stop()
                 subtitleMemoryWrites.toList().forEach { it.join() }
-                syncCoordinator.flushFinal(finalProgress)
+                // 直播没有续播语义：退出/切台不得落库，也不得向 Provider 上报进度。
+                if (!livePlayback) syncCoordinator.flushFinal(finalProgress)
             } finally {
                 syncCoordinator.stop()
                 try { engine.release() } finally { stopCompleted.complete(Unit) }
