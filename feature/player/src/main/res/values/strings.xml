@@ -18,6 +18,8 @@
     <string name="player_battery">电量 %1$d%%</string>
     <string name="player_time_progress">%1$s / %2$s</string>
     <string name="player_time_progress_unknown">%1$s / --:--</string>
+    <string name="player_live_badge">直播</string>
+    <string name="player_live_loading">正在加载直播频道…</string>
     <string name="player_pause">暂停</string>
     <string name="player_play">播放</string>
     <string name="player_playback_speed">%1$.2f×</string>
