@@ -164,8 +164,11 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
 搜索（`/search/multi`）、详情（`/movie|tv/{id}`，含 credits / external_ids）、
 季集（`/tv/{id}/season/{n}`，含未入库与未播出季集）。
 
-- 配置：API Key 由调用方注入（`TmdbMetadataProvider.create(apiKey = ...)`），仓库不保存任何真实密钥；
-  `baseUrl` / `language` 可覆盖，测试用 MockWebServer 注入本地地址，不访问真实 TMDB。
+- 配置（可注入配置点）：`app/build.gradle.kts` 依次读取未跟踪的 `local.properties`、
+  `secrets.properties`，取 `tmdb.apiKey` / `mdblist.apiKey` 写入 `BuildConfig`，运行时装配为
+  `MetadataRemoteConfig`。仓库不保存任何真实密钥。两者都缺失时 `MetadataEngine.available=false`：
+  UI 隐藏刮削入口、不发起任何外部请求，应用照常启动（降级而不是崩溃）。
+  `baseUrl` / `language` 可覆盖，测试全部使用 MockWebServer / 假实现，不访问真实 TMDB。
 - ID 约定：`movie/550`、`tv/1396`；裸数字 ID 会被拒绝（TMDB 电影与剧集 ID 空间重叠）。
 - 手动匹配：`ManualMatchService` 跨源搜索 + `MetadataMatcher` 归一化打分（标题/原名/年份/语言）；
   只有分数 ≥ 80 才标记为可自动采用，其余需人工确认；单源失败记录在 `MatchFailure`，不影响其它源。
