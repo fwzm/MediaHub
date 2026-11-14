@@ -6,6 +6,17 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// 弹弹play 开放 API 凭据：只从本地 Gradle 属性读取（gradle.properties / -P 参数），
+// 不写入仓库、不进入日志。未配置时在线弹幕保持关闭并给出明确错误。
+val danDanPlayAppId = providers.gradleProperty("mediahub.dandanplay.appId")
+    .orElse("")
+    .get()
+    .replace("\"", "")
+val danDanPlayAppSecret = providers.gradleProperty("mediahub.dandanplay.appSecret")
+    .orElse("")
+    .get()
+    .replace("\"", "")
+
 android {
     namespace = "com.mediahub.app"
     compileSdk = 36
@@ -17,6 +28,9 @@ android {
         versionCode = 1
         versionName = "0.1.0-alpha.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "DANDANPLAY_APP_ID", "\"$danDanPlayAppId\"")
+        buildConfigField("String", "DANDANPLAY_APP_SECRET", "\"$danDanPlayAppSecret\"")
     }
 
     buildTypes {
@@ -57,6 +71,7 @@ dependencies {
     implementation(project(":core:database"))
     implementation(project(":core:security"))
     implementation(project(":core:logging"))
+    implementation(project(":core:danmaku"))
     implementation(project(":core:ui"))
     implementation(libs.room.runtime)
 

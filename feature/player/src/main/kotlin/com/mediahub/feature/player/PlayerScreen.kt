@@ -113,6 +113,9 @@ import com.mediahub.core.ui.effects.FlowGlowClock
 import com.mediahub.core.ui.effects.rememberFlowGlowClock
 import com.mediahub.core.ui.effects.rememberPowerSaveMode
 import com.mediahub.core.ui.effects.rememberReduceMotion
+import com.mediahub.feature.player.danmaku.DanmakuCountBadge
+import com.mediahub.feature.player.danmaku.DanmakuOverlay
+import com.mediahub.feature.player.danmaku.DanmakuSheet
 import com.mediahub.player.engine.AudioBandLevels
 import com.mediahub.player.engine.EngineKind
 import com.mediahub.player.engine.SeekMode
@@ -146,6 +149,7 @@ fun PlayerRoute(
     val artworkPalette by viewModel.artworkPalette.collectAsStateWithLifecycle()
     val engineKind by viewModel.engineKind.collectAsStateWithLifecycle()
     val subtitleCenter by viewModel.subtitleCenter.collectAsStateWithLifecycle()
+    val danmakuState by viewModel.danmakuState.collectAsStateWithLifecycle()
     val playbackSource by viewModel.playbackSource.collectAsStateWithLifecycle()
     val audioSpectrumBridge = rememberAudioSpectrumBridge(viewModel.engine.audioBands)
 
@@ -239,6 +243,7 @@ fun PlayerRoute(
     var showSubtitleDialog by remember { mutableStateOf(false) }
     var showVisualEffectsSettings by remember { mutableStateOf(false) }
     var showInfoPanel by remember { mutableStateOf(false) }
+    var showDanmakuPanel by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // 字幕中心（P2 切片一）：SAF 导入入口（真实 ACTION_OPEN_DOCUMENT）。
@@ -467,6 +472,20 @@ fun PlayerRoute(
             onBackendChanged = reportVisualBackend,
         )
 
+        // 弹幕层（条目 12/74/96/125）：视频之上、字幕与 OSD 之下。
+        // 布局引擎在画面内预留顶部 18% 与底部 30%，因此不会遮挡标题/字幕/控制层。
+        if (danmakuState.enabled && danmakuState.comments.isNotEmpty()) {
+            val danmakuPosition by rememberUpdatedState(state.positionMs)
+            DanmakuOverlay(
+                comments = danmakuState.comments,
+                positionMs = { danmakuPosition },
+                playing = state.isPlaying,
+                opacity = danmakuState.opacity,
+                strokeWidthDp = danmakuState.strokeWidthDp,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
         // 字幕 overlay（Media3 独立 SubtitleView；mpv 内部 libass 渲染，subtitleCues=null 时不显示）
         AndroidView(
             factory = { context ->
@@ -560,6 +579,7 @@ fun PlayerRoute(
                         forceVisualFallback = forceVisualFallback,
                         onVisualBackendChanged = reportVisualBackend,
                         subtitleSelected = engineState.selectedSubtitle != null || subtitleCenter.selectedExternalId != null,
+                        danmakuCount = danmakuState.count,
                         onBack = exitPlayer,
                         onTogglePlayPause = viewModel.engine::togglePlayPause,
                         onSeek = { viewModel.engine.seekTo(it) },
@@ -571,6 +591,7 @@ fun PlayerRoute(
                         onShowInfo = { showInfoPanel = true },
                         onShowAudio = { showAudioDialog = true },
                         onShowSubtitle = { showSubtitleDialog = true },
+                        onShowDanmaku = { showDanmakuPanel = true },
                     )
                 }
 
@@ -764,6 +785,22 @@ fun PlayerRoute(
             )
         }
     }
+    if (showDanmakuPanel) {
+        PlayerVisualTheme(palette = visualState.chromePalette) {
+            DanmakuSheet(
+                state = danmakuState,
+                onEnabledChange = viewModel::setDanmakuEnabled,
+                onOnlineEnabledChange = viewModel::setDanmakuOnlineEnabled,
+                onOpacityChange = viewModel::setDanmakuOpacity,
+                onStrokeWidthChange = viewModel::setDanmakuStrokeWidth,
+                onSearch = viewModel::searchDanmaku,
+                onEpisodeSelected = viewModel::selectDanmakuEpisode,
+                onSend = viewModel::sendDanmaku,
+                onRefresh = viewModel::refreshDanmaku,
+                onDismiss = { showDanmakuPanel = false },
+            )
+        }
+    }
 }
 
 private fun AudioBandLevels.toSpectrumFrame(): SpectrumFrame = SpectrumFrame(
@@ -820,6 +857,7 @@ private fun PlayerControls(
     forceVisualFallback: Boolean,
     onVisualBackendChanged: (RendererBackend) -> Unit,
     subtitleSelected: Boolean,
+    danmakuCount: Int,
     onBack: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onSeek: (Long) -> Unit,
@@ -828,6 +866,7 @@ private fun PlayerControls(
     onShowInfo: () -> Unit,
     onShowAudio: () -> Unit,
     onShowSubtitle: () -> Unit,
+    onShowDanmaku: () -> Unit,
 ) {
     val seekBarColors = SliderDefaults.colors(
         thumbColor = MaterialTheme.colorScheme.primary,
@@ -874,6 +913,12 @@ private fun PlayerControls(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
             ) {
+                // 条目 101：控制层上的弹幕数量徽标，点击进入弹幕面板。
+                DanmakuCountBadge(
+                    count = danmakuCount,
+                    onClick = onShowDanmaku,
+                    modifier = Modifier.padding(top = 4.dp, end = 4.dp),
+                )
                 PlayerVisualEffectsEntry(onClick = onShowVisualEffects)
                 TextButton(onClick = onShowInfo) {
                     Text(stringResource(R.string.player_info_entry), color = MaterialTheme.colorScheme.primary)

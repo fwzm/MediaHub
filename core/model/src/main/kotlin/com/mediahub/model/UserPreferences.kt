@@ -29,7 +29,28 @@ data class UserPreferences(
     val playerVisualEffects: PlayerVisualEffectsPreferences = PlayerVisualEffectsPreferences.Default,
     /** 播放专业信息面板（默认专业）：expertMode 只控制面板信息密度，不影响播放本身。 */
     val professionalInfo: ProfessionalInfoPreferences = ProfessionalInfoPreferences.Default,
+    /** 弹幕显示、样式与在线源开关。 */
+    val danmaku: DanmakuPreferences = DanmakuPreferences(),
 )
+
+/**
+ * 弹幕偏好。
+ *
+ * - [enabled] 只控制渲染层显隐，不删除已加载弹幕（数量徽标仍可读）。
+ * - [onlineEnabled] 默认关闭；开启前需配置 DanDanPlay AppId/AppSecret。
+ * - [opacity] / [strokeWidthDp] 由数据层与 UI 双重夹取，避免历史脏值导致不可读。
+ */
+data class DanmakuPreferences(
+    val enabled: Boolean = true,
+    val opacity: Float = 0.85f,
+    val strokeWidthDp: Float = 1.5f,
+    val onlineEnabled: Boolean = false,
+) {
+    companion object {
+        const val MIN_OPACITY: Float = 0.1f
+        const val MAX_STROKE_WIDTH_DP: Float = 6f
+    }
+}
 
 /**
  * 播放器手势偏好（U3-B，9 项）。
