@@ -37,6 +37,8 @@ dependencies {
     implementation(project(":core:database"))
     implementation(project(":provider:api"))
 
+    implementation(libs.datastore.preferences)
+
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
