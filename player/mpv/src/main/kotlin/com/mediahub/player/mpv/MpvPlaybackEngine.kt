@@ -9,6 +9,7 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.HttpClientFactory
 import com.mediahub.core.network.OriginScopedCredentialInterceptor
 import com.mediahub.core.network.PlaybackError
+import com.mediahub.model.HdrType
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
 import com.mediahub.model.SubtitleStyle
@@ -249,11 +250,17 @@ class MpvPlaybackEngine internal constructor(
                     }
                     // M2（ADR-044）：只下发有二进制证据的选项；证据缺失（null）时不干预。
                     // 任何异常都不得影响起播——降级为空选项集。
+                    val deviceSupportsSourceHdr = runCatching { hdrEvidence.supports(src.hdrType) }.getOrNull()
                     runCatching {
                         MpvTuningOptions.build(
                             MpvTuningInput(
                                 sourceHdr = src.hdrType,
-                                deviceSupportsSourceHdr = hdrEvidence.supports(src.hdrType),
+                                deviceSupportsSourceHdr = deviceSupportsSourceHdr,
+                                // 缺陷 7：多声道下混归一化，避免立体声输出上声音偏小。
+                                normalizeDownmix = MpvAudioGainPolicy.shouldNormalizeDownmix(src.audioCodec),
+                                // 缺陷 46：杜比视界且设备明确不支持时，硬解初始化会失败 → 软解兜底。
+                                softwareDecode = src.hdrType == HdrType.DOLBY_VISION &&
+                                    deviceSupportsSourceHdr == false,
                             ),
                         )
                     }.getOrDefault(emptyList()).forEach { tuning ->

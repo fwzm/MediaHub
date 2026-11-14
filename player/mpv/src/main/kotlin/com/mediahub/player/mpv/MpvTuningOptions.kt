@@ -13,10 +13,16 @@ data class MpvTuningInput(
     val sourceHdr: HdrType = HdrType.NONE,
     /** true/false = 设备显示能力明确；null = 未知（不干预）。 */
     val deviceSupportsSourceHdr: Boolean? = null,
-    /** 下混归一化：默认关闭，需用户显式开启（本轮无 UI 入口，机制与测试先行）。 */
+    /** 下混归一化：多声道片源默认开启（缺陷 7）；立体声不干预。 */
     val normalizeDownmix: Boolean = false,
     /** 输出音量上限（百分比）；null = 不干预。 */
     val volumeMaxPercent: Int? = null,
+    /**
+     * 强制软件解码（`hwdec=no`）：仅在设备**明确不支持**杜比视界时下发，
+     * 让 FFmpeg 软解 + 色调映射兜底，避免硬解初始化失败导致黑屏（缺陷 46）。
+     * null/false = 不干预。
+     */
+    val softwareDecode: Boolean = false,
 )
 
 /** 一个 mpv 选项键值。 */
@@ -63,6 +69,8 @@ object MpvTuningOptions {
         "gamut-mapping-mode",
         "audio-normalize-downmix",
         "volume-max",
+        // hwdec 已在 MpvPlaybackEngine 生产使用，且字符串表命中 65 次。
+        "hwdec",
     )
 
     /** 文档存在但打包版本缺失的选项（设置无效，禁止使用）。 */
@@ -78,13 +86,17 @@ object MpvTuningOptions {
      * 1. HDR 片源 **且** 设备明确不支持该 HDR 格式 → 色调映射（bt.2390 + 动态峰值检测）；
      * 2. 设备能力未知（null）或明确支持 → 不下发任何色调映射选项，保持既有直通行为；
      * 3. 下混归一化仅在显式请求时下发；
-     * 4. 音量上限钳制到 100..1000（100 = 不放大）。
+     * 4. 杜比视界且设备明确不支持时强制软件解码（hwdec=no），由 FFmpeg 兜底；
+     * 5. 音量上限钳制到 100..1000（100 = 不放大）。
      */
     fun build(input: MpvTuningInput): List<MpvTuningOption> {
         val options = mutableListOf<MpvTuningOption>()
         if (input.sourceHdr != HdrType.NONE && input.deviceSupportsSourceHdr == false) {
             options += MpvTuningOption("tone-mapping", TONE_MAPPING_CURVE)
             options += MpvTuningOption("hdr-compute-peak", "yes")
+        }
+        if (input.softwareDecode) {
+            options += MpvTuningOption("hwdec", "no")
         }
         if (input.normalizeDownmix) {
             options += MpvTuningOption("audio-normalize-downmix", "yes")
