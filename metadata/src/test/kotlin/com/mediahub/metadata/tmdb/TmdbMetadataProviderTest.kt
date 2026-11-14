@@ -90,6 +90,10 @@ class TmdbMetadataProviderTest {
         assertEquals(listOf("剧情", "犯罪"), detail.genres)
         assertEquals(POSTER_PREFIX + "ggFHVNu6YYI5L9pCfOacjizRGt.jpg", detail.posterUrl)
         assertEquals("https://image.tmdb.org/t/p/w780/backdrop.jpg", detail.backdropUrl)
+        assertEquals(com.mediahub.metadata.MetadataMediaType.SERIES, detail.mediaType)
+        assertEquals("tt0903747", detail.externalIds["imdb"])
+        assertEquals("81189", detail.externalIds["tvdb"])
+        assertEquals("1396", detail.externalIds["tmdb"])
 
         val actor = detail.people.first { it.name == "布莱恩·科兰斯顿" }
         assertEquals(Person.Role.ACTOR, actor.role)

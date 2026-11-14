@@ -53,6 +53,9 @@ data class MetadataDetail(
     val posterUrl: String? = null,
     val backdropUrl: String? = null,
     val rating: Double? = null,
+    val mediaType: MetadataMediaType? = null,
+    /** 外部平台 ID（键如 imdb / tvdb / tmdb），供评分聚合等多源查询。 */
+    val externalIds: Map<String, String> = emptyMap(),
 )
 
 /** 刮削源注册表（按源选择实现）。 */

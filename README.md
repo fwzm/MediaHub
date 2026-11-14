@@ -169,7 +169,10 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
 - ID 约定：`movie/550`、`tv/1396`；裸数字 ID 会被拒绝（TMDB 电影与剧集 ID 空间重叠）。
 - 手动匹配：`ManualMatchService` 跨源搜索 + `MetadataMatcher` 归一化打分（标题/原名/年份/语言）；
   只有分数 ≥ 80 才标记为可自动采用，其余需人工确认；单源失败记录在 `MatchFailure`，不影响其它源。
-- 限制：尚未接入 UI 与持久化；多源评分聚合、片头片尾标记、排序与匹配率优化在后续段交付。
+- 季集展示：`SeasonCatalog` / `EpisodeCatalog` 合并"外部源声明"与"本地库"，`inLibrary=false` 即尚未入库的季集，仍会列出。
+- 多平台评分：`RatingsService` 聚合 IMDb / TMDB / 烂番茄 / Letterboxd / Trakt / Metacritic，
+  统一换算 10 分制求平均并按平台量纲展示；`MdbListRatingsSource` 需注入 API Key（`create` 时传入，仓库不保存）。
+- 限制：尚未接入 UI 与持久化；片头片尾标记、排序与匹配率优化在后续段交付。
 
 > 真机、真实 Emby/Jellyfin 服务器和旧版本数据库升级不属于上述 JVM 路径的自动保证范围；
 > 当前验证边界、尚未完成项和每个 Provider 的能力以 [TASKS.md](TASKS.md)、[ROADMAP.md](ROADMAP.md)
