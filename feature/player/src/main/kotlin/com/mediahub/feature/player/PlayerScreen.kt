@@ -734,8 +734,7 @@ fun PlayerRoute(
                 tracks = selectionSnapshot.audioTracks,
                 onDismiss = { showAudioDialog = false },
                 onSelect = { track: AudioTrack ->
-                    PlayerTrackSelection.addressOf(selectionSnapshot, track, selectionKind)
-                        ?.let(viewModel.engine::selectAudioTrack)
+                    viewModel.onAudioTrackSelected(track)
                     showAudioDialog = false
                 },
             )
@@ -743,7 +742,6 @@ fun PlayerRoute(
     }
     if (showSubtitleDialog) {
         val selectionSnapshot = engineState
-        val selectionKind = engineKind
         PlayerVisualTheme(palette = visualState.chromePalette) {
             SubtitleSheet(
                 tracks = selectionSnapshot.subtitleTracks,
@@ -753,9 +751,7 @@ fun PlayerRoute(
                 offsetSupported = viewModel.engine.subtitleCapabilities.offsetAdjust,
                 onDismiss = { showSubtitleDialog = false },
                 onSelect = { track: SubtitleTrack? ->
-                    if (track == null) viewModel.onEmbeddedSubtitleSelected(null)
-                    else PlayerTrackSelection.addressOf(selectionSnapshot, track, selectionKind)
-                        ?.let(viewModel::onEmbeddedSubtitleSelected)
+                    viewModel.onSubtitleTrackSelected(track)
                 },
                 onStyleChange = { newStyle -> viewModel.updateSubtitleStyle { newStyle } },
                 onSelectExternal = viewModel::selectExternalSubtitle,

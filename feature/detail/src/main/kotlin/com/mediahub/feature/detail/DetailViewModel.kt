@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.NavArgCodec
+import com.mediahub.core.database.prefs.UserPreferencesRepository
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.logging.LogTag
@@ -22,6 +23,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 /**
@@ -36,6 +38,7 @@ class DetailViewModel @Inject constructor(
     private val registry: MediaProviderRegistry,
     private val sourceResolver: CanonicalSourceResolver,
     private val logger: Logger,
+    private val userPreferencesRepository: UserPreferencesRepository,
 ) : ViewModel() {
 
     val serverId: String = checkNotNull(savedStateHandle["serverId"])
@@ -58,7 +61,34 @@ class DetailViewModel @Inject constructor(
     private var episodeJob: Job? = null
     private var sourceJob: Job? = null
 
-    init { load() }
+    /** 首选音轨/字幕语言（清单 6）：null 字段 = 未设置，保持播放器既有默认策略。 */
+    private val _trackLanguagePreferences = MutableStateFlow<TrackLanguagePreferences?>(null)
+    val trackLanguagePreferences: StateFlow<TrackLanguagePreferences?> =
+        _trackLanguagePreferences.asStateFlow()
+
+    init {
+        load()
+        viewModelScope.launch {
+            userPreferencesRepository.flow.collect { prefs ->
+                _trackLanguagePreferences.value = TrackLanguagePreferences(
+                    preferredAudioLanguage = prefs.preferredAudioLanguage,
+                    preferredSubtitleLanguage = prefs.preferredSubtitleLanguage,
+                )
+            }
+        }
+    }
+
+    fun updatePreferredAudioLanguage(language: String?) {
+        viewModelScope.launch {
+            userPreferencesRepository.update { it.copy(preferredAudioLanguage = language) }
+        }
+    }
+
+    fun updatePreferredSubtitleLanguage(language: String?) {
+        viewModelScope.launch {
+            userPreferencesRepository.update { it.copy(preferredSubtitleLanguage = language) }
+        }
+    }
 
     fun load() {
         _uiState.value = DetailUiState.Loading
@@ -226,8 +256,13 @@ class DetailViewModel @Inject constructor(
     }
 }
 
-data class SeriesBrowseState(
-    val seasons: List<MediaItem> = emptyList(),
+/** 详情页可选的首选音轨/字幕语言；null = 未设置（跟随系统 / 不自动开字幕）。 */
+data class TrackLanguagePreferences(
+    val preferredAudioLanguage: String? = null,
+    val preferredSubtitleLanguage: String? = null,
+)
+
+data class SeriesBrowseState(    val seasons: List<MediaItem> = emptyList(),
     val selectedSeasonId: String? = null,
     val episodes: List<MediaItem> = emptyList(),
     val seasonsLoading: Boolean = false,

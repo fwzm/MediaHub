@@ -1,6 +1,7 @@
 package com.mediahub.feature.detail
 
 import androidx.lifecycle.SavedStateHandle
+import com.mediahub.core.database.prefs.UserPreferencesRepository
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
@@ -15,6 +16,7 @@ import com.mediahub.model.PageRequest
 import com.mediahub.model.PagedResult
 import com.mediahub.model.ServerType
 import com.mediahub.model.UserData
+import com.mediahub.model.UserPreferences
 import com.mediahub.provider.api.ConnectionStatus
 import com.mediahub.provider.api.MediaDetailProvider
 import com.mediahub.provider.api.MediaLibraryProvider
@@ -28,6 +30,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -55,6 +58,15 @@ class DetailViewModelTest {
         override fun i(tag: LogTag, message: String) {}
         override fun w(tag: LogTag, message: String, throwable: Throwable?) {}
         override fun e(tag: LogTag, message: String, throwable: Throwable?) {}
+    }
+
+    private class FakePreferences(
+        val state: MutableStateFlow<UserPreferences> = MutableStateFlow(UserPreferences()),
+    ) : UserPreferencesRepository {
+        override val flow: Flow<UserPreferences> = state
+        override suspend fun update(transform: (UserPreferences) -> UserPreferences) {
+            state.value = transform(state.value)
+        }
     }
 
     private val testServer = MediaServer(
@@ -104,6 +116,7 @@ class DetailViewModelTest {
         libraryProvider: MediaLibraryProvider? = null,
         libraryNull: Boolean = false,
         identityLookup: com.mediahub.provider.api.MediaIdentityLookupProvider? = null,
+        preferences: UserPreferencesRepository = FakePreferences(),
     ): DetailViewModel {
         val savedStateHandle = SavedStateHandle(mapOf("serverId" to "srv", "itemId" to "dGVzdA"))
         val lib = when {
@@ -141,6 +154,7 @@ class DetailViewModelTest {
             registry,
             CanonicalSourceResolver(fakeServerStore(), registry, FakeLogger()),
             FakeLogger(),
+            preferences,
         )
     }
 
@@ -475,5 +489,49 @@ class DetailViewModelTest {
         testDispatcher.scheduler.advanceUntilIdle()
         assertNull(vm.seriesState.value.episodesError)
         assertTrue(vm.seriesState.value.episodes.isEmpty())
+    }
+
+    @Test
+    fun `track language preferences default to unset`() = runTest(testDispatcher) {
+        val vm = createViewModel(MediaDetail(item = makeItem("m1", MediaType.MOVIE)))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(TrackLanguagePreferences(), vm.trackLanguagePreferences.value)
+    }
+
+    @Test
+    fun `selecting preferred audio and subtitle languages persists both`() = runTest(testDispatcher) {
+        val preferences = FakePreferences()
+        val vm = createViewModel(
+            MediaDetail(item = makeItem("m1", MediaType.MOVIE)),
+            preferences = preferences,
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        vm.updatePreferredAudioLanguage("ja")
+        vm.updatePreferredSubtitleLanguage("zh")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals("ja", preferences.state.value.preferredAudioLanguage)
+        assertEquals("zh", preferences.state.value.preferredSubtitleLanguage)
+        assertEquals(TrackLanguagePreferences("ja", "zh"), vm.trackLanguagePreferences.value)
+    }
+
+    @Test
+    fun `clearing preferred subtitle language persists no preference`() = runTest(testDispatcher) {
+        val preferences = FakePreferences(
+            MutableStateFlow(UserPreferences(preferredSubtitleLanguage = "zh")),
+        )
+        val vm = createViewModel(
+            MediaDetail(item = makeItem("m1", MediaType.MOVIE)),
+            preferences = preferences,
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        vm.updatePreferredSubtitleLanguage(null)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertNull(preferences.state.value.preferredSubtitleLanguage)
+        assertNull(vm.trackLanguagePreferences.value?.preferredSubtitleLanguage)
     }
 }

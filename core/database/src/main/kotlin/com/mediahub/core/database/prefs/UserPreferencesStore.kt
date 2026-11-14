@@ -61,6 +61,10 @@ class UserPreferencesStore internal constructor(
             writeGestures(prefs, updated.gestures)
             writePlayerVisualEffects(prefs, updated.playerVisualEffects)
             writeProfessionalInfo(prefs, updated.professionalInfo)
+            updated.preferredAudioLanguage?.takeIf { it.isNotBlank() }?.let { prefs[Keys.PREFERRED_AUDIO_LANGUAGE] = it }
+                ?: prefs.remove(Keys.PREFERRED_AUDIO_LANGUAGE)
+            updated.preferredSubtitleLanguage?.takeIf { it.isNotBlank() }?.let { prefs[Keys.PREFERRED_SUBTITLE_LANGUAGE] = it }
+                ?: prefs.remove(Keys.PREFERRED_SUBTITLE_LANGUAGE)
         }
     }
 
@@ -96,6 +100,8 @@ class UserPreferencesStore internal constructor(
             gestures = readGestures(prefs),
             playerVisualEffects = readPlayerVisualEffects(prefs),
             professionalInfo = readProfessionalInfo(prefs),
+            preferredAudioLanguage = prefs[Keys.PREFERRED_AUDIO_LANGUAGE],
+            preferredSubtitleLanguage = prefs[Keys.PREFERRED_SUBTITLE_LANGUAGE],
         )
 
     private fun readSubtitleStyle(prefs: Preferences): SubtitleStyle =
@@ -231,5 +237,7 @@ class UserPreferencesStore internal constructor(
         val VISUAL_AUDIO_REACTIVE = booleanPreferencesKey("player_visual_effects_audio_reactive")
         val VISUAL_PERFORMANCE_MODE = stringPreferencesKey("player_visual_effects_performance_mode")
         val PROFESSIONAL_INFO_EXPERT_MODE = booleanPreferencesKey("player_professional_info_expert_mode")
+        val PREFERRED_AUDIO_LANGUAGE = stringPreferencesKey("preferred_audio_language")
+        val PREFERRED_SUBTITLE_LANGUAGE = stringPreferencesKey("preferred_subtitle_language")
     }
 }
