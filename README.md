@@ -86,7 +86,7 @@ provider/
   base/              BaseMediaServerProvider + Provider 注册表
   emby/ jellyfin/ webdav/ local/   具体数据源；真实能力以各 Provider 的声明与验证记录为准
   smb/ aliyun/ baidu/ quark/ china-mobile/ tianyi/   规划占位（README）
-metadata/            媒体元数据（刮削）抽象
+metadata/            媒体元数据（刮削）：TMDB 客户端（搜索/详情/季集），API Key 由调用方注入
 feature/
   home/ server/ library/ detail/ search/ settings/ player/    UI 模块
 docs/                providers / player / api 设计文档
@@ -157,6 +157,17 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
 设置页可改默认倍速、字幕大小等（DataStore 持久化）。mpv 同样接收字幕大小与字幕面板中的颜色、
 描边、背景、位置偏好，并在播放中更新、退出重进及内核降级时保留；默认尊重内嵌 ASS 样式。
 验证范围见 [字幕外观接线记录](docs/reviews/subtitle-presentation-and-local-audit-2026-10-27.md)。
+
+### 元数据（TMDB，第 1 段）
+
+`metadata` 模块已提供 TMDB v3 客户端与 Provider（`TmdbMetadataProvider`）：
+搜索（`/search/multi`）、详情（`/movie|tv/{id}`，含 credits / external_ids）、
+季集（`/tv/{id}/season/{n}`，含未入库与未播出季集）。
+
+- 配置：API Key 由调用方注入（`TmdbMetadataProvider.create(apiKey = ...)`），仓库不保存任何真实密钥；
+  `baseUrl` / `language` 可覆盖，测试用 MockWebServer 注入本地地址，不访问真实 TMDB。
+- ID 约定：`movie/550`、`tv/1396`；裸数字 ID 会被拒绝（TMDB 电影与剧集 ID 空间重叠）。
+- 限制：尚未接入 UI 与持久化；多源评分聚合、片头片尾标记、排序与匹配率优化在后续段交付。
 
 > 真机、真实 Emby/Jellyfin 服务器和旧版本数据库升级不属于上述 JVM 路径的自动保证范围；
 > 当前验证边界、尚未完成项和每个 Provider 的能力以 [TASKS.md](TASKS.md)、[ROADMAP.md](ROADMAP.md)
