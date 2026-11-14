@@ -83,7 +83,7 @@ class RestoreSnapshotStoreTest {
         val server = MediaServer("local", "name", ServerType.JELLYFIN, "user", "note", "icon", true, 8, 9, 10, "error", listOf(endpoint))
         val progress = PlaybackProgress("local", "item", 11, 12, false, 13, mode = PlaybackMode.DIRECT_STREAM,
             itemTitle = "title", posterUrl = "https://image.example?token=FAKE", itemType = MediaType.EPISODE)
-        val prefs = UserPreferences(PlaybackEngineMode.MPV, 1.5f, 24, false, false, false, 14,
+        val prefs = UserPreferences(PlaybackEngineMode.MPV, 1.5f, 24, false, false, false, true, 14,
             true, false, false, SubtitleStyle(1, 2, 2, 3, 1.2f, 0.2f, false),
             PlayerGestures(false, true, 15, true, 20, false, 0.1f, 6f, false, 3f),
             PlayerVisualEffectsPreferences(false, PlayerVisualPreset.SPECTRUM, 0.8f, false, false, VisualPerformanceMode.HIGH),

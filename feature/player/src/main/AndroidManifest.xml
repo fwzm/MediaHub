@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- PiP 窗口按钮的进程内投递终点；不导出，外部应用无法伪造播放控制。 -->
+        <receiver
+            android:name="com.mediahub.feature.player.pip.PictureInPictureActionReceiver"
+            android:exported="false" />
+    </application>
+
+</manifest>

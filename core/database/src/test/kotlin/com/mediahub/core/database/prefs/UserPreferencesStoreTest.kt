@@ -66,6 +66,30 @@ class UserPreferencesStoreTest {
     }
 
     @Test
+    fun `picture in picture preference survives a store round trip`() = runBlocking {
+        assertTrue("条目 31：后台自动画中画默认开启", store.flow.first().autoPictureInPicture)
+
+        store.update { current -> current.copy(autoPictureInPicture = false) }
+        assertEquals(false, store.flow.first().autoPictureInPicture)
+
+        // 重建 store 模拟进程重启，确认关闭状态已持久化而不是只在内存里。
+        // DataStore 要求同一文件同时只有一个活动实例，所以先释放原 scope。
+        scope.cancel()
+        val reopenedScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            val reopened = UserPreferencesStore(
+                PreferenceDataStoreFactory.create(
+                    scope = reopenedScope,
+                    produceFile = { File(temporaryFolder.root, "user.preferences_pb") },
+                ),
+            )
+            assertEquals(false, reopened.flow.first().autoPictureInPicture)
+        } finally {
+            reopenedScope.cancel()
+        }
+    }
+
+    @Test
     fun `visual preferences survive a store round trip`() = runBlocking {
         val expected = PlayerVisualEffectsPreferences(
             enabled = true,

@@ -104,6 +104,8 @@ object BackupDtos {
         @SerialName("enableHardwareDecoding") val enableHardwareDecoding: Boolean = true,
         @SerialName("preferDirectPlay") val preferDirectPlay: Boolean = true,
         @SerialName("autoPlayNextEpisode") val autoPlayNextEpisode: Boolean = true,
+        /** v3 追加；旧备份无该字段时按默认开启处理。 */
+        @SerialName("autoPictureInPicture") val autoPictureInPicture: Boolean = true,
         @SerialName("maxBitrateBps") val maxBitrateBps: Long? = null,
         @SerialName("showPlayerInfoOverlay") val showPlayerInfoOverlay: Boolean = false,
         @SerialName("autoLandscape") val autoLandscape: Boolean = true,

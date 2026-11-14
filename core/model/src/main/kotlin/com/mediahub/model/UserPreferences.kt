@@ -16,6 +16,8 @@ data class UserPreferences(
     val enableHardwareDecoding: Boolean = true,
     val preferDirectPlay: Boolean = true,
     val autoPlayNextEpisode: Boolean = true,
+    /** 播放中退到后台时自动进入画中画（条目 31，可关闭）。 */
+    val autoPictureInPicture: Boolean = true,
     val maxBitrateBps: Long? = null,
     val showPlayerInfoOverlay: Boolean = false,
     /** 播放视频时自动横屏（进入播放器锁定 SENSOR_LANDSCAPE，退出恢复原方向）。 */

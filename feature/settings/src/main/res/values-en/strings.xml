@@ -12,6 +12,7 @@
     <string name="settings_prefer_hardware_decoding">Prefer hardware decoding</string>
     <string name="settings_prefer_direct_play">Prefer Direct Play</string>
     <string name="settings_auto_play_next_episode">Auto-play the next episode</string>
+    <string name="settings_auto_picture_in_picture">Enter picture-in-picture when backgrounded during playback</string>
     <string name="settings_show_media_info">Show media information in player</string>
     <string name="settings_professional_info">Professional playback info (off = compact panel)</string>
     <string name="settings_auto_landscape">Auto-rotate to landscape for video</string>
