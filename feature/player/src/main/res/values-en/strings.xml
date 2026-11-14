@@ -106,4 +106,25 @@
     <string name="player_info_mode_transcode">Server transcode</string>
     <string name="player_info_mode_unsupported">Unsupported</string>
     <string name="player_info_engine_auto">Auto (Media3→mpv)</string>
+    <string name="player_danmaku">Danmaku</string>
+    <string name="player_danmaku_entry_description">Open danmaku settings</string>
+    <string name="player_danmaku_count">%1$s</string>
+    <string name="player_danmaku_enable">Show danmaku</string>
+    <string name="player_danmaku_online">Online danmaku (DanDanPlay)</string>
+    <string name="player_danmaku_opacity">Opacity %1$d%%</string>
+    <string name="player_danmaku_stroke">Stroke %1$.1f dp</string>
+    <string name="player_danmaku_loaded">%1$s danmaku loaded</string>
+    <string name="player_danmaku_source">Source: %1$s</string>
+    <string name="player_danmaku_loading">Loading danmaku…</string>
+    <string name="player_danmaku_search_hint">Search a series to match danmaku</string>
+    <string name="player_danmaku_search_action">Search</string>
+    <string name="player_danmaku_search_empty">No matching episodes</string>
+    <string name="player_danmaku_search_result">%1$s · %2$s</string>
+    <string name="player_danmaku_input_hint">Send a danmaku…</string>
+    <string name="player_danmaku_send">Send</string>
+    <string name="player_danmaku_send_empty">Danmaku text cannot be empty</string>
+    <string name="player_danmaku_send_too_long">Danmaku is limited to %1$d characters</string>
+    <string name="player_danmaku_disabled">Danmaku is off</string>
+    <string name="player_danmaku_local_source">Local</string>
+    <string name="player_danmaku_refresh">Reload</string>
 </resources>
