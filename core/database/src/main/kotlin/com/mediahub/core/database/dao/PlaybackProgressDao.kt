@@ -22,7 +22,15 @@ interface PlaybackProgressDao {
     suspend fun delete(serverId: String, itemId: String)
 
     @Query("DELETE FROM playback_progress WHERE updatedAtEpochMs < :beforeEpochMs")
-    suspend fun deleteOlderThan(beforeEpochMs: Long)
+    suspend fun deleteOlderThan(beforeEpochMs: Long): Int
+
+    /**
+     * 条目 63：清空全部播放记录。
+     *
+     * 用 DELETE 而非 DROP/重建：空表时返回 0 且不抛错，天然幂等。
+     */
+    @Query("DELETE FROM playback_progress")
+    suspend fun deleteAll(): Int
 
     @Query("DELETE FROM playback_progress WHERE serverId = :serverId")
     suspend fun deleteByServer(serverId: String)

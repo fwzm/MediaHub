@@ -22,12 +22,16 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.mediahub.core.common.sync.InMemorySourceSyncBaselineStore
 import com.mediahub.core.database.prefs.UserPreferencesStore
+import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.ui.effects.PlayerVisualTestTags
+import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlayerVisualEffectsPreferences
 import com.mediahub.model.PlayerVisualPreset
 import com.mediahub.model.UserPreferences
 import com.mediahub.model.VisualPerformanceMode
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -196,8 +200,23 @@ class VisualEffectsSettingsEntryTest {
             DiagnosticsExportOutcome.Exported("unused.txt", 0, 0)
     }
 
+    private object UnusedProgressStore : ProgressStore {
+        override fun observeContinueWatching(limit: Int): Flow<List<PlaybackProgress>> =
+            flowOf(emptyList())
+
+        override suspend fun getResume(serverId: String, itemId: String): Long? = null
+        override suspend fun save(progress: PlaybackProgress) = Unit
+        override suspend fun get(serverId: String, itemId: String): PlaybackProgress? = null
+        override suspend fun clearAll(): Int = 0
+    }
+
     private fun newViewModel(repository: UserPreferencesStore): SettingsViewModel =
-        SettingsViewModel(repository, InMemorySourceSyncBaselineStore(), UnusedDiagnosticsExportPort()).also { viewModel ->
+        SettingsViewModel(
+            repository,
+            InMemorySourceSyncBaselineStore(),
+            UnusedDiagnosticsExportPort(),
+            UnusedProgressStore,
+        ).also { viewModel ->
             viewModelStores += ViewModelStore().apply { put("settings", viewModel) }
         }
 

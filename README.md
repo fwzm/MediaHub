@@ -278,6 +278,14 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   - **真实第二 Windows 账户下的凭据库行为**：DPAPI 按用户隔离，需在同一台机器上建第二个 Windows 账户并登录，
     当前 `NOT_RUN`（不改系统账户无法自动化）。
   - **Intel / AMD / NVIDIA 硬件兼容矩阵**：需三类 GPU 真机，当前 `NOT_RUN`。
+- **已解决（2026-11-14，JVM 验证）**：清空播放记录与已缓存 / 本地内容的进度回显。
+  设置页新增「播放记录 → 清除播放记录」入口（单飞、幂等；空表返回 0，失败只提示不抛错），
+  `PlaybackProgressDao.deleteAll()` + `ProgressStore.clearAll()` 返回真实删除条数；
+  详情页通过新增的 `ProgressStore.get(serverId, itemId)` 回读本地快照，在服务器无 `UserData`
+  进度时（已缓存 / 本地内容）把主按钮显示为「继续播放 · mm:ss」并给出进度条，
+  页面 `ON_RESUME` 时刷新。`ProgressRepositoryClearTest`、`SettingsViewModelTest`、
+  `DetailViewModelTest`、`PlayerViewModelTest` 覆盖清空幂等、失败降级、详情回读、
+  以及无远端 `PROGRESS` 能力时本地快照仍回写。真机清空与详情回显为 `NOT_RUN`。
 - **已解决（2026-11-14，JVM 验证）**：缓存区间 seek 误报网络加载态、无扩展名 HLS 识别与 EXO 解析错误重试上限。
   `PlaybackSpeedMonitor` 同时监听 `CacheDataSource`（`onCachedBytesRead`），`BufferingIndicatorPolicy`
   在缓存读取期间抑制网络加载态（400 ms 宽限；网络速度 0 且缓存读取中显示「本地缓存」）；

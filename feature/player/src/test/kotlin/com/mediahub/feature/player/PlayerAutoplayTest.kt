@@ -462,6 +462,8 @@ class PlayerAutoplayTest {
         override fun observeContinueWatching(limit: Int): Flow<List<PlaybackProgress>> = flowOf(emptyList())
         override suspend fun getResume(serverId: String, itemId: String): Long? = resume
         override suspend fun save(progress: PlaybackProgress) = onSave(progress)
+        override suspend fun get(serverId: String, itemId: String): PlaybackProgress? = null
+        override suspend fun clearAll(): Int = 0
     }
 
     private class MapDetail(private val items: Map<String, MediaItem>) : MediaDetailProvider {

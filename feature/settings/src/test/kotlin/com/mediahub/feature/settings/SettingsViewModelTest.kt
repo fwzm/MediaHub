@@ -2,6 +2,8 @@ package com.mediahub.feature.settings
 
 import com.mediahub.core.common.sync.InMemorySourceSyncBaselineStore
 import com.mediahub.core.database.prefs.UserPreferencesRepository
+import com.mediahub.core.database.repository.ProgressStore
+import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.ProfessionalInfoPreferences
 import com.mediahub.model.UserPreferences
 import kotlinx.coroutines.CompletableDeferred
@@ -10,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -68,12 +71,33 @@ class SettingsViewModelTest {
         }
     }
 
+    /** 条目 63：可注入清除行为的进度仓储替身。 */
+    private class FakeProgressStore(
+        private val clear: suspend () -> Int = { 0 },
+    ) : ProgressStore {
+        var clearCalls = 0
+            private set
+
+        override fun observeContinueWatching(limit: Int): Flow<List<PlaybackProgress>> =
+            flowOf(emptyList())
+
+        override suspend fun getResume(serverId: String, itemId: String): Long? = null
+        override suspend fun save(progress: PlaybackProgress) = Unit
+        override suspend fun get(serverId: String, itemId: String): PlaybackProgress? = null
+
+        override suspend fun clearAll(): Int {
+            clearCalls += 1
+            return clear()
+        }
+    }
+
     private fun newViewModel(
         repository: UserPreferencesRepository,
         diagnostics: DiagnosticsExportPort = FixedDiagnosticsExportPort(
             DiagnosticsExportOutcome.Exported("unused.txt", 0, 0),
         ),
-    ) = SettingsViewModel(repository, InMemorySourceSyncBaselineStore(), diagnostics)
+        progressStore: ProgressStore = FakeProgressStore(),
+    ) = SettingsViewModel(repository, InMemorySourceSyncBaselineStore(), diagnostics, progressStore)
     /** preferences 是 WhileSubscribed 的 StateFlow：测试必须先订阅，上游才会被收集。
      *  订阅挂 backgroundScope（测试体结束时自动取消，不会卡住 runTest）。 */
     private fun CoroutineScope.subscribePreferences(viewModel: SettingsViewModel) = launch {
@@ -204,4 +228,69 @@ class SettingsViewModelTest {
         )
     }
 
+    // ---- 条目 63：清除播放记录 ----
+
+    @Test
+    fun `clearing playback history reports the real deleted count`() = runTest(dispatcher) {
+        val store = FakeProgressStore(clear = { 4 })
+        val viewModel = newViewModel(FakeUserPreferencesRepository(), progressStore = store)
+
+        viewModel.clearPlaybackHistory()
+        advanceUntilIdle()
+
+        assertEquals(PlaybackHistoryClearState.Cleared(4), viewModel.historyClearState.value)
+        assertEquals(1, store.clearCalls)
+    }
+
+    @Test
+    fun `clearing an already empty history is idempotent`() = runTest(dispatcher) {
+        val store = FakeProgressStore(clear = { 0 })
+        val viewModel = newViewModel(FakeUserPreferencesRepository(), progressStore = store)
+
+        viewModel.clearPlaybackHistory()
+        advanceUntilIdle()
+        viewModel.clearPlaybackHistory()
+        advanceUntilIdle()
+
+        assertEquals(
+            "空表再清一次应返回 0，而不是报错或停留在 Clearing",
+            PlaybackHistoryClearState.Cleared(0),
+            viewModel.historyClearState.value,
+        )
+        assertEquals(2, store.clearCalls)
+    }
+
+    @Test
+    fun `clear failure is surfaced as state and never thrown`() = runTest(dispatcher) {
+        val store = FakeProgressStore(clear = { error("database unavailable") })
+        val viewModel = newViewModel(FakeUserPreferencesRepository(), progressStore = store)
+
+        viewModel.clearPlaybackHistory()
+        advanceUntilIdle()
+
+        assertEquals(
+            PlaybackHistoryClearState.Failed,
+            viewModel.historyClearState.value,
+        )
+    }
+
+    @Test
+    fun `a second click while clearing does not start a second clear`() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val store = FakeProgressStore(clear = {
+            gate.await()
+            1
+        })
+        val viewModel = newViewModel(FakeUserPreferencesRepository(), progressStore = store)
+
+        viewModel.clearPlaybackHistory()
+        runCurrent()
+        viewModel.clearPlaybackHistory()
+        runCurrent()
+
+        assertEquals(1, store.clearCalls)
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(PlaybackHistoryClearState.Cleared(1), viewModel.historyClearState.value)
+    }
 }
