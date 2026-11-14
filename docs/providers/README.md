@@ -14,6 +14,7 @@
 | [Jellyfin](../../provider/jellyfin/src/main/kotlin/com/mediahub/provider/jellyfin/JellyfinProviderFactory.kt) | auth、library、detail、playback、search、progress、favorite |
 | [WebDAV](../../provider/webdav/src/main/kotlin/com/mediahub/provider/webdav/WebDavProviderFactory.kt) | auth、browse、detail、playback、subtitleDiscovery |
 | [Local](../../provider/local/src/main/kotlin/com/mediahub/provider/local/LocalProviderFactory.kt) | browse、detail、playback、subtitleDiscovery |
+| [IPTV](../../provider/iptv/src/main/kotlin/com/mediahub/provider/iptv/IptvProviderFactory.kt) | library、playback、search、epg |
 
 没有出现在表中的字段保留为空。尤其 `subtitle` 列表接口为空不等于播放器没有内嵌字幕：
 后端轨道、播放源附带的字幕和同目录外挂发现分别走各自路径，不能用单个规划枚举推断全部字幕能力。
@@ -33,6 +34,9 @@ UI 调用 `handle.provider.testConnection()`，具体实现负责探测协议：
   发 OPTIONS，成功状态还须有 DAV class 1 声明；重复响应头按列表解析，扩展 URI 内的数字不作为 class 标记。
   该检查确认协议声明，实际认证另经受保护的 PROPFIND 验证；状态文案不回显服务端的原始能力载荷。
 - Local 检查配置的本地根目录；完整的系统文档树授权路径仍见下节的边界。
+- IPTV 拉取配置的 M3U/M3U8 播放列表并校验 `#EXTM3U` 头；频道分组即 Library，EPG 地址来自
+  播放列表头的 `url-tvg` / `x-tvg-url`。直播流地址只在内存中驻留，播放时按频道 id 重新解析，
+  不写入 `MediaItem.path`。
 
 Emby/Jellyfin 使用独立的 AuthProvider、TokenStore 与各自的非敏感 SessionStore；登录后不保存密码。
 恢复时核对远端身份与会话，确定失效与暂时不可用分别处理。具体行为由各 Provider 的连接、认证、恢复隔离测试约束。

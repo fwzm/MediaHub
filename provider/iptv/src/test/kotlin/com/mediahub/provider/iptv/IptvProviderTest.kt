@@ -74,8 +74,9 @@ class IptvProviderTest {
     fun `libraries group channels and paging reports next offset`() = runTest {
         val libraries = provider.getLibraries()
 
-        assertEquals(listOf("央视", "卫视"), libraries.map { it.name })
-        assertEquals(listOf(2, 2), libraries.map { it.itemCount })
+        assertEquals(listOf("全部频道", "央视", "卫视"), libraries.map { it.name })
+        assertEquals(listOf(4, 2, 2), libraries.map { it.itemCount })
+        assertEquals(IptvLibraryIds.ALL_CHANNELS, libraries.first().id)
         assertEquals("LIVE_TV", libraries.first().type.name)
 
         val firstPage = provider.getItems("央视", PageRequest(offset = 0, limit = 1))
@@ -89,6 +90,20 @@ class IptvProviderTest {
         assertEquals("CCTV-2", secondPage.items.single().title)
         assertFalse(secondPage.hasMore)
         assertNull(secondPage.nextOffset)
+    }
+
+    @Test
+    fun `all channels library aggregates groups with paging`() = runTest {
+        val page = provider.getItems(IptvLibraryIds.ALL_CHANNELS, PageRequest(offset = 0, limit = 3))
+
+        assertEquals(listOf("CCTV-1", "CCTV-2", "湖南卫视"), page.items.map { it.title })
+        assertEquals(4, page.totalCount)
+        assertTrue(page.hasMore)
+        assertEquals(3, page.nextOffset)
+
+        val rest = provider.getItems(IptvLibraryIds.ALL_CHANNELS, PageRequest(offset = 3, limit = 3))
+        assertEquals(listOf("无 tvg-id 频道"), rest.items.map { it.title })
+        assertFalse(rest.hasMore)
     }
 
     @Test

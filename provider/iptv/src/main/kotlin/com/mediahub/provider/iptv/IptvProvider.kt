@@ -108,23 +108,43 @@ internal class IptvProvider(
     // ---- 频道库 ----
 
     override suspend fun getLibraries(): List<MediaLibrary> {
+        val channels = loadChannels()
         val groups = LinkedHashMap<String, Int>()
-        loadChannels().forEach { channel ->
+        channels.forEach { channel ->
             groups[channel.group] = (groups[channel.group] ?: 0) + 1
         }
-        return groups.map { (group, count) ->
-            MediaLibrary(
-                serverId = serverId,
-                id = group,
-                name = group,
-                type = LibraryType.LIVE_TV,
-                itemCount = count,
+        return buildList {
+            add(
+                MediaLibrary(
+                    serverId = serverId,
+                    id = IptvLibraryIds.ALL_CHANNELS,
+                    name = "全部频道",
+                    type = LibraryType.LIVE_TV,
+                    itemCount = channels.size,
+                ),
             )
+            groups.forEach { (group, count) ->
+                add(
+                    MediaLibrary(
+                        serverId = serverId,
+                        id = group,
+                        name = group,
+                        type = LibraryType.LIVE_TV,
+                        itemCount = count,
+                    ),
+                )
+            }
         }
     }
 
     override suspend fun getItems(libraryId: String, page: PageRequest): PagedResult<MediaItem> {
-        val channels = loadChannels().filter { it.group == libraryId }
+        val channels = loadChannels().let { channels ->
+            if (libraryId == IptvLibraryIds.ALL_CHANNELS) {
+                channels
+            } else {
+                channels.filter { it.group == libraryId }
+            }
+        }
         return channels.toPage(page) { it.toMediaItem() }
     }
 

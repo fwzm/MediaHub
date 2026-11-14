@@ -18,6 +18,8 @@ import com.mediahub.feature.detail.DetailRoute
 import com.mediahub.feature.home.HomeRoute
 import com.mediahub.feature.library.LibraryRoute
 import com.mediahub.feature.library.favorites.FavoritesRoute
+import com.mediahub.feature.library.iptv.IptvChannelsRoute
+import com.mediahub.model.ServerType
 import com.mediahub.feature.player.PlayerRoute
 import com.mediahub.feature.search.SearchRoute
 import com.mediahub.feature.server.AddServerRoute
@@ -46,7 +48,11 @@ fun MediaHubNavHost() {
             HomeRoute(
                 onForceRestore = { forceRestoreId = null }, // 消费完成清空，避免重复 forceRestore
                 onOpenServer = { server ->
-                    navController.navigate("library/${server.id}/root?name=${Uri.encode(server.name)}")
+                    if (server.type == ServerType.IPTV) {
+                        navController.navigate("iptv/${server.id}?name=${Uri.encode(server.name)}")
+                    } else {
+                        navController.navigate("library/${server.id}/root?name=${Uri.encode(server.name)}")
+                    }
                 },
                 onRelogin = { server ->
                     // Existing Server Re-login：复用原 serverId，进入添加页（reauthorizeId 模式）
@@ -187,6 +193,30 @@ fun MediaHubNavHost() {
                 },
                 reauthorizedSource = reauthorized,
                 onReauthorizationConsumed = { entry.savedStateHandle["auth_changed_server_id"] = null },
+            )
+        }
+
+        composable(
+            route = "iptv/{serverId}?name={name}",
+            arguments = listOf(
+                navArgument("serverId") { type = NavType.StringType },
+                navArgument("name") { type = NavType.StringType; defaultValue = "" },
+            ),
+        ) { entry ->
+            val serverId = entry.arguments?.getString("serverId").orEmpty()
+            IptvChannelsRoute(
+                onBack = { navController.popBackStack() },
+                onOpenChannel = { item ->
+                    // 直播频道直接进播放页：type=LIVE_TV 会跳过详情解析，
+                    // 由 Provider.resolvePlayback 重新解析直播直链（段3 再接独立起播/切台）。
+                    navController.navigate(
+                        "player/$serverId/${NavArgCodec.encode(item.id)}" +
+                            "?title=${Uri.encode(item.title)}" +
+                            "&type=${Uri.encode(item.type.name)}" +
+                            "&poster=${Uri.encode(item.posterUrl.orEmpty())}" +
+                            "&container=${Uri.encode(item.container.orEmpty())}"
+                    )
+                },
             )
         }
 
