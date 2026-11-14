@@ -11,10 +11,13 @@ import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.PlaybackSource
 import com.mediahub.provider.api.MediaPlaybackProvider
 import com.mediahub.provider.api.ProviderException
+import com.mediahub.provider.emby.api.CLIENT_PLAY_SESSION_PREFIX
 import com.mediahub.provider.emby.api.EmbyApiClient
 import com.mediahub.provider.emby.mapper.EmbyDetailMapper
+import com.mediahub.provider.emby.mapper.EmbyDuration
 import com.mediahub.provider.emby.session.EmbySessionStore
 import java.io.IOException
+import java.util.UUID
 import kotlinx.serialization.SerializationException
 
 /**
@@ -25,8 +28,13 @@ import kotlinx.serialization.SerializationException
  *   绝不构造 /Videos/... 音频播放地址；
  * - PlaybackInfo 走官方 POST 协商，固定 EnableTranscoding=false / EnableDirectStream=true，
  *   只询问服务端能否 Direct Stream；绝不申请转码会话；
- * - MediaSourceId / PlaySessionId / container 缺失视为响应损坏（Parse），
- *   不生成残缺 URL；只有\"媒体源非空但全都不支持 Direct Stream\"才报\"需要转码\"；
+ * - MediaSourceId / container 缺失视为响应损坏（Parse），不生成残缺 URL；
+ *   只有\"媒体源非空但全都不支持 Direct Stream\"才报\"需要转码\"；
+ * - **PlaySessionId 兼容兜底（fnOS 等兼容服，用户条目 38）**：PlaybackInfo 缺该字段时
+ *   不再 Parse 失败，而是生成客户端会话 id（`mh-<uuid>`）供 stream URL 与
+ *   [PlaybackSource.sessionId] 使用——真实 Emby 4.x 接受任意非空 PlaySessionId
+ *   （证据见 [com.mediahub.provider.emby.api.EmbyPlaybackStartInfoDto] 注释）。
+ *   服务端给出真值时必须继续用真值；兜底值只代表本进程本次会话，不是服务端真值；
  * - 播放 URL 永远不含 Token（Token 只走 headers，由 PlaybackEngine 注入 DataSource）；
  * - RequiredHttpHeaders 并入播放请求头，但鉴权头（X-Emby-Token / X-Emby-Authorization）
  *   不允许被覆盖（鉴权头后合并且获胜）。
@@ -69,7 +77,7 @@ class EmbyPlaybackProvider(
             val mediaSourceId = source.id?.takeIf(String::isNotBlank)
                 ?: throw ProviderException.Parse(server.id)
             val playSessionId = info.playSessionId?.takeIf(String::isNotBlank)
-                ?: throw ProviderException.Parse(server.id)
+                ?: (CLIENT_PLAY_SESSION_PREFIX + UUID.randomUUID())
             val container = source.container?.takeIf(String::isNotBlank)
                 ?: item.container?.takeIf(String::isNotBlank)
                 ?: throw ProviderException.Parse(server.id)
@@ -103,10 +111,12 @@ class EmbyPlaybackProvider(
                     extendedVideoType = video?.extendedVideoType,
                     extendedVideoSubType = video?.extendedVideoSubType,
                 ),
-                durationMs = source.runTimeTicks?.div(TICKS_PER_MILLIS),
+                // 兼容兜底：源级 RunTimeTicks 缺失/不可信时回退条目时长（见 EmbyDuration）。
+                durationMs = EmbyDuration.fromRunTimeTicks(source.runTimeTicks) ?: item.runtimeMs,
                 mode = PlaybackMode.DIRECT_STREAM,
-                // PlaybackInfo 真值（非空已校验）：进度上报三端点必需，
-                // 缺失时真实 Emby 4.x 回 400 null-key（1H 真机 + curl 矩阵实证）
+                // 服务端真值优先；兼容服缺失时用 `mh-<uuid>` 兜底（进度上报三端点必需，
+                // 真值缺失时真实 Emby 4.x 回 400 null-key（1H 真机 + curl 矩阵实证），
+                // 兼容服则接受任意非空值）。
                 sessionId = playSessionId,
                 externalSubtitles = source.mediaStreams.mapNotNull { stream ->
                     if (!stream.type.equals("Subtitle", ignoreCase = true) || !stream.isExternal) return@mapNotNull null
