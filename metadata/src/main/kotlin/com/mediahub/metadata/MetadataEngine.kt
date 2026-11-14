@@ -12,7 +12,7 @@ import com.mediahub.metadata.tmdb.TmdbMetadataProvider
  * 搜索立即返回空结果且不发起任何网络请求；[ratings] 仍可能返回 TMDB 自带评分
  * （评分来自已获取的详情，不需要额外网络）。
  */
-class MetadataEngine private constructor(
+class MetadataEngine(
     val available: Boolean,
     val manualMatch: ManualMatchService,
     val ratings: RatingsService,
