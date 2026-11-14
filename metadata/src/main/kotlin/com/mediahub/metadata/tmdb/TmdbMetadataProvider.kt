@@ -141,6 +141,15 @@ private fun TmdbDetail.toDetail(ref: TmdbRef): MetadataDetail {
         posterUrl = imageUrl(posterPath, POSTER_SIZE),
         backdropUrl = imageUrl(backdropPath, BACKDROP_SIZE),
         rating = voteAverage,
+        mediaType = when (ref.kind) {
+            TmdbMediaKind.TV -> com.mediahub.metadata.MetadataMediaType.SERIES
+            TmdbMediaKind.MOVIE -> com.mediahub.metadata.MetadataMediaType.MOVIE
+        },
+        externalIds = buildMap {
+            externalIds?.imdbId?.let { put("imdb", it) }
+            externalIds?.tvdbId?.let { put("tvdb", it.toString()) }
+            put("tmdb", ref.id.toString())
+        },
     )
 }
 
