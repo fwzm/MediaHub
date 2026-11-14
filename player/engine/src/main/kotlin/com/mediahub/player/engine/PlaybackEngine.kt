@@ -198,8 +198,12 @@ class PlaybackEngine(
 
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
+                // 条目 137：像素宽高比（变形视频）也要计入显示宽高比，否则首帧仍会拉伸。
+                val displayWidth = (videoSize.width * videoSize.pixelWidthHeightRatio)
+                    .toInt()
+                    .coerceAtLeast(videoSize.width)
                 _uiState.update {
-                    it.copy(videoWidth = videoSize.width, videoHeight = videoSize.height)
+                    it.copy(videoWidth = displayWidth, videoHeight = videoSize.height)
                 }
             }
 

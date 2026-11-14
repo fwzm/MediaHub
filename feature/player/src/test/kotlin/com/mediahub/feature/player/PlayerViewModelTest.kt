@@ -452,6 +452,31 @@ class PlayerViewModelTest {
         } finally { vm.stopAndFlush(); runCurrent() }
     }
 
+    @Test fun aspectModeIsRestoredPerItemAndCyclePersistsMemory() = runTest(dispatcher) {
+        val prefs = FakeUserPreferences()
+        val key = com.mediahub.model.VideoAspectMemory.key("srv-1", "m1")
+        prefs.state.value = UserPreferences(
+            videoAspectOverrides = mapOf(key to com.mediahub.model.VideoAspectMode.RATIO_16_9),
+        )
+        val vm = PlayerViewModel(savedState("m1"), FakeServerStore(embyServer()), FakeProgressStore(null),
+            FakeSubtitleMemoryStore(), FakeRegistry(detail = FakeDetail(mediaItemWithPoster("https://fixture.invalid/poster")),
+                playback = FakePlayback(PlaybackSource("https://fixture.invalid/video.mp4"))),
+            PlaybackEngineCreator { FakeEngine() }, PlaybackEngineCreator { FakeEngine() },
+            InMemoryEnginePreferenceHistory(), prefs, NoArtworkPalette, noOpLogger)
+        try {
+            runCurrent()
+            assertEquals(com.mediahub.model.VideoAspectMode.RATIO_16_9, vm.videoAspectMode.value)
+
+            vm.cycleVideoAspectMode(); runCurrent()
+
+            assertEquals(com.mediahub.model.VideoAspectMode.RATIO_4_3, vm.videoAspectMode.value)
+            assertEquals(
+                com.mediahub.model.VideoAspectMode.RATIO_4_3,
+                prefs.state.value.videoAspectOverrides[key],
+            )
+        } finally { vm.stopAndFlush(); runCurrent() }
+    }
+
     // ---- fakes ----
     private val NoArtworkPalette = ArtworkPaletteLoader { _, _ -> null }
 

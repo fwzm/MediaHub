@@ -21,6 +21,10 @@
     <string name="player_pause">暂停</string>
     <string name="player_play">播放</string>
     <string name="player_playback_speed">%1$.2f×</string>
+    <string name="player_aspect_fit">自适应</string>
+    <string name="player_aspect_crop">填满</string>
+    <string name="player_aspect_16_9">16:9</string>
+    <string name="player_aspect_4_3">4:3</string>
     <string name="player_gesture_seek">%1$s → %2$s</string>
     <string name="player_gesture_rewinding">↺ %1$.2f× 快退中</string>
     <string name="player_gesture_speed">%1$.2f× 倍速中</string>

@@ -121,6 +121,8 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
    跨 origin 重定向剥离凭据（ADR-030）；图片加载同源注入鉴权、跨 origin 剥离（ADR-031）。
 5. 播放器：音轨/字幕 Bottom Sheet（codec / 声道 / 采样率 / 解码器诊断），
    字幕默认白字透明背景（黑底关闭），字号/颜色/描边/位置可调并持久化；
+   画面比例可循环切换（自适应 / 填满 / 16:9 / 4:3），**按内容记忆**，再次播放同一内容时自动恢复；
+   视频按真实宽高比布局（含首帧），Media3 与 mpv 字幕字号统一按 720p 基准换算；
    全部音轨不被设备支持时显式提示而非静默无声。
    未手动选轨时按"系统语言 → 容器 DEFAULT → 设备支持 → 码率/声道 → 首轨兜底"选默认音轨
    （ADR-048，待产品确认；字幕默认不自动开启）。
@@ -156,6 +158,8 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
 
 设置页可改默认倍速、字幕大小等（DataStore 持久化）。mpv 同样接收字幕大小与字幕面板中的颜色、
 描边、背景、位置偏好，并在播放中更新、退出重进及内核降级时保留；默认尊重内嵌 ASS 样式。
+跨内核字号一致性：Media3 的 SubtitleView 与视频画面同尺寸，字号用 `38/720` 视高比例；
+mpv 的 `sub-font-size` 使用同一常量，因此两种内核在同一视频高度下字号一致。
 验证范围见 [字幕外观接线记录](docs/reviews/subtitle-presentation-and-local-audit-2026-10-27.md)。
 
 > 真机、真实 Emby/Jellyfin 服务器和旧版本数据库升级不属于上述 JVM 路径的自动保证范围；
@@ -274,6 +278,12 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   - **真实第二 Windows 账户下的凭据库行为**：DPAPI 按用户隔离，需在同一台机器上建第二个 Windows 账户并登录，
     当前 `NOT_RUN`（不改系统账户无法自动化）。
   - **Intel / AMD / NVIDIA 硬件兼容矩阵**：需三类 GPU 真机，当前 `NOT_RUN`。
+- **已解决（2026-11-14，JVM 验证）**：画面比例记忆与首帧拉伸 / 跨内核字幕字号。新增
+  `VideoAspectMode`（自适应 / 填满 / 16:9 / 4:3）与 `VideoAspectMemory`（按 `serverId/itemId`
+  记忆、上限 200 条），播放器按视频真实宽高比布局（未知尺寸回退 16:9，不再铺满拉伸）；
+  Media3 字幕层与画面同尺寸，字号常量与 mpv 的 720p 基准共用 `SubtitleStyle.BASE_FONT_SIZE_AT_720P`。
+  `VideoAspectModeTest`、`VideoContentSizingTest`、`UserPreferencesStoreTest`、`PlayerViewModelTest`
+  覆盖模式循环、记忆序列化、尺寸计算与偏好恢复。真机首帧/字幕目视效果为 `NOT_RUN`。
 - **已解决（2026-11-12）**：季 / 集导航已从 `NOT_RUN` 移出。U2 的 P1.1 在真实 Emby / Jellyfin 上执行
   「媒体库 → 库 → 剧 → 第 1 季 → S01E01 详情页与播放入口」，Jellyfin 侧 35/35；Emby 侧 W9 曾 35/35，
   W12 复核产物中的 12 条失败均为窗口未到前台导致的非产品失败，详见

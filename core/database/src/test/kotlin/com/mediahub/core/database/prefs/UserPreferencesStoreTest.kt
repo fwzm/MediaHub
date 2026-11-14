@@ -8,6 +8,8 @@ import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.PlayerVisualEffectsPreferences
 import com.mediahub.model.PlayerVisualPreset
 import com.mediahub.model.UserPreferences
+import com.mediahub.model.VideoAspectMemory
+import com.mediahub.model.VideoAspectMode
 import com.mediahub.model.VisualPerformanceMode
 import java.io.File
 import java.util.concurrent.CountDownLatch
@@ -63,6 +65,22 @@ class UserPreferencesStoreTest {
         assertEquals(UserPreferences(), preferences)
         assertEquals(PlayerVisualEffectsPreferences.Default, preferences.playerVisualEffects)
         assertTrue(preferences.playerVisualEffects.isEffectivelyEnabled)
+    }
+
+    @Test
+    fun `aspect ratio memory survives a store round trip and keeps unrelated keys`() = runBlocking {
+        val overrides = mapOf(
+            VideoAspectMemory.key("server-1", "item-1") to VideoAspectMode.CROP,
+            VideoAspectMemory.key("server-1", "item-2") to VideoAspectMode.RATIO_16_9,
+        )
+        store.update { current ->
+            current.copy(subtitleSizeSp = 22, videoAspectOverrides = overrides)
+        }
+
+        val restored = UserPreferencesStore(dataStore).flow.first()
+
+        assertEquals(overrides, restored.videoAspectOverrides)
+        assertEquals(22, restored.subtitleSizeSp)
     }
 
     @Test

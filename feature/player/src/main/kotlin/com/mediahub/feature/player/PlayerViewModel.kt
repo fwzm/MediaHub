@@ -124,6 +124,9 @@ data class PlayerCombinedState(
     /** G3：用户播放意图（缓冲时 isPlaying=false 但本字段仍为 true）。 */
     val playWhenReady: Boolean = false,
     val isEnded: Boolean = false,
+    /** 视频编码尺寸（0 = 未知）；用于按真实宽高比呈现首帧（条目 137）。 */
+    val videoWidth: Int = 0,
+    val videoHeight: Int = 0,
 )
 
 private object SubtitleMemoryOwnership {
@@ -210,10 +213,49 @@ class PlayerViewModel @Inject constructor(
     private val _preferences = MutableStateFlow<com.mediahub.model.UserPreferences?>(null)
     val preferences: StateFlow<com.mediahub.model.UserPreferences?> = _preferences.asStateFlow()
 
+    /** 画面比例模式（条目 9）：随内容记忆，播放器内可循环切换。 */
+    private val _videoAspectMode = MutableStateFlow(com.mediahub.model.VideoAspectMode.FIT)
+    val videoAspectMode: StateFlow<com.mediahub.model.VideoAspectMode> = _videoAspectMode.asStateFlow()
+    /** 本会话内用户手动切换过比例：迟到的偏好读取不得覆盖。 */
+    private var aspectModeManual = false
+
+    private fun currentAspectKey(): String =
+        com.mediahub.model.VideoAspectMemory.key(serverId, itemId)
+
+    private fun restoreAspectMode() {
+        aspectModeManual = false
+        _videoAspectMode.value =
+            latestPreferences.videoAspectOverrides[currentAspectKey()]
+                ?: com.mediahub.model.VideoAspectMode.FIT
+    }
+
+    /** 循环切换画面比例，并按内容记忆（下次播放同一内容时恢复）。 */
+    fun cycleVideoAspectMode() {
+        val next = _videoAspectMode.value.next()
+        _videoAspectMode.value = next
+        aspectModeManual = true
+        viewModelScope.launch {
+            userPreferencesRepository.update { current ->
+                current.copy(
+                    videoAspectOverrides = com.mediahub.model.VideoAspectMemory.remember(
+                        current.videoAspectOverrides,
+                        currentAspectKey(),
+                        next,
+                    ),
+                )
+            }
+        }
+    }
+
     init {
         viewModelScope.launch {
             userPreferencesRepository.flow.collect { stored ->
                 latestPreferences = stored
+                if (!aspectModeManual) {
+                    _videoAspectMode.value =
+                        stored.videoAspectOverrides[currentAspectKey()]
+                            ?: com.mediahub.model.VideoAspectMode.FIT
+                }
                 engine.setSubtitlePresentation(stored.subtitleStyle, stored.subtitleSizeSp)
                 _preferences.value = stored
             }
@@ -599,6 +641,8 @@ class PlayerViewModel @Inject constructor(
                 error = player.error,
                 playWhenReady = player.playWhenReady,
                 isEnded = player.isEnded,
+                videoWidth = player.videoWidth,
+                videoHeight = player.videoHeight,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerCombinedState())
 
@@ -617,6 +661,7 @@ class PlayerViewModel @Inject constructor(
      */
     private fun resolveInternal(autoplay: Boolean) {
         if (stopped) return
+        restoreAspectMode()
         resolveJob?.cancel()
         val generation = resolveGeneration.incrementAndGet()
         invalidateSubtitleSession()
