@@ -64,6 +64,11 @@ data class PlayerGestures(
     val longPressDirectionalEnabled: Boolean = true,
     /** 长按默认倍率（1.0-4.0，默认 2.0×；启动时锁定此档开始）。 */
     val longPressDefaultSpeed: Float = 2.0f,
+    /**
+     * 双击屏幕左右边缘显隐控制栏（默认关）。
+     * 开启后仅最外侧各 10% 让位给显隐，中间 10%-90% 仍保持原有双击 seek 分区。
+     */
+    val doubleTapSidesToggleOverlay: Boolean = false,
 )
 
 /**

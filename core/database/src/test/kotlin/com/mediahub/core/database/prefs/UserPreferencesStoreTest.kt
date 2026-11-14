@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import com.mediahub.model.PlaybackEngineMode
+import com.mediahub.model.PlayerGestures
 import com.mediahub.model.PlayerVisualEffectsPreferences
 import com.mediahub.model.PlayerVisualPreset
 import com.mediahub.model.UserPreferences
@@ -194,6 +195,17 @@ class UserPreferencesStoreTest {
         assertNull(raw[UserPreferencesStore.Keys.VISUAL_FOLLOW_ARTWORK])
         assertNull(raw[UserPreferencesStore.Keys.VISUAL_AUDIO_REACTIVE])
         assertNull(raw[UserPreferencesStore.Keys.VISUAL_PERFORMANCE_MODE])
+    }
+
+    @Test
+    fun `double tap side overlay setting survives a store round trip`() = runBlocking {
+        store.update { current ->
+            current.copy(gestures = PlayerGestures(doubleTapSidesToggleOverlay = true))
+        }
+
+        val restored = store.flow.first()
+
+        assertTrue(restored.gestures.doubleTapSidesToggleOverlay)
     }
 
     @Test

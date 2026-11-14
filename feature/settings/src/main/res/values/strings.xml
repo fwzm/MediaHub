@@ -42,4 +42,6 @@
     <string name="settings_github" translatable="false">GitHub</string>
     <string name="settings_feedback">反馈问题</string>
     <string name="settings_feedback_description">提交 Issue 报告 Bug 或建议新功能</string>
+    <string name="settings_gesture_double_tap_sides_overlay">双击屏幕两侧显隐控制栏</string>
+    <string name="settings_gesture_double_tap_sides_overlay_hint">开启后仅最外侧 10% 区域用于显隐控制栏，原来的双击快进/快退分区保持不变。</string>
 </resources>

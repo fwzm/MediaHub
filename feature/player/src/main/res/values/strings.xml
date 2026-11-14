@@ -112,4 +112,5 @@
     <string name="player_info_hdr10_plus" translatable="false">HDR10+</string>
     <string name="player_info_hlg" translatable="false">HLG</string>
     <string name="player_info_dolby_vision" translatable="false">Dolby Vision</string>
+    <string name="player_zoom_reset">还原画面</string>
 </resources>

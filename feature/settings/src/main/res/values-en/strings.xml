@@ -38,4 +38,6 @@
     <string name="settings_product_description">A unified media player for Emby / Jellyfin / NAS / cloud drives / local files</string>
     <string name="settings_feedback">Send feedback</string>
     <string name="settings_feedback_description">Open an issue to report a bug or request a feature</string>
+    <string name="settings_gesture_double_tap_sides_overlay">Double-tap sides to toggle controls</string>
+    <string name="settings_gesture_double_tap_sides_overlay_hint">Only the outer 10% on each side toggles the controls; the existing double-tap seek zones stay unchanged.</string>
 </resources>

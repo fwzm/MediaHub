@@ -134,6 +134,7 @@ class UserPreferencesStore internal constructor(
             longPressSpeedMax = (prefs[Keys.GESTURE_SPEED_MAX] ?: 5.0f).coerceIn(2f, 8f),
             longPressDirectionalEnabled = prefs[Keys.GESTURE_LONG_PRESS_DIR] ?: true,
             longPressDefaultSpeed = (prefs[Keys.GESTURE_LONG_PRESS_DEFAULT_SPEED] ?: 2.0f).coerceIn(1f, 4f),
+            doubleTapSidesToggleOverlay = prefs[Keys.GESTURE_DT_SIDES_OVERLAY] ?: false,
         )
 
     private fun writeGestures(
@@ -150,6 +151,7 @@ class UserPreferencesStore internal constructor(
         prefs[Keys.GESTURE_SPEED_MAX] = gestures.longPressSpeedMax.coerceIn(2f, 8f)
         prefs[Keys.GESTURE_LONG_PRESS_DIR] = gestures.longPressDirectionalEnabled
         prefs[Keys.GESTURE_LONG_PRESS_DEFAULT_SPEED] = gestures.longPressDefaultSpeed.coerceIn(1f, 4f)
+        prefs[Keys.GESTURE_DT_SIDES_OVERLAY] = gestures.doubleTapSidesToggleOverlay
     }
 
     private fun readPlayerVisualEffects(prefs: Preferences): PlayerVisualEffectsPreferences =
@@ -224,6 +226,7 @@ class UserPreferencesStore internal constructor(
         val GESTURE_SPEED_MAX = floatPreferencesKey("gesture_long_press_speed_max")
         val GESTURE_LONG_PRESS_DIR = booleanPreferencesKey("gesture_long_press_directional")
         val GESTURE_LONG_PRESS_DEFAULT_SPEED = floatPreferencesKey("gesture_long_press_default_speed")
+        val GESTURE_DT_SIDES_OVERLAY = booleanPreferencesKey("gesture_double_tap_sides_overlay")
         val VISUAL_ENABLED = booleanPreferencesKey("player_visual_effects_enabled")
         val VISUAL_PRESET = stringPreferencesKey("player_visual_effects_preset")
         val VISUAL_INTENSITY = floatPreferencesKey("player_visual_effects_intensity")
