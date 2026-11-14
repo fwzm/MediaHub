@@ -86,6 +86,13 @@ class UserPreferencesLayoutStoreTest {
     }
 
     @Test
+    fun `badge pack renames persist`() = runBlocking {
+        store.update { it.copy(badgePackNames = mapOf("emby" to "家里", "local" to "我的")) }
+        val prefs = store.flow.first()
+        assertEquals(mapOf("emby" to "家里", "local" to "我的"), prefs.badgePackNames)
+    }
+
+    @Test
     fun `writing defaults clears layout preferences`() = runBlocking {
         store.update {
             it.copy(

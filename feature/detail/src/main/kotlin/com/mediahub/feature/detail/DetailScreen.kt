@@ -301,6 +301,21 @@ fun DetailBody(
             }
         }
 
+        // ---- 文件路径（条目 24：解码后展示，只读） ----
+        decodedPathForDisplay(item.path)?.let { decoded ->
+            Text(
+                "文件路径",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            Text(
+                decoded,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+            )
+        }
+
         // 导演
         val directors = item.people.filter { it.role == com.mediahub.model.Person.Role.DIRECTOR }
         if (directors.isNotEmpty()) {

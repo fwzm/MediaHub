@@ -19,8 +19,10 @@ import com.mediahub.model.ProfessionalInfoPreferences
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.UserPreferences
 import com.mediahub.model.VisualPerformanceMode
+import com.mediahub.model.decodeBadgePackNames
 import com.mediahub.model.decodeHomeSectionStyles
 import com.mediahub.model.decodeLibraryOrder
+import com.mediahub.model.encodeBadgePackNames
 import com.mediahub.model.encodeHomeSectionStyles
 import com.mediahub.model.encodeLibraryOrder
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -68,6 +70,7 @@ class UserPreferencesStore internal constructor(
             prefs[Keys.HOME_SECTION_STYLES] = encodeHomeSectionStyles(updated.homeSectionStyles)
             prefs[Keys.LIBRARY_ORDER] = encodeLibraryOrder(updated.libraryOrder)
             prefs[Keys.SHOW_PLAY_BUTTON] = updated.showPlayerPlayButton
+            prefs[Keys.BADGE_PACK_NAMES] = encodeBadgePackNames(updated.badgePackNames)
         }
     }
 
@@ -106,6 +109,7 @@ class UserPreferencesStore internal constructor(
             homeSectionStyles = decodeHomeSectionStyles(prefs[Keys.HOME_SECTION_STYLES]),
             libraryOrder = decodeLibraryOrder(prefs[Keys.LIBRARY_ORDER]),
             showPlayerPlayButton = prefs[Keys.SHOW_PLAY_BUTTON] ?: true,
+            badgePackNames = decodeBadgePackNames(prefs[Keys.BADGE_PACK_NAMES]),
         )
 
     private fun readSubtitleStyle(prefs: Preferences): SubtitleStyle =
@@ -244,5 +248,6 @@ class UserPreferencesStore internal constructor(
         val HOME_SECTION_STYLES = stringPreferencesKey("home_section_styles")
         val LIBRARY_ORDER = stringPreferencesKey("library_display_order")
         val SHOW_PLAY_BUTTON = booleanPreferencesKey("player_show_play_button")
+        val BADGE_PACK_NAMES = stringPreferencesKey("badge_pack_names")
     }
 }

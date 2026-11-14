@@ -39,3 +39,31 @@ internal fun formatBytes(bytes: Long): String {
     val mb = bytes / 1_048_576.0
     return String.format(Locale.US, "%.1f MB", mb)
 }
+
+/**
+ * 详情页底部路径展示（条目 24）：去掉 `file://` 前缀并做百分号解码。
+ * 只做展示，不参与任何文件访问或播放寻址。
+ */
+internal fun decodedPathForDisplay(path: String?): String? {
+    val raw = path?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return percentDecode(raw.removePrefix("file://"))
+}
+
+private fun percentDecode(raw: String): String {
+    val out = java.io.ByteArrayOutputStream(raw.length)
+    var index = 0
+    while (index < raw.length) {
+        val ch = raw[index]
+        if (ch == '%' && index + 2 < raw.length) {
+            val decoded = raw.substring(index + 1, index + 3).toIntOrNull(16)
+            if (decoded != null) {
+                out.write(decoded)
+                index += 3
+                continue
+            }
+        }
+        out.write(ch.toString().toByteArray(Charsets.UTF_8))
+        index++
+    }
+    return out.toByteArray().toString(Charsets.UTF_8)
+}

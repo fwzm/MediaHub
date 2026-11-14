@@ -302,10 +302,10 @@ fun ServerEditorRoute(
     }
 
     if (showIconDialog) {
-        AlertDialog(
-            onDismissRequest = { showIconDialog = false },
-            title = { Text("更换图标") },
-            text = {
+        com.mediahub.core.ui.MediaHubDialog(
+            title = "更换图标",
+            onDismiss = { showIconDialog = false },
+            content = {
                 Column {
                     TextButton(onClick = { viewModel.useBuiltinIcon(); showIconDialog = false }) { Text("使用 Emby 默认图标") }
                     TextButton(onClick = {
@@ -315,22 +315,20 @@ fun ServerEditorRoute(
                     TextButton(onClick = { viewModel.removeIcon(); showIconDialog = false }) { Text("移除自定义图标") }
                 }
             },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = { showIconDialog = false }) { Text("取消") } },
         )
     }
 
     if (showDeleteDialog && state.server != null) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text("删除“" + state.server!!.displayName + "”？") },
-            text = { Text("该媒体源的登录信息和本地观看进度也会被删除。") },
-            confirmButton = {
-                TextButton(onClick = { showDeleteDialog = false; viewModel.delete(onDeleted) }) {
-                    Text("删除", color = MaterialTheme.colorScheme.error)
-                }
+        com.mediahub.core.ui.MediaHubDialog(
+            title = "删除“" + state.server!!.displayName + "”？",
+            message = "该媒体源的登录信息和本地观看进度也会被删除。",
+            onDismiss = { showDeleteDialog = false },
+            confirmLabel = "删除",
+            danger = true,
+            onConfirm = {
+                showDeleteDialog = false
+                viewModel.delete(onDeleted)
             },
-            dismissButton = { TextButton(onClick = { showDeleteDialog = false }) { Text("取消") } },
         )
     }
 }

@@ -55,4 +55,23 @@ class DetailLayoutPolicyTest {
         assertEquals("512.0 MB", formatBytes(536_870_912))
         assertEquals("0 B", formatBytes(0))
     }
+
+    @Test
+    fun `path is decoded and file scheme stripped`() {
+        assertEquals(
+            "/media/电影/流浪地球 2.mkv",
+            decodedPathForDisplay("file:///media/%E7%94%B5%E5%BD%B1/%E6%B5%81%E6%B5%AA%E5%9C%B0%E7%90%83%202.mkv"),
+        )
+    }
+
+    @Test
+    fun `blank or missing path returns null`() {
+        assertEquals(null, decodedPathForDisplay(null))
+        assertEquals(null, decodedPathForDisplay("   "))
+    }
+
+    @Test
+    fun `invalid percent escape is kept verbatim`() {
+        assertEquals("/media/100%zz.mkv", decodedPathForDisplay("/media/100%zz.mkv"))
+    }
 }

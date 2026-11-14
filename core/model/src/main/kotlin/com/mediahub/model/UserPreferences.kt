@@ -35,6 +35,8 @@ data class UserPreferences(
     val libraryOrder: List<String> = emptyList(),
     /** 播放器控制栏是否显示播放/暂停按钮（条目 56）。 */
     val showPlayerPlayButton: Boolean = true,
+    /** 徽章包重命名映射：内置包 id → 用户自定义名称（条目 118）。 */
+    val badgePackNames: Map<String, String> = emptyMap(),
 )
 
 /**

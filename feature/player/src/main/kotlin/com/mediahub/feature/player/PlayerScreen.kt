@@ -571,6 +571,7 @@ fun PlayerRoute(
                         onShowInfo = { showInfoPanel = true },
                         onShowAudio = { showAudioDialog = true },
                         onShowSubtitle = { showSubtitleDialog = true },
+                        showPlayButton = preferences.showPlayerPlayButton,
                     )
                 }
 
@@ -828,6 +829,7 @@ private fun PlayerControls(
     onShowInfo: () -> Unit,
     onShowAudio: () -> Unit,
     onShowSubtitle: () -> Unit,
+    showPlayButton: Boolean = true,
 ) {
     val seekBarColors = SliderDefaults.colors(
         thumbColor = MaterialTheme.colorScheme.primary,
@@ -1027,22 +1029,24 @@ private fun PlayerControls(
                             // 缓冲/音频焦点被抑制时 isPlaying=false 但用户并未暂停；
                             // 若按 isPlaying 显示，图标会闪成「播放」，用户点它反而变成继续播放。
                             val showPauseIcon = state.playWhenReady && !state.isEnded
-                            FilledIconButton(
-                                onClick = onTogglePlayPause,
-                                modifier = Modifier.size(48.dp),
-                                shape = CircleShape,
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                                ),
-                            ) {
-                                Icon(
-                                    if (showPauseIcon) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                    contentDescription = stringResource(
-                                        if (showPauseIcon) R.string.player_pause else R.string.player_play,
+                            if (showPlayButton) {
+                                FilledIconButton(
+                                    onClick = onTogglePlayPause,
+                                    modifier = Modifier.size(48.dp),
+                                    shape = CircleShape,
+                                    colors = IconButtonDefaults.filledIconButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary,
                                     ),
-                                    modifier = Modifier.size(26.dp),
-                                )
+                                ) {
+                                    Icon(
+                                        if (showPauseIcon) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                        contentDescription = stringResource(
+                                            if (showPauseIcon) R.string.player_pause else R.string.player_play,
+                                        ),
+                                        modifier = Modifier.size(26.dp),
+                                    )
+                                }
                             }
                             TextButton(onClick = onCycleSpeed) {
                                 Text(
