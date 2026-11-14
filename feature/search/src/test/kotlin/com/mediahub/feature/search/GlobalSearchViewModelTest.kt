@@ -1,6 +1,7 @@
 package com.mediahub.feature.search
 
 import androidx.lifecycle.SavedStateHandle
+import com.mediahub.core.database.repository.SearchHistoryStore
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
@@ -28,7 +29,9 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -120,17 +123,38 @@ class GlobalSearchViewModelTest {
         serverId = serverId, id = id, type = MediaType.MOVIE, title = title,
     )
 
+    private class FakeSearchHistory(
+        initial: List<String> = emptyList(),
+    ) : SearchHistoryStore {
+        val recorded = mutableListOf<String>()
+        val removed = mutableListOf<String>()
+        private val state = MutableStateFlow(initial)
+
+        override fun observe(limit: Int): Flow<List<String>> = state.map { it.take(limit) }
+        override suspend fun record(query: String) {
+            recorded += query
+            state.value = listOf(query) + state.value.filterNot { it == query }
+        }
+
+        override suspend fun remove(query: String) {
+            removed += query
+            state.value = state.value.filterNot { it == query }
+        }
+    }
+
     private fun viewModel(
         servers: List<MediaServer>,
         handles: Map<String, ProviderHandle?>,
         engine: GlobalSearchEngine = GlobalSearchEngine(perServerTimeoutMs = 2_000),
         savedStateHandle: SavedStateHandle = SavedStateHandle(),
+        history: SearchHistoryStore = FakeSearchHistory(),
     ) = GlobalSearchViewModel(
         savedStateHandle,
         FakeServerStore(servers),
         FakeRegistry(handles),
         engine,
         FakeLogger(),
+        history,
     )
 
     private class FakeRegistry(
@@ -285,6 +309,59 @@ class GlobalSearchViewModelTest {
         assertEquals("予初", final.hits[0].serverName)
         assertTrue(final.errors.containsKey("srv-b"))
         assertFalse(final.isSearching)
+        job.cancel()
+    }
+
+    // ---- 搜索历史（条目 52/120）：只记录实际执行的查询，支持单条删除 ----
+
+    @Test
+    fun `debounced executed query is recorded once in history`() = runTest {
+        val searchA = FakeSearch()
+        val history = FakeSearchHistory()
+        val vm = viewModel(listOf(serverA), mapOf("srv-a" to handle(searchA)), history = history)
+
+        val job = launch { vm.state.collect {} }
+        runCurrent()
+        vm.onQueryChange("冰血暴")
+        advanceTimeBy(400)
+        runCurrent()
+
+        assertEquals(listOf("冰血暴"), history.recorded)
+        job.cancel()
+    }
+
+    @Test
+    fun `blank query never records history`() = runTest {
+        val history = FakeSearchHistory()
+        val vm = viewModel(listOf(serverA), mapOf("srv-a" to handle(FakeSearch())), history = history)
+
+        val job = launch { vm.state.collect {} }
+        runCurrent()
+        vm.onQueryChange("   ")
+        advanceTimeBy(500)
+        runCurrent()
+
+        assertTrue(history.recorded.isEmpty())
+        job.cancel()
+    }
+
+    @Test
+    fun `removeHistory deletes the single entry and updates observable history`() = runTest {
+        val history = FakeSearchHistory(listOf("fargo", "冰血暴"))
+        val vm = viewModel(
+            listOf(serverA),
+            mapOf("srv-a" to handle(FakeSearch())),
+            history = history,
+        )
+
+        val job = launch { vm.history.collect {} }
+        runCurrent()
+
+        vm.removeHistory("fargo")
+        runCurrent()
+
+        assertEquals(listOf("fargo"), history.removed)
+        assertEquals(listOf("冰血暴"), vm.history.value)
         job.cancel()
     }
 }

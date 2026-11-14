@@ -1,5 +1,8 @@
 package com.mediahub.feature.search
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -7,12 +10,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -29,14 +34,20 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -66,16 +77,23 @@ import com.mediahub.model.MediaType
 fun SearchRoute(
     onBack: () -> Unit,
     onOpenItem: (MediaItem) -> Unit,
+    /** 重新选中搜索入口时的递增信号：用于再次聚焦输入框并弹出键盘（条目 35/99）。 */
+    focusRequestToken: Int = 0,
     viewModel: GlobalSearchViewModel = hiltViewModel(),
 ) {
     // The field and search engine share the same restorable query.
     val input by viewModel.query.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val history by viewModel.history.collectAsStateWithLifecycle()
 
     SearchContent(
         query = input,
         state = state,
+        history = history,
         onQueryChange = viewModel::onQueryChange,
+        onSelectHistory = viewModel::onQueryChange,
+        onDeleteHistory = viewModel::removeHistory,
+        focusRequestToken = focusRequestToken,
         onBack = onBack,
         onOpenItem = onOpenItem,
     )
@@ -89,7 +107,21 @@ fun SearchContent(
     onQueryChange: (String) -> Unit,
     onBack: () -> Unit,
     onOpenItem: (MediaItem) -> Unit,
+    history: List<String> = emptyList(),
+    onSelectHistory: (String) -> Unit = onQueryChange,
+    onDeleteHistory: (String) -> Unit = {},
+    focusRequestToken: Int = 0,
 ) {
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    // 进入搜索页即聚焦输入框并弹出键盘；token 变化（再次选中搜索入口）时重复触发。
+    LaunchedEffect(focusRequestToken) {
+        // 等待输入框节点完成挂载后再请求焦点，避免首次组合时 FocusRequester 未初始化。
+        withFrameNanos { }
+        focusRequester.requestFocus()
+        keyboardController?.show()
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -97,7 +129,11 @@ fun SearchContent(
                     TextField(
                         value = query,
                         onValueChange = onQueryChange,
-                        modifier = Modifier.fillMaxWidth().padding(end = 12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(end = 12.dp)
+                            .focusRequester(focusRequester)
+                            .testTag(SearchTestTags.INPUT),
                         placeholder = {
                             Text(
                                 "搜索电影 / 剧集 / 单集",
@@ -139,7 +175,11 @@ fun SearchContent(
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
         SearchBody(
+            query = query,
             state = state,
+            history = history,
+            onSelectHistory = onSelectHistory,
+            onDeleteHistory = onDeleteHistory,
             onOpenItem = onOpenItem,
             modifier = Modifier
                 .fillMaxSize()
@@ -153,19 +193,32 @@ fun SearchBody(
     state: GlobalSearchState,
     onOpenItem: (MediaItem) -> Unit,
     modifier: Modifier = Modifier,
+    query: String = state.query,
+    history: List<String> = emptyList(),
+    onSelectHistory: (String) -> Unit = {},
+    onDeleteHistory: (String) -> Unit = {},
 ) {
     // 聚合为纯同步投影：与 state 来自同一 Compose snapshot，杜绝 stale entries 帧闪烁
     val entries = remember(state.hits) { SearchAggregator.group(state.hits) }
-    if (state.query.isBlank()) {
-        Column(
-            modifier = modifier,
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            MediaHubStatus(
-                title = "探索你的媒体世界",
-                message = "输入关键词，聚合搜索所有媒体源",
-                icon = Icons.Default.Search,
+    if (query.isBlank()) {
+        if (history.isEmpty()) {
+            Column(
+                modifier = modifier,
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                MediaHubStatus(
+                    title = "探索你的媒体世界",
+                    message = "输入关键词，聚合搜索所有媒体源",
+                    icon = Icons.Default.Search,
+                )
+            }
+        } else {
+            SearchHistoryPanel(
+                history = history,
+                onSelectHistory = onSelectHistory,
+                onDeleteHistory = onDeleteHistory,
+                modifier = modifier,
             )
         }
         return
@@ -360,6 +413,90 @@ private fun ServerStatusLines(state: GlobalSearchState) {
                 )
             }
         }
+    }
+}
+
+/** 搜索历史布局常量：列表固定两行高，超出滚动。 */
+internal object SearchHistoryLayout {
+    val ROW_HEIGHT = 44.dp
+    val ROW_SPACING = 8.dp
+    const val VISIBLE_ROWS = 2
+    val LIST_HEIGHT = ROW_HEIGHT * VISIBLE_ROWS + ROW_SPACING * (VISIBLE_ROWS - 1)
+}
+
+internal object SearchTestTags {
+    const val INPUT = "search-input"
+    const val HISTORY_LIST = "search-history-list"
+    fun historyItem(query: String) = "search-history-item-$query"
+}
+
+@Composable
+private fun SearchHistoryPanel(
+    history: List<String>,
+    onSelectHistory: (String) -> Unit,
+    onDeleteHistory: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+    ) {
+        Text(
+            "搜索历史",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(10.dp))
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(SearchHistoryLayout.LIST_HEIGHT)
+                .testTag(SearchTestTags.HISTORY_LIST),
+            verticalArrangement = Arrangement.spacedBy(SearchHistoryLayout.ROW_SPACING),
+        ) {
+            items(history, key = { it }) { query ->
+                SearchHistoryRow(
+                    query = query,
+                    onClick = { onSelectHistory(query) },
+                    onLongClick = { onDeleteHistory(query) },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SearchHistoryRow(
+    query: String,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(SearchHistoryLayout.ROW_HEIGHT)
+            .background(
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = RoundedCornerShape(12.dp),
+            )
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 12.dp)
+            .testTag(SearchTestTags.historyItem(query)),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Default.Search,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            query,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

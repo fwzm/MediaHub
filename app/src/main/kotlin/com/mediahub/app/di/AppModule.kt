@@ -226,6 +226,7 @@ object AppModule {
                 Migrations.MIGRATION_2_3,
                 Migrations.MIGRATION_3_4,
                 Migrations.MIGRATION_4_5,
+                Migrations.MIGRATION_5_6,
             )
             .build()
 
@@ -377,6 +378,12 @@ abstract class RegistryModule {
     @Binds
     @Singleton
     abstract fun bindSubtitleMemoryStore(impl: com.mediahub.core.database.repository.SubtitleMemoryRepository): com.mediahub.core.database.repository.SubtitleMemoryStore
+
+    @Binds
+    @Singleton
+    abstract fun bindSearchHistoryStore(
+        impl: com.mediahub.core.database.repository.SearchHistoryRepository,
+    ): com.mediahub.core.database.repository.SearchHistoryStore
 
     @Binds
     @Singleton
