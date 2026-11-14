@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
+import com.mediahub.metadata.sort.TitleSorter
+import com.mediahub.model.MediaItem
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -27,6 +29,9 @@ class FavoritesViewModel @Inject constructor(
 
     val serverId: String = checkNotNull(savedStateHandle["serverId"])
 
+    /** 收藏是一次性完整列表：按 TitleSorter 名称语义展示（拼音/冠词/自然数字）。 */
+    private val titleSorter = TitleSorter()
+
     private val _uiState = MutableStateFlow<FavoritesUiState>(FavoritesUiState.Loading)
     val uiState: StateFlow<FavoritesUiState> = _uiState.asStateFlow()
 
@@ -44,7 +49,7 @@ class FavoritesViewModel @Inject constructor(
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
                 val favoriteProvider = handle.favorite
                     ?: throw ProviderException.NotYetImplemented(serverId, "该数据源的收藏能力尚未接入")
-                _uiState.value = FavoritesState.loaded(favoriteProvider.listFavorites())
+                _uiState.value = FavoritesState.loaded(sortByTitle(favoriteProvider.listFavorites()))
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 logger.w(LogTag.UI, "收藏列表加载失败 serverId=$serverId", e)
@@ -52,6 +57,12 @@ class FavoritesViewModel @Inject constructor(
             }
         }
     }
+
+    private fun sortByTitle(items: List<MediaItem>): List<MediaItem> = titleSorter.sortedByTitle(
+        items = items,
+        titleOf = { it.sortName.ifBlank { it.title } },
+        idOf = { it.id },
+    )
 
     private fun userMessage(e: Exception): String = when (e) {
         is ProviderException -> e.message ?: "加载失败"

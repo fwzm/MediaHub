@@ -36,6 +36,7 @@ dependencies {
     implementation(project(":core:logging"))
     implementation(project(":core:database"))
     implementation(project(":provider:api"))
+    implementation(project(":metadata"))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

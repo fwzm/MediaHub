@@ -23,19 +23,33 @@ class TitleSorter(
     }
 
     fun sort(results: List<MetadataResult>): List<MetadataResult> =
-        results.sortedWith { left, right ->
-            val leftTitle = left.displayTitle()
-            val rightTitle = right.displayTitle()
-            when {
-                leftTitle.isBlank() && rightTitle.isBlank() -> left.id.compareTo(right.id)
-                leftTitle.isBlank() -> 1
-                rightTitle.isBlank() -> -1
-                else -> {
-                    val compared = collator.compare(sortKey(leftTitle), sortKey(rightTitle))
-                    if (compared != 0) compared else left.id.compareTo(right.id)
-                }
+        sortedByTitle(
+            items = results,
+            titleOf = { it.displayTitle() },
+            idOf = { it.id },
+        )
+
+    /**
+     * 通用重载：给客户端完整列表（媒体库根列表、收藏等）复用同一套名称排序语义。
+     * 分页/服务端排序列表不要用它 —— 那类列表的顺序由服务端决定。
+     */
+    fun <T> sortedByTitle(
+        items: List<T>,
+        titleOf: (T) -> String,
+        idOf: (T) -> String,
+    ): List<T> = items.sortedWith { left, right ->
+        val leftTitle = titleOf(left)
+        val rightTitle = titleOf(right)
+        when {
+            leftTitle.isBlank() && rightTitle.isBlank() -> idOf(left).compareTo(idOf(right))
+            leftTitle.isBlank() -> 1
+            rightTitle.isBlank() -> -1
+            else -> {
+                val compared = collator.compare(sortKey(leftTitle), sortKey(rightTitle))
+                if (compared != 0) compared else idOf(left).compareTo(idOf(right))
             }
         }
+    }
 
     fun sortKey(title: String): String {
         val folded = Normalizer.normalize(title, Normalizer.Form.NFKC).lowercase().trim()
