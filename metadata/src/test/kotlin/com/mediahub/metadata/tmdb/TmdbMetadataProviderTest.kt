@@ -49,6 +49,9 @@ class TmdbMetadataProviderTest {
         assertEquals(MetadataSource.TMDB, tv.source)
         assertEquals("绝命毒师", tv.title)
         assertEquals(2008, tv.year)
+        assertEquals("Breaking Bad", tv.originalTitle)
+        assertEquals("en", tv.language)
+        assertEquals(com.mediahub.metadata.MetadataMediaType.SERIES, tv.mediaType)
         assertEquals(POSTER_PREFIX + "ggFHVNu6YYI5L9pCfOacjizRGt.jpg", tv.posterUrl)
         assertTrue(tv.overview!!.startsWith("中学化学老师"))
 
@@ -194,7 +197,8 @@ class TmdbMetadataProviderTest {
                   "original_name": "Breaking Bad",
                   "first_air_date": "2008-01-20",
                   "overview": "中学化学老师得知自己身患绝症后开始制毒。",
-                  "poster_path": "/ggFHVNu6YYI5L9pCfOacjizRGt.jpg"
+                  "poster_path": "/ggFHVNu6YYI5L9pCfOacjizRGt.jpg",
+                  "original_language": "en"
                 },
                 {
                   "id": 550,

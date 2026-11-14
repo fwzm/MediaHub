@@ -112,6 +112,15 @@ private fun TmdbSearchItem.toResult(): MetadataResult? {
         year = date.toYear(),
         posterUrl = imageUrl(posterPath, POSTER_SIZE),
         overview = overview,
+        originalTitle = when (kind) {
+            TmdbMediaKind.TV -> originalName
+            TmdbMediaKind.MOVIE -> originalTitle
+        },
+        language = originalLanguage,
+        mediaType = when (kind) {
+            TmdbMediaKind.TV -> com.mediahub.metadata.MetadataMediaType.SERIES
+            TmdbMediaKind.MOVIE -> com.mediahub.metadata.MetadataMediaType.MOVIE
+        },
     )
 }
 

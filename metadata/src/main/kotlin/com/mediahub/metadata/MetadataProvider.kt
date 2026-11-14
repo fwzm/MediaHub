@@ -29,7 +29,18 @@ data class MetadataResult(
     val year: Int? = null,
     val posterUrl: String? = null,
     val overview: String? = null,
+    /** 原始语言标题（如英文原名），用于手动匹配时跨语言命中。 */
+    val originalTitle: String? = null,
+    /** ISO 639-1 原始语言（如 en / zh），用于匹配排序辅助判定。 */
+    val language: String? = null,
+    val mediaType: MetadataMediaType? = null,
 )
+
+/** 元数据条目的媒体类型（与 `core:model.MediaType` 解耦，仅刮削侧使用）。 */
+enum class MetadataMediaType {
+    MOVIE,
+    SERIES,
+}
 
 data class MetadataDetail(
     val source: MetadataSource,
