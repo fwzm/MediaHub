@@ -52,6 +52,7 @@ class UserPreferencesStore internal constructor(
             prefs[Keys.HW_DECODING] = updated.enableHardwareDecoding
             prefs[Keys.PREFER_DIRECT_PLAY] = updated.preferDirectPlay
             prefs[Keys.AUTO_NEXT] = updated.autoPlayNextEpisode
+            prefs[Keys.PRECISE_RESUME] = updated.preciseResumeSeek
             updated.maxBitrateBps?.let { prefs[Keys.MAX_BITRATE] = it }
                 ?: prefs.remove(Keys.MAX_BITRATE)
             prefs[Keys.SHOW_INFO] = updated.showPlayerInfoOverlay
@@ -88,6 +89,7 @@ class UserPreferencesStore internal constructor(
             enableHardwareDecoding = prefs[Keys.HW_DECODING] ?: true,
             preferDirectPlay = prefs[Keys.PREFER_DIRECT_PLAY] ?: true,
             autoPlayNextEpisode = prefs[Keys.AUTO_NEXT] ?: true,
+            preciseResumeSeek = prefs[Keys.PRECISE_RESUME] ?: false,
             maxBitrateBps = prefs[Keys.MAX_BITRATE],
             showPlayerInfoOverlay = prefs[Keys.SHOW_INFO] ?: false,
             autoLandscape = prefs[Keys.AUTO_LANDSCAPE] ?: true,
@@ -203,6 +205,7 @@ class UserPreferencesStore internal constructor(
         val HW_DECODING = booleanPreferencesKey("enable_hardware_decoding")
         val PREFER_DIRECT_PLAY = booleanPreferencesKey("prefer_direct_play")
         val AUTO_NEXT = booleanPreferencesKey("auto_play_next_episode")
+        val PRECISE_RESUME = booleanPreferencesKey("precise_resume_seek")
         val MAX_BITRATE = longPreferencesKey("max_bitrate_bps")
         val SHOW_INFO = booleanPreferencesKey("show_player_info_overlay")
         val AUTO_LANDSCAPE = booleanPreferencesKey("auto_landscape")

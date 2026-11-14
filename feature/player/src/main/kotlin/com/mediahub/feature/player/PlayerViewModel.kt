@@ -21,6 +21,7 @@ import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.PlaybackSource
 import com.mediahub.model.PlayerVisualEffectsPreferences
 import com.mediahub.model.ProfessionalInfoPreferences
+import com.mediahub.model.ResumeSeekMode
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.SubtitleFormats
 import com.mediahub.model.UpNextResolver
@@ -588,17 +589,21 @@ class PlayerViewModel @Inject constructor(
 
     val uiState: StateFlow<PlayerCombinedState> =
         combine(engine.uiState, _resolveState) { player, resolve ->
+            // 条目 21：换源/换集会先进入 Resolving，再等新源解析完成才 engine.play。
+            // 这段窗口里引擎仍是上一个会话，必须清零进度/缓冲/时长/播放意图，
+            // 否则进度条会停在旧位置，看起来像新视频从旧时间继续。
+            val ready = resolve is ResolveState.Ready
             PlayerCombinedState(
                 resolve = resolve,
-                isPlaying = player.isPlaying,
-                isBuffering = player.isBuffering,
-                positionMs = player.positionMs,
-                durationMs = player.durationMs,
+                isPlaying = ready && player.isPlaying,
+                isBuffering = ready && player.isBuffering,
+                positionMs = if (ready) player.positionMs else 0L,
+                durationMs = if (ready) player.durationMs else 0L,
                 speed = player.speed,
                 mediaTitle = player.mediaTitle,
                 error = player.error,
-                playWhenReady = player.playWhenReady,
-                isEnded = player.isEnded,
+                playWhenReady = ready && player.playWhenReady,
+                isEnded = ready && player.isEnded,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerCombinedState())
 
@@ -698,6 +703,11 @@ class PlayerViewModel @Inject constructor(
                         itemType = item.type,
                         posterUrl = item.posterUrl,
                         trace = trace,
+                        resumeSeekMode = if (latestPreferences.preciseResumeSeek) {
+                            ResumeSeekMode.EXACT
+                        } else {
+                            ResumeSeekMode.KEYFRAME
+                        },
                     )
                 )
 

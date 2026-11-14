@@ -16,6 +16,7 @@ import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
 import com.mediahub.model.PlaybackEngineMode
+import com.mediahub.model.ResumeSeekMode
 import com.mediahub.model.ServerType
 import com.mediahub.model.UserPreferences
 import com.mediahub.player.engine.InMemoryEnginePreferenceHistory
@@ -41,6 +42,7 @@ import com.mediahub.provider.api.ProviderStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -57,6 +59,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -452,6 +455,99 @@ class PlayerViewModelTest {
         } finally { vm.stopAndFlush(); runCurrent() }
     }
 
+    /**
+     * 条目 21：换源/换集时必须先把进度与缓冲状态清零，再等新源解析。
+     * 旧实现在 Resolving 期间继续暴露上一个会话的 position/isBuffering。
+     */
+    @Test fun switchingSourceClearsStaleProgressWhileTheNewSourceResolves() = runTest(dispatcher) {
+        val gate = Channel<Unit>(Channel.UNLIMITED)
+        val playback = FakePlayback(
+            source = PlaybackSource("https://fixture.invalid/video.mp4"),
+            gate = gate,
+        )
+        val engine = FakeEngine()
+        val vm = PlayerViewModel(
+            savedStateHandle = savedState("m1"),
+            serverStore = FakeServerStore(embyServer()),
+            progressStore = FakeProgressStore(resume = null),
+            subtitleMemoryStore = FakeSubtitleMemoryStore(),
+            registry = FakeRegistry(
+                detail = FakeDetail(mediaItemWithPoster("https://fixture.invalid/poster")),
+                playback = playback,
+            ),
+            media3EngineFactory = PlaybackEngineCreator { engine },
+            mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+            engineHistory = InMemoryEnginePreferenceHistory(),
+            userPreferencesRepository = FakeUserPreferences(),
+            artworkPaletteLoader = NoArtworkPalette,
+            logger = noOpLogger,
+        )
+        backgroundScope.launch { vm.uiState.collect { } }
+        try {
+            runCurrent()
+            assertEquals(ResolveState.Resolving, vm.resolveState.value)
+            gate.send(Unit); runCurrent()
+            assertEquals(ResolveState.Ready, vm.resolveState.value)
+
+            engine.setState(
+                PlaybackUiState(
+                    positionMs = 90_000,
+                    durationMs = 120_000,
+                    isBuffering = true,
+                    playWhenReady = true,
+                )
+            )
+            runCurrent()
+            assertEquals(90_000L, vm.uiState.value.positionMs)
+            assertTrue(vm.uiState.value.isBuffering)
+
+            vm.resolve()
+            runCurrent()
+            assertEquals(ResolveState.Resolving, vm.resolveState.value)
+            assertEquals("换源后进度必须清零", 0L, vm.uiState.value.positionMs)
+            assertFalse("换源后缓冲状态必须清零", vm.uiState.value.isBuffering)
+            assertEquals("换源后时长必须重新计算", 0L, vm.uiState.value.durationMs)
+            assertFalse(vm.uiState.value.playWhenReady)
+
+            gate.send(Unit); runCurrent()
+            assertEquals(ResolveState.Ready, vm.resolveState.value)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    /** 条目 124：设置里的精确续播开关必须随 PlaybackSession 传到引擎。 */
+    @Test fun preciseResumePreferenceReachesThePlaybackSession() = runTest(dispatcher) {
+        val prefs = FakeUserPreferences()
+        prefs.state.value = UserPreferences(preciseResumeSeek = true)
+        val engine = FakeEngine()
+        val vm = PlayerViewModel(
+            savedStateHandle = savedState("m1"),
+            serverStore = FakeServerStore(embyServer()),
+            progressStore = FakeProgressStore(resume = 15_000L),
+            subtitleMemoryStore = FakeSubtitleMemoryStore(),
+            registry = FakeRegistry(
+                detail = FakeDetail(mediaItemWithPoster("https://fixture.invalid/poster")),
+                playback = FakePlayback(PlaybackSource("https://fixture.invalid/video.mp4")),
+            ),
+            media3EngineFactory = PlaybackEngineCreator { engine },
+            mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+            engineHistory = InMemoryEnginePreferenceHistory(),
+            userPreferencesRepository = prefs,
+            artworkPaletteLoader = NoArtworkPalette,
+            logger = noOpLogger,
+        )
+        try {
+            runCurrent()
+            assertEquals(ResolveState.Ready, vm.resolveState.value)
+            assertEquals(ResumeSeekMode.EXACT, engine.playedSession?.resumeSeekMode)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
     // ---- fakes ----
     private val NoArtworkPalette = ArtworkPaletteLoader { _, _ -> null }
 
@@ -517,6 +613,7 @@ class PlayerViewModelTest {
     private class FakePlayback(
         private val source: PlaybackSource? = null,
         private val error: ProviderException? = null,
+        private val gate: Channel<Unit>? = null,
     ) : MediaPlaybackProvider {
         var receivedItem: MediaItem? = null
         var receivedStartMs: Long? = null
@@ -526,6 +623,7 @@ class PlayerViewModelTest {
         ): PlaybackSource {
             receivedItem = item
             receivedStartMs = options.startPositionMs
+            gate?.receive()
             error?.let { throw it }
             return checkNotNull(source)
         }
@@ -581,6 +679,7 @@ class PlayerViewModelTest {
         override val downloadSpeedBps: StateFlow<Long> = MutableStateFlow(0L)
         override fun attachSurface(surface: android.view.Surface?) = Unit
         override fun play(session: PlaybackSession) { presentationOnPlay = presentation; playedSession = session }
+        fun setState(state: PlaybackUiState) { ui.value = state }
         override fun togglePlayPause() = Unit
         override fun seekTo(positionMs: Long, mode: com.mediahub.player.engine.SeekMode) = Unit
         override fun setSpeed(speed: Float) = Unit

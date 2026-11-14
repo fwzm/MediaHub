@@ -66,6 +66,16 @@ class UserPreferencesStoreTest {
     }
 
     @Test
+    fun `precise resume preference survives a store round trip`() = runBlocking {
+        assertFalse(store.flow.first().preciseResumeSeek)
+
+        store.update { it.copy(preciseResumeSeek = true) }
+
+        val recreatedStore = UserPreferencesStore(dataStore)
+        assertTrue(recreatedStore.flow.first().preciseResumeSeek)
+    }
+
+    @Test
     fun `visual preferences survive a store round trip`() = runBlocking {
         val expected = PlayerVisualEffectsPreferences(
             enabled = true,

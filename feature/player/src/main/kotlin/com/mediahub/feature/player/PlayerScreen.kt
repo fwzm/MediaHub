@@ -235,6 +235,20 @@ fun PlayerRoute(
         onDispose { sysUiController?.exitPlayback() }
     }
 
+    // 条目 104：播放中保持屏幕常亮；暂停、解析失败或退出播放页时恢复系统锁屏行为。
+    val keepScreenOn = KeepScreenOnPolicy.shouldKeepScreenOn(resolve, state.playWhenReady)
+    DisposableEffect(activity, keepScreenOn) {
+        val window = activity?.window
+        if (keepScreenOn) {
+            window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            if (keepScreenOn) window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
     var showVisualEffectsSettings by remember { mutableStateOf(false) }

@@ -125,6 +125,10 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
    未手动选轨时按"系统语言 → 容器 DEFAULT → 设备支持 → 码率/声道 → 首轨兜底"选默认音轨
    （ADR-048，待产品确认；字幕默认不自动开启）。
 6. 播放进度自动写入本地快照 → 首页"继续观看"（缩略图 + 进度条）。
+7. 播放期保屏与续播精度：播放中持有 `FLAG_KEEP_SCREEN_ON`，暂停、解析失败或退出播放页立即恢复系统锁屏；
+   换源/换集时进度、缓冲、时长与播放意图先清零，等新源解析后再重算。
+   设置 → 播放 →「精确续播」默认关闭：EXO 用 `SeekParameters.CLOSEST_SYNC`、mpv 用 `hr-seek=no`，
+   从邻近关键帧快速起播；开启后 EXO 用 `SeekParameters.EXACT`、mpv 用 `hr-seek=yes` 按精确时间定位，首帧更慢。
 
 ### WebDAV（只读）
 1. 首页 → 添加媒体库 → WebDAV → 填服务器地址（目录 URL，保存时统一补结尾 `/`）/ 用户名 / 密码 → 登录并添加。
@@ -234,6 +238,13 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 | **句柄配对：备份来源对上本机已登录来源（W31）**：W30 的适配器要调用方自己给出「备份来源 id → ProviderHandle」；本轮把这一步做成可测的配对层 `windows/src/MediaHub.Backup.Providers/MhBackupHandleLocator.cs`。备份 id 与新机 `ServerId`（`emby:<remoteId>`）必然不同名 ⇒ 判据是**类型相同 + 端点地址相同**（scheme/host 小写、默认端口省略、末尾斜杠去掉）。四个出口：`matched`（唯一命中，交给真实写通道）/ `no-handle`（本机没这个来源 ⇒ 执行层 `needs-login`，请求不发）/ `address-mismatch`（有同类型来源但地址不一致 ⇒ 拒绝并说「地址不一致时不猜」）/ `ambiguous`（多个同地址或多个无地址候选 ⇒ 拒绝）。刻意不把后两者冒充成「没登录」——让用户去重登一个已登录的来源只会掩盖问题。备份无地址时回退「唯一的同类型来源」，两个以上则拒绝 | windows/docs/W15-CROSS-PLATFORM-BACKUP.md §21（9 例含一条 MockMediaServer 端到端，三条负向对照 1/1/1 红、逐字节还原；本机 1952/0，sln 0 错误） |
 
 ### 已知缺陷与未验证项
+
+- **保屏（条目 104）只有 JVM 策略测试**：`KeepScreenOnPolicy` 的判定矩阵已单测覆盖，但真实熄屏行为取决于
+  系统屏幕超时与窗口标志，本地无法自动化；状态 `NOT_RUN`。验证条件：Xiaomi 14 Ultra（serial `123e243f`）
+  将「屏幕超时」设为 15 s，播放 ≥1 分钟不熄屏；暂停后 15 s 内正常熄屏；退出播放页后恢复系统行为。
+- **精确续播（条目 124）的实际起播位置未上真机**：EXO `SeekParameters` 与 mpv `hr-seek` 的映射有单测，
+  但「关闭时落在邻近关键帧、开启时精确到记录位置」及首帧耗时差异，需用关键帧间隔 ≥2 s 的夹具在真机逐项记录；
+  当前 `NOT_RUN`。验证条件：同一夹具分别在两种模式下从同一记录位置起播，记录 `positionMs` 与首帧耗时。
 
 - **进度回写的服务端语义**：中断位置写入与「完全重启后恢复」已在 Jellyfin 12.2 与 Emby 4.10.x 实测
   （W8 S2 43/43：中断回写 304.33 s，完全重启后从 306 s 恢复）；W4 记录的「中断恢复 FAILED」已更正为
