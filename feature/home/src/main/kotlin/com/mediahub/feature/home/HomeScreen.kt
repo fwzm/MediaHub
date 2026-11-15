@@ -30,12 +30,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.mediahub.core.ui.MediaHubAccentLine
 import com.mediahub.core.ui.MediaHubCard
 import com.mediahub.core.ui.MediaHubLabel
 import com.mediahub.core.ui.MediaHubSectionHeader
@@ -111,13 +109,7 @@ fun HomeContent(
         topBar = {
             TopAppBar(
                 title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        MediaHubAccentLine()
-                        Text("MediaHub", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    }
+                    Text("MediaHub", style = MaterialTheme.typography.headlineSmall)
                 },
                 actions = {
                     IconButton(onClick = onOpenSearch) {
@@ -145,7 +137,7 @@ fun HomeContent(
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(start = 20.dp, top = 10.dp, end = 20.dp, bottom = 100.dp),
+            contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 100.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             item {
@@ -261,7 +253,7 @@ private fun ContinueWatchingCard(
                         androidx.compose.ui.graphics.Brush.verticalGradient(
                             listOf(
                                 androidx.compose.ui.graphics.Color.Transparent,
-                                androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.9f),
+                                MaterialTheme.colorScheme.scrim.copy(alpha = 0.9f),
                             ),
                         ),
                     )
@@ -270,7 +262,7 @@ private fun ContinueWatchingCard(
                 Text(
                     text = progress.itemTitle ?: "未命名",
                     style = MaterialTheme.typography.titleSmall,
-                    color = androidx.compose.ui.graphics.Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -284,13 +276,13 @@ private fun ContinueWatchingCard(
                         Text(
                             "剩余约 $remainingMinutes 分钟",
                             style = MaterialTheme.typography.bodySmall,
-                            color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.8f),
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                         )
                     }
                     Icon(
                         Icons.Default.PlayArrow,
                         contentDescription = null,
-                        tint = androidx.compose.ui.graphics.Color.White,
+                        tint = MaterialTheme.colorScheme.onSurface,
                     )
                 }
             }

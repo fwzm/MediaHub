@@ -42,7 +42,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -220,7 +219,7 @@ fun ServerEditorRoute(
                                     } else {
                                         listOfNotNull(r.message, r.toActionableHint()).joinToString(String(charArrayOf(10.toChar())))
                                     },
-                                    color = if (r.ok) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
+                                    color = if (r.ok) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
                                     style = MaterialTheme.typography.bodySmall,
                                     modifier = Modifier.weight(1f),
                                 )

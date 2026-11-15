@@ -62,7 +62,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.mediahub.core.ui.MediaHubAccentLine
 import com.mediahub.core.ui.MediaHubCard
 import com.mediahub.core.ui.MediaHubStatus
 import com.mediahub.core.ui.PosterImage
@@ -145,18 +144,15 @@ fun LibraryContent(
         topBar = {
             TopAppBar(
                 title = {
-                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Text(
-                            text = when (val s = state) {
-                                is LibraryUiState.Content -> s.libraryName
-                                else -> fallbackName.ifBlank { "媒体库" }
-                            },
-                            style = MaterialTheme.typography.titleLarge,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        MediaHubAccentLine()
-                    }
+                    Text(
+                        text = when (val s = state) {
+                            is LibraryUiState.Content -> s.libraryName
+                            else -> fallbackName.ifBlank { "媒体库" }
+                        },
+                        style = MaterialTheme.typography.headlineSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -516,7 +512,7 @@ private fun LibraryRow(library: MediaLibrary, onClick: () -> Unit) {
     MediaHubCard(
         modifier = Modifier.fillMaxWidth(),
         onClick = onClick,
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 20.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,

@@ -602,7 +602,7 @@ fun PlayerRoute(
                         } else {
                             stringResource(R.string.player_audio_unsupported)
                         },
-                        color = Color.Yellow,
+                        color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier
                             .align(Alignment.TopCenter)
