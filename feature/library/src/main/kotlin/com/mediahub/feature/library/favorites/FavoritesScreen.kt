@@ -32,6 +32,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.MediaHubStatus
 import com.mediahub.core.ui.PosterImage
+import com.mediahub.core.ui.theme.MediaHubSpacing
 import com.mediahub.model.MediaItem
 
 /** 「我的收藏」列表页（task-25 / A2）：只列服务端 IsFavorite=true 的条目。 */
@@ -102,13 +103,13 @@ fun FavoritesRoute(
                 s.refreshError?.let { message ->
                     Text(
                         text = message,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = MediaHubSpacing.l, vertical = MediaHubSpacing.s),
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(MediaHubSpacing.xs),
                 ) {
                     items(s.items, key = { it.id }) { item ->
                         FavoriteRow(item = item, onClick = { onOpenItem(item) })
@@ -125,7 +126,7 @@ private fun FavoriteRow(item: MediaItem, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = MediaHubSpacing.l, vertical = MediaHubSpacing.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         PosterImage(
@@ -134,8 +135,8 @@ private fun FavoriteRow(item: MediaItem, onClick: () -> Unit) {
             modifier = Modifier.width(56.dp),
         )
         Column(
-            modifier = Modifier.padding(start = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            modifier = Modifier.padding(start = MediaHubSpacing.m),
+            verticalArrangement = Arrangement.spacedBy(MediaHubSpacing.xxs),
         ) {
             Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(
