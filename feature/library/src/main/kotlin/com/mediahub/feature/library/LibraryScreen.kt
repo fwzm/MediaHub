@@ -66,6 +66,7 @@ import com.mediahub.core.ui.MediaHubCard
 import com.mediahub.core.ui.MediaHubStatus
 import com.mediahub.core.ui.PosterImage
 import com.mediahub.core.ui.ThumbImage
+import com.mediahub.core.ui.theme.MediaHubSpacing
 import com.mediahub.model.MediaFilter
 import com.mediahub.model.MediaFilterField
 import com.mediahub.model.MediaItem
@@ -214,7 +215,7 @@ fun LibraryContent(
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize().padding(padding),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                        contentPadding = PaddingValues(horizontal = MediaHubSpacing.l, vertical = MediaHubSpacing.m),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         items(s.libraries, key = { it.id }) { library ->
@@ -272,9 +273,9 @@ fun LibraryContent(
                         state = gridState,
                         columns = GridCells.Fixed(3),
                         modifier = Modifier.fillMaxSize().padding(padding),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(horizontal = MediaHubSpacing.l, vertical = MediaHubSpacing.m),
+                        horizontalArrangement = Arrangement.spacedBy(MediaHubSpacing.m),
+                        verticalArrangement = Arrangement.spacedBy(MediaHubSpacing.m),
                     ) {
                         if (s.canGoUp) {
                             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
@@ -512,7 +513,7 @@ private fun LibraryRow(library: MediaLibrary, onClick: () -> Unit) {
     MediaHubCard(
         modifier = Modifier.fillMaxWidth(),
         onClick = onClick,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+        contentPadding = PaddingValues(horizontal = MediaHubSpacing.l, vertical = MediaHubSpacing.l),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,

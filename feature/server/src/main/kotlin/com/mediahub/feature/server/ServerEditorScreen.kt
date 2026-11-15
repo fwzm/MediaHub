@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.ServerIcon
+import com.mediahub.core.ui.theme.mediaHubSemanticColors
 import com.mediahub.model.MediaServer
 import com.mediahub.model.ServerType
 
@@ -219,7 +220,7 @@ fun ServerEditorRoute(
                                     } else {
                                         listOfNotNull(r.message, r.toActionableHint()).joinToString(String(charArrayOf(10.toChar())))
                                     },
-                                    color = if (r.ok) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
+                                    color = if (r.ok) MaterialTheme.mediaHubSemanticColors.success else MaterialTheme.colorScheme.error,
                                     style = MaterialTheme.typography.bodySmall,
                                     modifier = Modifier.weight(1f),
                                 )

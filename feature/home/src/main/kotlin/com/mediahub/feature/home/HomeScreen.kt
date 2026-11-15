@@ -39,6 +39,7 @@ import com.mediahub.core.ui.MediaHubLabel
 import com.mediahub.core.ui.MediaHubSectionHeader
 import com.mediahub.core.ui.MediaHubStatus
 import com.mediahub.core.ui.ThumbImageWithProgress
+import com.mediahub.core.ui.theme.MediaHubSpacing
 import com.mediahub.feature.server.ServerCard
 import com.mediahub.model.MediaServer
 import com.mediahub.model.PlaybackProgress
@@ -125,7 +126,7 @@ fun HomeContent(
         floatingActionButton = {
             androidx.compose.material3.FloatingActionButton(onClick = onAddServer) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 20.dp),
+                    modifier = Modifier.padding(horizontal = MediaHubSpacing.l),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -137,8 +138,14 @@ fun HomeContent(
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 100.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(
+                start = MediaHubSpacing.l,
+                top = MediaHubSpacing.l,
+                end = MediaHubSpacing.l,
+                // 100dp：给悬浮「添加媒体库」按钮留出不被最后一张卡片压住的空间。
+                bottom = 100.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(MediaHubSpacing.m),
         ) {
             item {
                 Text(
@@ -152,11 +159,11 @@ fun HomeContent(
                     MediaHubSectionHeader(
                         title = "继续观看",
                         subtitle = "从上次离开的地方继续",
-                        modifier = Modifier.padding(top = 12.dp),
+                        modifier = Modifier.padding(top = MediaHubSpacing.m),
                     )
                 }
                 item {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(MediaHubSpacing.l)) {
                         items(continueWatching, key = { "${it.serverId}/${it.itemId}" }) { progress ->
                             ContinueWatchingCard(
                                 progress = progress,
@@ -172,7 +179,7 @@ fun HomeContent(
                 MediaHubSectionHeader(
                     title = "媒体源",
                     subtitle = if (servers.isEmpty()) "连接你的媒体世界" else "${servers.size} 个媒体源",
-                    modifier = Modifier.padding(top = if (continueWatching.isEmpty()) 16.dp else 24.dp),
+                    modifier = Modifier.padding(top = if (continueWatching.isEmpty()) MediaHubSpacing.l else MediaHubSpacing.xl),
                 )
             }
             if (!loaded) {
@@ -236,7 +243,7 @@ private fun ContinueWatchingCard(
     MediaHubCard(
         modifier = modifier,
         onClick = onClick,
-        contentPadding = PaddingValues(10.dp),
+        contentPadding = PaddingValues(MediaHubSpacing.s),
     ) {
         androidx.compose.foundation.layout.Box {
             ThumbImageWithProgress(
