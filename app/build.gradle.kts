@@ -77,6 +77,7 @@ dependencies {
     implementation(project(":feature:detail"))
     implementation(project(":feature:search"))
     implementation(project(":feature:settings"))
+    implementation(project(":feature:stats"))
     implementation(project(":feature:player"))
 
     implementation(libs.androidx.core.ktx)

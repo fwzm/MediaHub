@@ -14,6 +14,9 @@
     <string name="settings_auto_play_next_episode">自动连播下一集</string>
     <string name="settings_show_media_info">播放器显示媒体信息浮层</string>
     <string name="settings_professional_info">播放专业信息（关闭为精简面板）</string>
+    <string name="settings_watch_stats">观影统计</string>
+    <string name="settings_watch_stats_enabled">记录观看历史（关闭后不再记录，已有记录保留）</string>
+    <string name="settings_watch_stats_entry">查看观影统计</string>
     <string name="settings_auto_landscape">播放视频时自动横屏</string>
     <string name="settings_immersive_bars">播放时隐藏状态栏和导航栏</string>
     <string name="settings_player_gestures">播放器手势</string>

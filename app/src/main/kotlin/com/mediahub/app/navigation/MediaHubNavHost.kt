@@ -116,7 +116,12 @@ fun MediaHubNavHost() {
             SettingsRoute(
                 onBack = { navController.popBackStack() },
                 onOpenBackup = { navController.navigate(Routes.BACKUP) },
+                onOpenStats = { navController.navigate(Routes.STATS) },
             )
+        }
+
+        composable(Routes.STATS) {
+            com.mediahub.feature.stats.StatsRoute(onBack = { navController.popBackStack() })
         }
 
         composable(Routes.BACKUP) {
@@ -252,6 +257,7 @@ private object Routes {
     const val HOME = "home"
     const val ADD_SERVER = "server/add"
     const val SETTINGS = "settings"
+    const val STATS = "stats"
     const val BACKUP = "backup"
     const val SEARCH = "search"
     const val FAVORITES = "favorites/{serverId}"
