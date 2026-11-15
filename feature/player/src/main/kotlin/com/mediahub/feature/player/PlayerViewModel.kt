@@ -8,6 +8,7 @@ import com.mediahub.core.database.prefs.UserPreferencesRepository
 import com.mediahub.core.database.repository.SubtitleMemoryEntry
 import com.mediahub.core.database.repository.SubtitleMemoryKeys
 import com.mediahub.core.database.repository.SubtitleMemoryStore
+import com.mediahub.core.database.repository.WatchStatsRecorder
 import com.mediahub.core.network.PlaybackNetworkTraceRegistry
 import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
@@ -64,6 +65,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -153,6 +155,10 @@ class PlayerViewModel @Inject constructor(
      * 冷启动的首次枚举由 app 层预热，不在播放线程上触发。
      */
     private val deviceCapabilitiesProvider: DeviceCapabilitiesProvider? = null,
+    /**
+     * 观影统计记录器（条目 141）。null = 未接线（单元测试 / 无统计环境），播放行为不受影响。
+     */
+    private val watchStatsRecorder: WatchStatsRecorder? = null,
 ) : ViewModel() {
     private val serverId: String = checkNotNull(savedStateHandle["serverId"])
     // itemId 经 NavArgCodec(Base64 URL_SAFE) 传输，兼容文件路径中的 '/'（见 core:common）
@@ -215,6 +221,8 @@ class PlayerViewModel @Inject constructor(
             userPreferencesRepository.flow.collect { stored ->
                 latestPreferences = stored
                 engine.setSubtitlePresentation(stored.subtitleStyle, stored.subtitleSizeSp)
+                // 条目 122：关闭观影统计后不再产生新记录（已有记录保留）。
+                watchStatsRecorder?.setEnabled(stored.watchStatsEnabled)
                 _preferences.value = stored
             }
         }
@@ -579,9 +587,10 @@ class PlayerViewModel @Inject constructor(
     private var autoplayInFlight = false
     /** 连播切换失败过一次就整轮停住：不重试、不连环跳集。 */
     private var autoplayBlocked = false
-    private var autoplayJob: Job? = null
-    /** 已经为哪个条目安排过连播（同一集重复 Ended 不连跳两集）。 */
+    private var autoplayJob: Job? = null    /** 已经为哪个条目安排过连播（同一集重复 Ended 不连跳两集）。 */
     private var autoplayHandledItemId: String? = null
+    /** 观影统计采样任务（条目 141）；null 表示未接线。 */
+    private var watchStatsJob: Job? = null
     private var eventsTapStarted = false
     /** engine.events 是单消费者 Channel：先 tap 一次，再分发给同步管线与连播逻辑。 */
     private val playbackEventBus = MutableSharedFlow<PlaybackEventMessage>(extraBufferCapacity = 32)
@@ -716,6 +725,7 @@ class PlayerViewModel @Inject constructor(
                 startSubtitleCenter(item, source)
                 if (!autoplay) autoplayBlocked = false
                 _resolveState.value = ResolveState.Ready
+                startWatchStats()
                 if (currentTrace === trace) PlaybackNetworkTraceRegistry.set(null)
             } catch (e: CancellationException) {
                 if (currentTrace === trace) PlaybackNetworkTraceRegistry.set(null)
@@ -810,6 +820,8 @@ class PlayerViewModel @Inject constructor(
         val targetId = nextEpisodeId ?: return
         if (stopped) return
         logger.i(LogTag.PLAYER, "自动连播 serverId=$serverId from=$itemId to=$targetId")
+        // 条目 141：换集前先结算上一集的观影会话，避免串集/少算。
+        watchStatsRecorder?.finish()
         itemId = targetId
         // 启动快照属于上一集：不清空会把上一集的 type/runtime/poster/container 套到新一集。
         launchType = ""
@@ -855,6 +867,40 @@ class PlayerViewModel @Inject constructor(
      * （远端 final 上报短超时，不阻塞退出；Jellyfin 走 /Sessions/Playing/Stopped）→
      * 释放播放器。幂等：可被返回按钮与 onDispose 兜底重复调用。
      */
+    /**
+     * 条目 141：把引擎播放采样喂给观影统计记录器，并周期落盘。
+     *
+     * 只在进入 Ready 后启动（拿到真实 title/duration）；引擎 uiState 是 StateFlow，
+     * 启动即读到当前值。周期 checkpoint 使用同一会话 id Upsert，不会产生重复记录。
+     */
+    private fun startWatchStats() {
+        val recorder = watchStatsRecorder ?: return
+        if (watchStatsJob != null) return
+        watchStatsJob = viewModelScope.launch {
+            launch {
+                engine.uiState.collect { ui ->
+                    recorder.onSample(
+                        serverId = serverId,
+                        itemId = itemId,
+                        itemTitle = currentItem?.title ?: itemTitle,
+                        itemType = (currentItem?.type ?: MediaType.OTHER).name,
+                        positionMs = ui.positionMs,
+                        durationMs = ui.durationMs,
+                        // 缓冲期间不计入观看时长（isPlaying 可能因缓冲短暂为 false）。
+                        isPlaying = ui.isPlaying && !ui.isBuffering,
+                        speed = ui.speed,
+                    )
+                }
+            }
+            launch {
+                while (true) {
+                    delay(30_000L)
+                    recorder.checkpoint()
+                }
+            }
+        }
+    }
+
     suspend fun stopAndFlush() {
         if (stopped) { stopCompleted.await(); return }
         stopped = true
@@ -865,6 +911,21 @@ class PlayerViewModel @Inject constructor(
         withContext(NonCancellable + Dispatchers.Main.immediate) {
             try {
                 val finalProgress = engine.stop()
+                // 条目 141：用引擎最终快照收尾观影会话（更新 positionEnd/完成态），再落盘。
+                watchStatsRecorder?.let { recorder ->
+                    val ui = engine.uiState.value
+                    recorder.onSample(
+                        serverId = serverId,
+                        itemId = itemId,
+                        itemTitle = currentItem?.title ?: itemTitle,
+                        itemType = (currentItem?.type ?: MediaType.OTHER).name,
+                        positionMs = finalProgress?.positionMs ?: ui.positionMs,
+                        durationMs = finalProgress?.durationMs ?: ui.durationMs,
+                        isPlaying = false,
+                        speed = ui.speed,
+                    )
+                    recorder.finish()
+                }
                 // Stop periodic work before draining accepted local writes and the bounded
                 // final report. Navigation cancellation must not strand the native engine.
                 syncCoordinator.stop()
@@ -891,6 +952,9 @@ class PlayerViewModel @Inject constructor(
         resolveGeneration.incrementAndGet()
         resolveJob?.cancel()
         autoplayJob?.cancel()
+        watchStatsJob?.cancel()
+        // 周期 checkpoint 已落盘；此处只清理未结算的内存累加，避免下一会话串数据。
+        watchStatsRecorder?.reset()
         invalidateSubtitleSession()
         // 兜底：若未走 stopAndFlush（如进程销毁/异常路径），确保停止采样并释放资源。
         if (!stopped) {
