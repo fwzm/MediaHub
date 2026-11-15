@@ -21,9 +21,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
 
@@ -85,13 +85,11 @@ fun ThumbImageWithProgress(
     progress: Float,
     modifier: Modifier = Modifier,
 ) {
-    val shape = RoundedCornerShape(14.dp)
-    Box(modifier = modifier.aspectRatio(THUMB_ASPECT).clip(shape)) {
+    Box(modifier = modifier.aspectRatio(THUMB_ASPECT).clip(MaterialTheme.shapes.small)) {
         MediaArtwork(
             url = url,
             contentDescription = contentDescription,
             modifier = Modifier.fillMaxSize(),
-            cornerRadius = 14.dp,
         )
         LinearProgressIndicator(
             progress = { progress.coerceIn(0f, 1f) },
@@ -112,11 +110,11 @@ private fun MediaArtwork(
     url: String?,
     contentDescription: String?,
     modifier: Modifier = Modifier,
-    cornerRadius: Dp = 12.dp,
+    shape: Shape = MaterialTheme.shapes.small,
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(cornerRadius))
+            .clip(shape)
             .background(
                 Brush.linearGradient(
                     listOf(

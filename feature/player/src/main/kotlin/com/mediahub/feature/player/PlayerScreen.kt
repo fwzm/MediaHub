@@ -113,6 +113,7 @@ import com.mediahub.core.ui.effects.FlowGlowClock
 import com.mediahub.core.ui.effects.rememberFlowGlowClock
 import com.mediahub.core.ui.effects.rememberPowerSaveMode
 import com.mediahub.core.ui.effects.rememberReduceMotion
+import com.mediahub.core.ui.theme.mediaHubSemanticColors
 import com.mediahub.player.engine.AudioBandLevels
 import com.mediahub.player.engine.EngineKind
 import com.mediahub.player.engine.SeekMode
@@ -602,7 +603,7 @@ fun PlayerRoute(
                         } else {
                             stringResource(R.string.player_audio_unsupported)
                         },
-                        color = Color.Yellow,
+                        color = MaterialTheme.mediaHubSemanticColors.warning,
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier
                             .align(Alignment.TopCenter)
