@@ -275,11 +275,12 @@ fun PlayerRoute(
     }
 
     // 手势层（U3-B）：统一手势状态机驱动 Overlay / 双击矩阵 / scrub / 连续快退 / 长按倍速。
-    // 闭包经属性代理读取最新 state/preferences（remember 不需要 keys）。
+    // 闭包经属性代理读取最新 state/storedPreferences（remember 不需要 keys）；
+    // 注意不要在闭包里捕获 preferences 这个普通 val，否则会固化首次合成时的默认值，导致手势设置永不生效。
     val gestureController = remember {
         val engine = viewModel.engine
         PlayerGestureController(
-            gestures = { preferences.gestures },
+            gestures = { (storedPreferences ?: UserPreferences()).gestures },
             positionMs = { state.positionMs },
             durationMs = { state.durationMs },
             currentSpeed = { state.speed },
