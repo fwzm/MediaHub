@@ -1,0 +1,397 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:MediaHub.App.Controls">
+
+  <!--
+    方案 C · 光边（Filigree Edge）
+
+    What it borrows: the dark-UI pattern that design communities replicated hardest after Liquid
+    Glass - a nearly flat plate whose identity is a single 1px hairline, plus a low-alpha accent
+    halo outside it. No dome, no gloss, no blur. The hairline is bright along the top and takes the
+    brand colour along the bottom, so the edge itself carries the hierarchy.
+
+    Deliberately absent: blur and grain. Because the identity is a 1px line, it also has the
+    cleanest Windows 10 / solid-mode story of the three.
+  -->
+
+  <LinearGradientBrush x:Key="FiligreeSurfaceBrush" StartPoint="0.5,0" EndPoint="0.5,1">
+    <GradientStop Color="#FF1E252F" Offset="0" />
+    <GradientStop Color="#FF181E26" Offset="1" />
+  </LinearGradientBrush>
+
+  <SolidColorBrush x:Key="FiligreePrimaryBrush" Color="#FF3FC9B8" />
+  <SolidColorBrush x:Key="FiligreeDangerBrush" Color="#FFB8413A" />
+
+  <!-- The signature: white at the top, nothing through the middle, brand colour at the bottom. -->
+  <LinearGradientBrush x:Key="FiligreeHairlineBrush" StartPoint="0.5,0" EndPoint="0.5,1">
+    <GradientStop Color="#8CFFFFFF" Offset="0" />
+    <GradientStop Color="#24FFFFFF" Offset="0.4" />
+    <GradientStop Color="#0018C4B4" Offset="0.62" />
+    <GradientStop Color="#663FC9B8" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="FiligreeHairlineHoverBrush" StartPoint="0.5,0" EndPoint="0.5,1">
+    <GradientStop Color="#B3FFFFFF" Offset="0" />
+    <GradientStop Color="#33FFFFFF" Offset="0.4" />
+    <GradientStop Color="#0018C4B4" Offset="0.62" />
+    <GradientStop Color="#993FC9B8" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="FiligreeHairlinePressedBrush" StartPoint="0.5,0" EndPoint="0.5,1">
+    <GradientStop Color="#4DFFFFFF" Offset="0" />
+    <GradientStop Color="#14FFFFFF" Offset="0.4" />
+    <GradientStop Color="#0018C4B4" Offset="0.62" />
+    <GradientStop Color="#333FC9B8" Offset="1" />
+  </LinearGradientBrush>
+
+  <!-- The primary and danger plates are flat, so their hairline does all the dimensional work. -->
+  <LinearGradientBrush x:Key="FiligreePrimaryHairlineBrush" StartPoint="0.5,0" EndPoint="0.5,1">
+    <GradientStop Color="#8CFFFFFF" Offset="0" />
+    <GradientStop Color="#26FFFFFF" Offset="0.45" />
+    <GradientStop Color="#4004110E" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="FiligreeDangerHairlineBrush" StartPoint="0.5,0" EndPoint="0.5,1">
+    <GradientStop Color="#66FFD9D4" Offset="0" />
+    <GradientStop Color="#26FFFFFF" Offset="0.45" />
+    <GradientStop Color="#4D000000" Offset="1" />
+  </LinearGradientBrush>
+
+  <SolidColorBrush x:Key="FiligreeGlowBrush" Color="#1A3FC9B8" />
+  <SolidColorBrush x:Key="FiligreeGlowHoverBrush" Color="#333FC9B8" />
+
+  <SolidColorBrush x:Key="FiligreeVeilHoverBrush" Color="#0AFFFFFF" />
+  <SolidColorBrush x:Key="FiligreeVeilPressedBrush" Color="#14000000" />
+
+  <SolidColorBrush x:Key="FiligreeIconSurfaceBrush" Color="#FF202832" />
+  <SolidColorBrush x:Key="FiligreeIconPressedBrush" Color="#FF161C24" />
+
+  <SolidColorBrush x:Key="FiligreeDisabledSurfaceBrush" Color="#FF171C23" />
+  <SolidColorBrush x:Key="FiligreeDisabledHairlineBrush" Color="#FF2A323C" />
+  <SolidColorBrush x:Key="FiligreeDisabledTextBrush" Color="#FF707A86" />
+
+  <SolidColorBrush x:Key="FiligreeFocusBrush" Color="#FF3FC9B8" />
+  <SolidColorBrush x:Key="FiligreeFocusHaloBrush" Color="#403FC9B8" />
+
+  <!-- ============================================================ surface template -->
+
+  <ControlTemplate x:Key="FiligreeSurface" TargetType="Button">
+    <Grid x:Name="Root" Background="Transparent" RenderTransformOrigin="0.5,0.5">
+      <Grid.RenderTransform>
+        <CompositeTransform x:Name="Motion" />
+      </Grid.RenderTransform>
+
+      <Border x:Name="Glow" Margin="-1" CornerRadius="{TemplateBinding CornerRadius}"
+              Background="Transparent" BorderThickness="1"
+              BorderBrush="{StaticResource FiligreeGlowBrush}" IsHitTestVisible="False" />
+
+      <Border x:Name="Fill" Background="{TemplateBinding Background}"
+              BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="{TemplateBinding BorderThickness}"
+              CornerRadius="{TemplateBinding CornerRadius}" />
+
+      <Border x:Name="Hairline" Margin="1" CornerRadius="{TemplateBinding CornerRadius}"
+              BorderBrush="{StaticResource FiligreeHairlineBrush}" BorderThickness="1"
+              IsHitTestVisible="False" />
+
+      <Border x:Name="Veil" Margin="1" CornerRadius="{TemplateBinding CornerRadius}"
+              Background="Transparent" IsHitTestVisible="False" />
+
+      <ContentPresenter x:Name="Presenter"
+                        Content="{TemplateBinding Content}"
+                        ContentTemplate="{TemplateBinding ContentTemplate}"
+                        Foreground="{TemplateBinding Foreground}"
+                        Padding="{TemplateBinding Padding}"
+                        HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                        VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+
+      <Border x:Name="FocusHalo" Margin="-8" CornerRadius="{TemplateBinding CornerRadius}"
+              BorderThickness="3" BorderBrush="{StaticResource FiligreeFocusHaloBrush}"
+              Visibility="Collapsed" IsHitTestVisible="False" />
+      <Border x:Name="FocusRing" Margin="-4" CornerRadius="{TemplateBinding CornerRadius}"
+              BorderThickness="2" BorderBrush="{StaticResource FiligreeFocusBrush}"
+              Visibility="Collapsed" IsHitTestVisible="False" />
+
+      <VisualStateManager.VisualStateGroups>
+        <VisualStateGroup x:Name="CommonStates">
+          <VisualState x:Name="Normal">
+            <VisualState.Storyboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="TranslateY"
+                                 To="0" Duration="0:0:0.14">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+              </Storyboard>
+            </VisualState.Storyboard>
+            <VisualState.Setters>
+              <Setter Target="Veil.Background" Value="Transparent" />
+              <Setter Target="Glow.BorderBrush" Value="{StaticResource FiligreeGlowBrush}" />
+              <Setter Target="Hairline.Opacity" Value="1" />
+              <Setter Target="Hairline.BorderBrush" Value="{StaticResource FiligreeHairlineBrush}" />
+            </VisualState.Setters>
+          </VisualState>
+
+          <VisualState x:Name="PointerOver">
+            <VisualState.Storyboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="TranslateY"
+                                 To="-1" Duration="0:0:0.12">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+              </Storyboard>
+            </VisualState.Storyboard>
+            <VisualState.Setters>
+              <Setter Target="Veil.Background" Value="{StaticResource FiligreeVeilHoverBrush}" />
+              <Setter Target="Glow.BorderBrush" Value="{StaticResource FiligreeGlowHoverBrush}" />
+              <Setter Target="Hairline.Opacity" Value="1" />
+              <Setter Target="Hairline.BorderBrush" Value="{StaticResource FiligreeHairlineHoverBrush}" />
+            </VisualState.Setters>
+          </VisualState>
+
+          <VisualState x:Name="Pressed">
+            <VisualState.Storyboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="TranslateY"
+                                 To="0" Duration="0:0:0.08">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+              </Storyboard>
+            </VisualState.Storyboard>
+            <VisualState.Setters>
+              <Setter Target="Veil.Background" Value="{StaticResource FiligreeVeilPressedBrush}" />
+              <Setter Target="Glow.BorderBrush" Value="{StaticResource FiligreeGlowBrush}" />
+              <Setter Target="Hairline.Opacity" Value="1" />
+              <Setter Target="Hairline.BorderBrush" Value="{StaticResource FiligreeHairlinePressedBrush}" />
+            </VisualState.Setters>
+          </VisualState>
+
+          <VisualState x:Name="Disabled">
+            <VisualState.Setters>
+              <Setter Target="Fill.Background" Value="{StaticResource FiligreeDisabledSurfaceBrush}" />
+              <Setter Target="Presenter.Foreground" Value="{StaticResource FiligreeDisabledTextBrush}" />
+              <Setter Target="Veil.Background" Value="Transparent" />
+              <Setter Target="Glow.Opacity" Value="0" />
+              <Setter Target="Hairline.Opacity" Value="1" />
+              <Setter Target="Hairline.BorderBrush" Value="{StaticResource FiligreeDisabledHairlineBrush}" />
+            </VisualState.Setters>
+          </VisualState>
+        </VisualStateGroup>
+
+        <VisualStateGroup x:Name="FocusStates">
+          <VisualState x:Name="Unfocused">
+            <VisualState.Setters>
+              <Setter Target="FocusRing.Visibility" Value="Collapsed" />
+              <Setter Target="FocusHalo.Visibility" Value="Collapsed" />
+            </VisualState.Setters>
+          </VisualState>
+          <VisualState x:Name="Focused">
+            <VisualState.Setters>
+              <Setter Target="FocusRing.Visibility" Value="Visible" />
+              <Setter Target="FocusHalo.Visibility" Value="Visible" />
+            </VisualState.Setters>
+          </VisualState>
+        </VisualStateGroup>
+      </VisualStateManager.VisualStateGroups>
+    </Grid>
+  </ControlTemplate>
+
+  <!-- ============================================================ icon template -->
+
+  <ControlTemplate x:Key="FiligreeIcon" TargetType="Button">
+    <Grid x:Name="Root" Background="Transparent" RenderTransformOrigin="0.5,0.5">
+      <Grid.RenderTransform>
+        <CompositeTransform x:Name="Motion" />
+      </Grid.RenderTransform>
+
+      <Border x:Name="Glow" Margin="-1" CornerRadius="{TemplateBinding CornerRadius}"
+              Background="Transparent" BorderThickness="1" BorderBrush="Transparent"
+              IsHitTestVisible="False" />
+
+      <Border x:Name="Hover" Background="Transparent" BorderBrush="Transparent"
+              BorderThickness="1" CornerRadius="{TemplateBinding CornerRadius}" />
+      <Border x:Name="Hairline" Margin="1" CornerRadius="{TemplateBinding CornerRadius}"
+              BorderBrush="{StaticResource FiligreeHairlineBrush}" BorderThickness="1"
+              Opacity="0" IsHitTestVisible="False" />
+
+      <ContentPresenter x:Name="Presenter"
+                        Content="{TemplateBinding Content}"
+                        ContentTemplate="{TemplateBinding ContentTemplate}"
+                        Foreground="{TemplateBinding Foreground}"
+                        HorizontalContentAlignment="Center"
+                        VerticalContentAlignment="Center" />
+
+      <Border x:Name="FocusHalo" Margin="-7" CornerRadius="{TemplateBinding CornerRadius}"
+              BorderThickness="3" BorderBrush="{StaticResource FiligreeFocusHaloBrush}"
+              Visibility="Collapsed" IsHitTestVisible="False" />
+      <Border x:Name="FocusRing" Margin="-3" CornerRadius="{TemplateBinding CornerRadius}"
+              BorderThickness="2" BorderBrush="{StaticResource FiligreeFocusBrush}"
+              Visibility="Collapsed" IsHitTestVisible="False" />
+
+      <VisualStateManager.VisualStateGroups>
+        <VisualStateGroup x:Name="CommonStates">
+          <VisualState x:Name="Normal">
+            <VisualState.Storyboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="TranslateY"
+                                 To="0" Duration="0:0:0.14">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+              </Storyboard>
+            </VisualState.Storyboard>
+            <VisualState.Setters>
+              <Setter Target="Hover.Background" Value="Transparent" />
+              <Setter Target="Hover.BorderBrush" Value="Transparent" />
+              <Setter Target="Glow.Opacity" Value="0" />
+              <Setter Target="Hairline.Opacity" Value="0" />
+            </VisualState.Setters>
+          </VisualState>
+
+          <VisualState x:Name="PointerOver">
+            <VisualState.Storyboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="TranslateY"
+                                 To="-1" Duration="0:0:0.12">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+              </Storyboard>
+            </VisualState.Storyboard>
+            <VisualState.Setters>
+              <Setter Target="Hover.Background" Value="{StaticResource FiligreeIconSurfaceBrush}" />
+              <Setter Target="Hover.BorderBrush" Value="Transparent" />
+              <Setter Target="Glow.Opacity" Value="1" />
+              <Setter Target="Glow.BorderBrush" Value="{StaticResource FiligreeGlowHoverBrush}" />
+              <Setter Target="Hairline.Opacity" Value="1" />
+              <Setter Target="Hairline.BorderBrush" Value="{StaticResource FiligreeHairlineHoverBrush}" />
+            </VisualState.Setters>
+          </VisualState>
+
+          <VisualState x:Name="Pressed">
+            <VisualState.Storyboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="TranslateY"
+                                 To="0" Duration="0:0:0.08">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+              </Storyboard>
+            </VisualState.Storyboard>
+            <VisualState.Setters>
+              <Setter Target="Hover.Background" Value="{StaticResource FiligreeIconPressedBrush}" />
+              <Setter Target="Hover.BorderBrush" Value="Transparent" />
+              <Setter Target="Glow.Opacity" Value="0" />
+              <Setter Target="Hairline.Opacity" Value="1" />
+              <Setter Target="Hairline.BorderBrush" Value="{StaticResource FiligreeHairlinePressedBrush}" />
+            </VisualState.Setters>
+          </VisualState>
+
+          <VisualState x:Name="Disabled">
+            <VisualState.Setters>
+              <Setter Target="Hover.Background" Value="Transparent" />
+              <Setter Target="Hover.BorderBrush" Value="Transparent" />
+              <Setter Target="Presenter.Foreground" Value="{StaticResource FiligreeDisabledTextBrush}" />
+              <Setter Target="Glow.Opacity" Value="0" />
+              <Setter Target="Hairline.Opacity" Value="0" />
+            </VisualState.Setters>
+          </VisualState>
+        </VisualStateGroup>
+
+        <VisualStateGroup x:Name="FocusStates">
+          <VisualState x:Name="Unfocused">
+            <VisualState.Setters>
+              <Setter Target="FocusRing.Visibility" Value="Collapsed" />
+              <Setter Target="FocusHalo.Visibility" Value="Collapsed" />
+            </VisualState.Setters>
+          </VisualState>
+          <VisualState x:Name="Focused">
+            <VisualState.Setters>
+              <Setter Target="FocusRing.Visibility" Value="Visible" />
+              <Setter Target="FocusHalo.Visibility" Value="Visible" />
+            </VisualState.Setters>
+          </VisualState>
+        </VisualStateGroup>
+      </VisualStateManager.VisualStateGroups>
+    </Grid>
+  </ControlTemplate>
+
+  <!-- ============================================================ styles -->
+
+  <Style x:Key="MediaHubPrimaryButton" TargetType="Button">
+    <Setter Property="Background" Value="{StaticResource FiligreePrimaryBrush}" />
+    <Setter Property="Foreground" Value="#FF04110E" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="20,9" />
+    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="UseSystemFocusVisuals" Value="False" />
+    <Setter Property="controls:ButtonChrome.TrackFocus" Value="True" />
+    <Setter Property="Template" Value="{StaticResource FiligreeSurface}" />
+  </Style>
+
+  <Style x:Key="MediaHubGhostButton" TargetType="Button">
+    <Setter Property="Background" Value="{StaticResource FiligreeSurfaceBrush}" />
+    <Setter Property="Foreground" Value="#FFF2F5F8" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="18,8" />
+    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="UseSystemFocusVisuals" Value="False" />
+    <Setter Property="controls:ButtonChrome.TrackFocus" Value="True" />
+    <Setter Property="Template" Value="{StaticResource FiligreeSurface}" />
+  </Style>
+
+  <Style x:Key="MediaHubDangerButton" TargetType="Button">
+    <Setter Property="Background" Value="{StaticResource FiligreeDangerBrush}" />
+    <Setter Property="Foreground" Value="#FFFFF3F1" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="18,8" />
+    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="UseSystemFocusVisuals" Value="False" />
+    <Setter Property="controls:ButtonChrome.TrackFocus" Value="True" />
+    <Setter Property="Template" Value="{StaticResource FiligreeSurface}" />
+  </Style>
+
+  <Style x:Key="MediaHubIconButton" TargetType="Button">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#FFF2F5F8" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Width" Value="36" />
+    <Setter Property="Height" Value="36" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="UseSystemFocusVisuals" Value="False" />
+    <Setter Property="controls:ButtonChrome.TrackFocus" Value="True" />
+    <Setter Property="Template" Value="{StaticResource FiligreeIcon}" />
+  </Style>
+
+  <Style x:Key="MediaHubCardButton" TargetType="Button">
+    <Setter Property="Background" Value="{StaticResource FiligreeSurfaceBrush}" />
+    <Setter Property="Foreground" Value="#FFF2F5F8" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="14" />
+    <Setter Property="Padding" Value="18,15" />
+    <Setter Property="MinWidth" Value="176" />
+    <Setter Property="MinHeight" Value="76" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="UseSystemFocusVisuals" Value="False" />
+    <Setter Property="controls:ButtonChrome.TrackFocus" Value="True" />
+    <Setter Property="Template" Value="{StaticResource FiligreeSurface}" />
+  </Style>
+
+</ResourceDictionary>

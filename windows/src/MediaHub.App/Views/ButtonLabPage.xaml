@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="MediaHub.App.Views.ButtonLabPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:MediaHub.App.Controls"
+    Background="{StaticResource MediaHubGlassPageBrush}">
+
+  <!--
+    Diagnostic surface, only reachable through MEDIAHUB_BUTTON_LAB=1. It exists so the five button
+    roles can be photographed in every visual state without moving the pointer or taking the
+    foreground: each cell forces a template state instead of waiting for real input.
+  -->
+  <ScrollViewer Padding="36,24,36,32" HorizontalContentAlignment="Stretch"
+                HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Spacing="16" MaxWidth="1500">
+
+      <StackPanel Spacing="4">
+        <TextBlock x:Name="SchemeName" Style="{StaticResource MediaHubPageTitle}" />
+        <TextBlock x:Name="SchemeNote" Style="{StaticResource MediaHubCaption}"
+                   TextWrapping="Wrap" MaxWidth="1000" />
+      </StackPanel>
+
+      <Grid ColumnSpacing="12" Margin="0,6,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="112" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <TextBlock Grid.Column="0" Text="组件" Style="{StaticResource MediaHubCaption}" />
+        <TextBlock Grid.Column="1" Text="常态" HorizontalAlignment="Center" Style="{StaticResource MediaHubCaption}" />
+        <TextBlock Grid.Column="2" Text="悬停" HorizontalAlignment="Center" Style="{StaticResource MediaHubCaption}" />
+        <TextBlock Grid.Column="3" Text="按下" HorizontalAlignment="Center" Style="{StaticResource MediaHubCaption}" />
+        <TextBlock Grid.Column="4" Text="键盘焦点" HorizontalAlignment="Center" Style="{StaticResource MediaHubCaption}" />
+        <TextBlock Grid.Column="5" Text="禁用" HorizontalAlignment="Center" Style="{StaticResource MediaHubCaption}" />
+      </Grid>
+
+      <Grid ColumnSpacing="12" RowSpacing="14">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="112" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Primary -->
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="主按钮" VerticalAlignment="Center"
+                   Style="{StaticResource MediaHubBody}" />
+        <Button Grid.Row="0" Grid.Column="1" Content="立即播放" Tag="Normal"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubPrimaryButton}" AutomationProperties.Name="主按钮-常态" />
+        <Button Grid.Row="0" Grid.Column="2" Content="立即播放" Tag="PointerOver"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubPrimaryButton}" AutomationProperties.Name="主按钮-悬停" />
+        <Button Grid.Row="0" Grid.Column="3" Content="立即播放" Tag="Pressed"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubPrimaryButton}" AutomationProperties.Name="主按钮-按下" />
+        <Button Grid.Row="0" Grid.Column="4" Content="立即播放" Tag="Focused"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubPrimaryButton}" AutomationProperties.Name="主按钮-焦点" />
+        <Button Grid.Row="0" Grid.Column="5" Content="立即播放" IsEnabled="False"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubPrimaryButton}" AutomationProperties.Name="主按钮-禁用" />
+
+        <!-- Secondary -->
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="次按钮" VerticalAlignment="Center"
+                   Style="{StaticResource MediaHubBody}" />
+        <Button Grid.Row="1" Grid.Column="1" Content="加入列表" Tag="Normal"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubGhostButton}" AutomationProperties.Name="次按钮-常态" />
+        <Button Grid.Row="1" Grid.Column="2" Content="加入列表" Tag="PointerOver"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubGhostButton}" AutomationProperties.Name="次按钮-悬停" />
+        <Button Grid.Row="1" Grid.Column="3" Content="加入列表" Tag="Pressed"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubGhostButton}" AutomationProperties.Name="次按钮-按下" />
+        <Button Grid.Row="1" Grid.Column="4" Content="加入列表" Tag="Focused"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubGhostButton}" AutomationProperties.Name="次按钮-焦点" />
+        <Button Grid.Row="1" Grid.Column="5" Content="加入列表" IsEnabled="False"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubGhostButton}" AutomationProperties.Name="次按钮-禁用" />
+
+        <!-- Icon -->
+        <TextBlock Grid.Row="2" Grid.Column="0" Text="图标按钮" VerticalAlignment="Center"
+                   Style="{StaticResource MediaHubBody}" />
+        <Button Grid.Row="2" Grid.Column="1" Tag="Normal"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubIconButton}" AutomationProperties.Name="图标按钮-常态">
+          <FontIcon Glyph="&#xE768;" FontSize="16" />
+        </Button>
+        <Button Grid.Row="2" Grid.Column="2" Tag="PointerOver"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubIconButton}" AutomationProperties.Name="图标按钮-悬停">
+          <FontIcon Glyph="&#xE768;" FontSize="16" />
+        </Button>
+        <Button Grid.Row="2" Grid.Column="3" Tag="Pressed"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubIconButton}" AutomationProperties.Name="图标按钮-按下">
+          <FontIcon Glyph="&#xE768;" FontSize="16" />
+        </Button>
+        <Button Grid.Row="2" Grid.Column="4" Tag="Focused"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubIconButton}" AutomationProperties.Name="图标按钮-焦点">
+          <FontIcon Glyph="&#xE768;" FontSize="16" />
+        </Button>
+        <Button Grid.Row="2" Grid.Column="5" IsEnabled="False"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubIconButton}" AutomationProperties.Name="图标按钮-禁用">
+          <FontIcon Glyph="&#xE768;" FontSize="16" />
+        </Button>
+
+        <!-- Danger -->
+        <TextBlock Grid.Row="3" Grid.Column="0" Text="危险操作" VerticalAlignment="Center"
+                   Style="{StaticResource MediaHubBody}" />
+        <Button Grid.Row="3" Grid.Column="1" Content="删除" Tag="Normal"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubDangerButton}" AutomationProperties.Name="危险操作-常态" />
+        <Button Grid.Row="3" Grid.Column="2" Content="删除" Tag="PointerOver"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubDangerButton}" AutomationProperties.Name="危险操作-悬停" />
+        <Button Grid.Row="3" Grid.Column="3" Content="删除" Tag="Pressed"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubDangerButton}" AutomationProperties.Name="危险操作-按下" />
+        <Button Grid.Row="3" Grid.Column="4" Content="删除" Tag="Focused"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubDangerButton}" AutomationProperties.Name="危险操作-焦点" />
+        <Button Grid.Row="3" Grid.Column="5" Content="删除" IsEnabled="False"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubDangerButton}" AutomationProperties.Name="危险操作-禁用" />
+
+        <!-- Card -->
+        <TextBlock Grid.Row="4" Grid.Column="0" Text="大卡片" VerticalAlignment="Center"
+                   Style="{StaticResource MediaHubBody}" />
+        <Button Grid.Row="4" Grid.Column="1" Tag="Normal"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubCardButton}" AutomationProperties.Name="大卡片-常态">
+          <StackPanel Orientation="Horizontal" Spacing="12">
+            <FontIcon Glyph="&#xE8B7;" FontSize="18" Foreground="{StaticResource MediaHubAccentBrush}" />
+            <StackPanel Spacing="1" VerticalAlignment="Center">
+              <TextBlock Text="媒体库" FontSize="14" FontWeight="SemiBold" />
+              <TextBlock Text="全部片库" Style="{StaticResource MediaHubCaption}" />
+            </StackPanel>
+          </StackPanel>
+        </Button>
+        <Button Grid.Row="4" Grid.Column="2" Tag="PointerOver"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubCardButton}" AutomationProperties.Name="大卡片-悬停">
+          <StackPanel Orientation="Horizontal" Spacing="12">
+            <FontIcon Glyph="&#xE8B7;" FontSize="18" Foreground="{StaticResource MediaHubAccentBrush}" />
+            <StackPanel Spacing="1" VerticalAlignment="Center">
+              <TextBlock Text="媒体库" FontSize="14" FontWeight="SemiBold" />
+              <TextBlock Text="全部片库" Style="{StaticResource MediaHubCaption}" />
+            </StackPanel>
+          </StackPanel>
+        </Button>
+        <Button Grid.Row="4" Grid.Column="3" Tag="Pressed"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubCardButton}" AutomationProperties.Name="大卡片-按下">
+          <StackPanel Orientation="Horizontal" Spacing="12">
+            <FontIcon Glyph="&#xE8B7;" FontSize="18" Foreground="{StaticResource MediaHubAccentBrush}" />
+            <StackPanel Spacing="1" VerticalAlignment="Center">
+              <TextBlock Text="媒体库" FontSize="14" FontWeight="SemiBold" />
+              <TextBlock Text="全部片库" Style="{StaticResource MediaHubCaption}" />
+            </StackPanel>
+          </StackPanel>
+        </Button>
+        <Button Grid.Row="4" Grid.Column="4" Tag="Focused"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubCardButton}" AutomationProperties.Name="大卡片-焦点">
+          <StackPanel Orientation="Horizontal" Spacing="12">
+            <FontIcon Glyph="&#xE8B7;" FontSize="18" Foreground="{StaticResource MediaHubAccentBrush}" />
+            <StackPanel Spacing="1" VerticalAlignment="Center">
+              <TextBlock Text="媒体库" FontSize="14" FontWeight="SemiBold" />
+              <TextBlock Text="全部片库" Style="{StaticResource MediaHubCaption}" />
+            </StackPanel>
+          </StackPanel>
+        </Button>
+        <Button Grid.Row="4" Grid.Column="5" IsEnabled="False"
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubCardButton}" AutomationProperties.Name="大卡片-禁用">
+          <StackPanel Orientation="Horizontal" Spacing="12">
+            <FontIcon Glyph="&#xE8B7;" FontSize="18" Foreground="{StaticResource MediaHubAccentBrush}" />
+            <StackPanel Spacing="1" VerticalAlignment="Center">
+              <TextBlock Text="媒体库" FontSize="14" FontWeight="SemiBold" />
+              <TextBlock Text="全部片库" Style="{StaticResource MediaHubCaption}" />
+            </StackPanel>
+          </StackPanel>
+        </Button>
+      </Grid>
+
+      <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" Margin="0,6,0,0"
+                 Text="状态由模板的 VisualState 直接驱动，用于后台截图；没有注入指针、没有激活窗口。" />
+    </StackPanel>
+  </ScrollViewer>
+</Page>

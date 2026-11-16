@@ -1,0 +1,451 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:MediaHub.App.Controls">
+
+  <!--
+    方案 A · 棱镜（Prism Rim）
+
+    What it borrows: Liquid Glass reads as glass because the rim bends light, not because the middle
+    is blurry. The load-bearing cues are a bright inner rim that is strongest along the top arc, a
+    second, softer rim just inside it, and a contact shadow along the bottom edge. Apple only ships
+    that as a live material; here it is rebuilt from gradients so it costs one composite per layer
+    and still works on Windows 10.
+
+    Deliberately absent: backdrop blur (per-element blur re-samples the tree and is what makes the
+    poster grid drop frames) and grain (rejected by the reviewer). Depth is light only.
+  -->
+
+  <LinearGradientBrush x:Key="PrismSurfaceBrush" StartPoint="0.5,0" EndPoint="0.5,1">
+    <GradientStop Color="#FF232C38" Offset="0" />
+    <GradientStop Color="#FF141920" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="PrismPrimaryBrush" StartPoint="0.5,0" EndPoint="0.5,1">
+    <GradientStop Color="#FF4AD6C5" Offset="0" />
+    <GradientStop Color="#FF2E9A8E" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="PrismDangerBrush" StartPoint="0.5,0" EndPoint="0.5,1">
+    <GradientStop Color="#FFBE443C" Offset="0" />
+    <GradientStop Color="#FF96302A" Offset="1" />
+  </LinearGradientBrush>
+
+  <!-- The outer edge closes the silhouette: bright where the top arc faces the light, dark where the
+       bottom arc turns away. 1px only - a thicker ring reads as a plastic bezel. -->
+  <LinearGradientBrush x:Key="PrismEdgeBrush" StartPoint="0.5,0" EndPoint="0.5,1">
+    <GradientStop Color="#8CFFFFFF" Offset="0" />
+    <GradientStop Color="#2EFFFFFF" Offset="0.3" />
+    <GradientStop Color="#00000000" Offset="0.62" />
+    <GradientStop Color="#4D000000" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="PrismEdgeHoverBrush" StartPoint="0.5,0" EndPoint="0.5,1">
+    <GradientStop Color="#B3FFFFFF" Offset="0" />
+    <GradientStop Color="#3DFFFFFF" Offset="0.3" />
+    <GradientStop Color="#00000000" Offset="0.62" />
+    <GradientStop Color="#4D000000" Offset="1" />
+  </LinearGradientBrush>
+
+  <!-- The second rim, one pixel inside the first. Two edges at slightly different brightness is the
+       lensing cue; one edge is just a border. -->
+  <LinearGradientBrush x:Key="PrismInnerEdgeBrush" StartPoint="0.5,0" EndPoint="0.5,1">
+    <GradientStop Color="#66FFFFFF" Offset="0" />
+    <GradientStop Color="#1FFFFFFF" Offset="0.38" />
+    <GradientStop Color="#00000000" Offset="0.64" />
+    <GradientStop Color="#26000000" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="PrismInnerEdgeHoverBrush" StartPoint="0.5,0" EndPoint="0.5,1">
+    <GradientStop Color="#99FFFFFF" Offset="0" />
+    <GradientStop Color="#33FFFFFF" Offset="0.38" />
+    <GradientStop Color="#00000000" Offset="0.64" />
+    <GradientStop Color="#26000000" Offset="1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="PrismInnerEdgePressedBrush" StartPoint="0.5,0" EndPoint="0.5,1">
+    <GradientStop Color="#40FFFFFF" Offset="0" />
+    <GradientStop Color="#14FFFFFF" Offset="0.38" />
+    <GradientStop Color="#00000000" Offset="0.64" />
+    <GradientStop Color="#40000000" Offset="1" />
+  </LinearGradientBrush>
+
+  <!-- A soft dome of light centred on the top edge. A flat 1px line says "rectangle"; a dome that
+       falls off before the bottom of the pill says "curved surface". -->
+  <RadialGradientBrush x:Key="PrismDomeBrush"
+                       Center="0.5,0" GradientOrigin="0.5,0"
+                       RadiusX="0.92" RadiusY="0.95"
+                       MappingMode="RelativeToBoundingBox">
+    <GradientStop Color="#3DFFFFFF" Offset="0" />
+    <GradientStop Color="#1FFFFFFF" Offset="0.36" />
+    <GradientStop Color="#0AFFFFFF" Offset="0.62" />
+    <GradientStop Color="#00FFFFFF" Offset="0.88" />
+  </RadialGradientBrush>
+
+  <!-- State veils. A light veil on hover and a dark one on press work on every fill in the system,
+       including the accent and danger plates, so one template covers all five button roles. -->
+  <SolidColorBrush x:Key="PrismVeilHoverBrush" Color="#14FFFFFF" />
+  <SolidColorBrush x:Key="PrismVeilPressedBrush" Color="#29000000" />
+
+  <SolidColorBrush x:Key="PrismIconSurfaceBrush" Color="#FF232C38" />
+  <SolidColorBrush x:Key="PrismIconPressedBrush" Color="#FF161C23" />
+
+  <!-- A disabled control is a neutral plate, not a dimmed accent: opacity alone drops the label
+       below 3:1, and a disabled label still has to be readable enough to say why it is disabled. -->
+  <SolidColorBrush x:Key="PrismDisabledSurfaceBrush" Color="#FF1E252E" />
+  <SolidColorBrush x:Key="PrismDisabledEdgeBrush" Color="#FF333B46" />
+  <SolidColorBrush x:Key="PrismDisabledTextBrush" Color="#FF7E8996" />
+
+  <SolidColorBrush x:Key="PrismFocusBrush" Color="#FF3FC9B8" />
+  <SolidColorBrush x:Key="PrismFocusHaloBrush" Color="#00000000" />
+  <SolidColorBrush x:Key="PrismGlowBrush" Color="#00000000" />
+
+  <!-- ============================================================ surface template -->
+
+  <ControlTemplate x:Key="PrismSurface" TargetType="Button">
+    <Grid x:Name="Root" Background="Transparent" RenderTransformOrigin="0.5,0.5">
+      <Grid.RenderTransform>
+        <CompositeTransform x:Name="Motion" />
+      </Grid.RenderTransform>
+
+      <Border x:Name="Glow" Margin="-1" CornerRadius="{TemplateBinding CornerRadius}"
+              Background="Transparent" BorderThickness="1"
+              BorderBrush="{StaticResource PrismGlowBrush}" IsHitTestVisible="False" />
+
+      <Border x:Name="Fill" Background="{TemplateBinding Background}"
+              BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="{TemplateBinding BorderThickness}"
+              CornerRadius="{TemplateBinding CornerRadius}" />
+
+      <Border x:Name="Dome" Margin="1" CornerRadius="{TemplateBinding CornerRadius}"
+              Background="{StaticResource PrismDomeBrush}" IsHitTestVisible="False" />
+
+      <Border x:Name="InnerEdge" Margin="1" CornerRadius="{TemplateBinding CornerRadius}"
+              BorderBrush="{StaticResource PrismInnerEdgeBrush}" BorderThickness="1"
+              IsHitTestVisible="False" />
+
+      <Border x:Name="Veil" Margin="1" CornerRadius="{TemplateBinding CornerRadius}"
+              Background="Transparent" IsHitTestVisible="False" />
+
+      <ContentPresenter x:Name="Presenter"
+                        Content="{TemplateBinding Content}"
+                        ContentTemplate="{TemplateBinding ContentTemplate}"
+                        Foreground="{TemplateBinding Foreground}"
+                        Padding="{TemplateBinding Padding}"
+                        HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                        VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+
+      <Border x:Name="FocusHalo" Margin="-7" CornerRadius="{TemplateBinding CornerRadius}"
+              BorderThickness="3" BorderBrush="{StaticResource PrismFocusHaloBrush}"
+              Visibility="Collapsed" IsHitTestVisible="False" />
+      <Border x:Name="FocusRing" Margin="-4" CornerRadius="{TemplateBinding CornerRadius}"
+              BorderThickness="2" BorderBrush="{StaticResource PrismFocusBrush}"
+              Visibility="Collapsed" IsHitTestVisible="False" />
+
+      <VisualStateManager.VisualStateGroups>
+        <VisualStateGroup x:Name="CommonStates">
+          <VisualState x:Name="Normal">
+            <VisualState.Storyboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="ScaleX"
+                                 To="1" Duration="0:0:0.14">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="ScaleY"
+                                 To="1" Duration="0:0:0.14">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+              </Storyboard>
+            </VisualState.Storyboard>
+            <VisualState.Setters>
+              <Setter Target="Veil.Background" Value="Transparent" />
+              <Setter Target="Dome.Opacity" Value="1" />
+              <Setter Target="InnerEdge.Opacity" Value="1" />
+              <Setter Target="InnerEdge.BorderBrush" Value="{StaticResource PrismInnerEdgeBrush}" />
+            </VisualState.Setters>
+          </VisualState>
+
+          <VisualState x:Name="PointerOver">
+            <VisualState.Storyboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="ScaleX"
+                                 To="1.02" Duration="0:0:0.12">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="ScaleY"
+                                 To="1.02" Duration="0:0:0.12">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+              </Storyboard>
+            </VisualState.Storyboard>
+            <VisualState.Setters>
+              <Setter Target="Veil.Background" Value="{StaticResource PrismVeilHoverBrush}" />
+              <Setter Target="Dome.Opacity" Value="1" />
+              <Setter Target="InnerEdge.Opacity" Value="1" />
+              <Setter Target="InnerEdge.BorderBrush" Value="{StaticResource PrismInnerEdgeHoverBrush}" />
+            </VisualState.Setters>
+          </VisualState>
+
+          <VisualState x:Name="Pressed">
+            <VisualState.Storyboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="ScaleX"
+                                 To="0.97" Duration="0:0:0.08">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="ScaleY"
+                                 To="0.97" Duration="0:0:0.08">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+              </Storyboard>
+            </VisualState.Storyboard>
+            <VisualState.Setters>
+              <Setter Target="Veil.Background" Value="{StaticResource PrismVeilPressedBrush}" />
+              <Setter Target="Dome.Opacity" Value="0.45" />
+              <Setter Target="InnerEdge.Opacity" Value="1" />
+              <Setter Target="InnerEdge.BorderBrush" Value="{StaticResource PrismInnerEdgePressedBrush}" />
+            </VisualState.Setters>
+          </VisualState>
+
+          <VisualState x:Name="Disabled">
+            <VisualState.Setters>
+              <Setter Target="Fill.Background" Value="{StaticResource PrismDisabledSurfaceBrush}" />
+              <Setter Target="Fill.BorderBrush" Value="{StaticResource PrismDisabledEdgeBrush}" />
+              <Setter Target="Presenter.Foreground" Value="{StaticResource PrismDisabledTextBrush}" />
+              <Setter Target="Veil.Background" Value="Transparent" />
+              <Setter Target="Dome.Opacity" Value="0" />
+              <Setter Target="InnerEdge.Opacity" Value="0" />
+            </VisualState.Setters>
+          </VisualState>
+        </VisualStateGroup>
+
+        <VisualStateGroup x:Name="FocusStates">
+          <VisualState x:Name="Unfocused">
+            <VisualState.Setters>
+              <Setter Target="FocusRing.Visibility" Value="Collapsed" />
+              <Setter Target="FocusHalo.Visibility" Value="Collapsed" />
+            </VisualState.Setters>
+          </VisualState>
+          <VisualState x:Name="Focused">
+            <VisualState.Setters>
+              <Setter Target="FocusRing.Visibility" Value="Visible" />
+              <Setter Target="FocusHalo.Visibility" Value="Visible" />
+            </VisualState.Setters>
+          </VisualState>
+        </VisualStateGroup>
+      </VisualStateManager.VisualStateGroups>
+    </Grid>
+  </ControlTemplate>
+
+  <!-- ============================================================ icon template -->
+
+  <ControlTemplate x:Key="PrismIcon" TargetType="Button">
+    <Grid x:Name="Root" Background="Transparent" RenderTransformOrigin="0.5,0.5">
+      <Grid.RenderTransform>
+        <CompositeTransform x:Name="Motion" />
+      </Grid.RenderTransform>
+
+      <Border x:Name="Glow" Margin="-1" CornerRadius="{TemplateBinding CornerRadius}"
+              Background="Transparent" BorderThickness="1"
+              BorderBrush="{StaticResource PrismGlowBrush}" IsHitTestVisible="False" />
+
+      <Border x:Name="Hover" Background="Transparent" BorderBrush="Transparent"
+              BorderThickness="1" CornerRadius="{TemplateBinding CornerRadius}" />
+      <Border x:Name="Dome" Margin="1" CornerRadius="{TemplateBinding CornerRadius}"
+              Background="{StaticResource PrismDomeBrush}" Opacity="0" IsHitTestVisible="False" />
+      <Border x:Name="InnerEdge" Margin="1" CornerRadius="{TemplateBinding CornerRadius}"
+              BorderBrush="{StaticResource PrismInnerEdgeHoverBrush}" BorderThickness="1"
+              Opacity="0" IsHitTestVisible="False" />
+
+      <ContentPresenter x:Name="Presenter"
+                        Content="{TemplateBinding Content}"
+                        ContentTemplate="{TemplateBinding ContentTemplate}"
+                        Foreground="{TemplateBinding Foreground}"
+                        HorizontalContentAlignment="Center"
+                        VerticalContentAlignment="Center" />
+
+      <Border x:Name="FocusHalo" Margin="-6" CornerRadius="{TemplateBinding CornerRadius}"
+              BorderThickness="3" BorderBrush="{StaticResource PrismFocusHaloBrush}"
+              Visibility="Collapsed" IsHitTestVisible="False" />
+      <Border x:Name="FocusRing" Margin="-3" CornerRadius="{TemplateBinding CornerRadius}"
+              BorderThickness="2" BorderBrush="{StaticResource PrismFocusBrush}"
+              Visibility="Collapsed" IsHitTestVisible="False" />
+
+      <VisualStateManager.VisualStateGroups>
+        <VisualStateGroup x:Name="CommonStates">
+          <VisualState x:Name="Normal">
+            <VisualState.Storyboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="ScaleX"
+                                 To="1" Duration="0:0:0.14">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="ScaleY"
+                                 To="1" Duration="0:0:0.14">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+              </Storyboard>
+            </VisualState.Storyboard>
+            <VisualState.Setters>
+              <Setter Target="Hover.Background" Value="Transparent" />
+              <Setter Target="Hover.BorderBrush" Value="Transparent" />
+              <Setter Target="Dome.Opacity" Value="0" />
+              <Setter Target="InnerEdge.Opacity" Value="0" />
+            </VisualState.Setters>
+          </VisualState>
+
+          <VisualState x:Name="PointerOver">
+            <VisualState.Storyboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="ScaleX"
+                                 To="1.06" Duration="0:0:0.12">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="ScaleY"
+                                 To="1.06" Duration="0:0:0.12">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+              </Storyboard>
+            </VisualState.Storyboard>
+            <VisualState.Setters>
+              <Setter Target="Hover.Background" Value="{StaticResource PrismIconSurfaceBrush}" />
+              <Setter Target="Hover.BorderBrush" Value="{StaticResource PrismEdgeBrush}" />
+              <Setter Target="Dome.Opacity" Value="1" />
+              <Setter Target="InnerEdge.Opacity" Value="1" />
+            </VisualState.Setters>
+          </VisualState>
+
+          <VisualState x:Name="Pressed">
+            <VisualState.Storyboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="ScaleX"
+                                 To="0.94" Duration="0:0:0.08">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+                <DoubleAnimation Storyboard.TargetName="Motion" Storyboard.TargetProperty="ScaleY"
+                                 To="0.94" Duration="0:0:0.08">
+                  <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+              </Storyboard>
+            </VisualState.Storyboard>
+            <VisualState.Setters>
+              <Setter Target="Hover.Background" Value="{StaticResource PrismIconPressedBrush}" />
+              <Setter Target="Hover.BorderBrush" Value="{StaticResource PrismEdgeBrush}" />
+              <Setter Target="Dome.Opacity" Value="0.4" />
+              <Setter Target="InnerEdge.Opacity" Value="1" />
+            </VisualState.Setters>
+          </VisualState>
+
+          <VisualState x:Name="Disabled">
+            <VisualState.Setters>
+              <Setter Target="Hover.Background" Value="Transparent" />
+              <Setter Target="Hover.BorderBrush" Value="Transparent" />
+              <Setter Target="Presenter.Foreground" Value="{StaticResource PrismDisabledTextBrush}" />
+              <Setter Target="Dome.Opacity" Value="0" />
+              <Setter Target="InnerEdge.Opacity" Value="0" />
+            </VisualState.Setters>
+          </VisualState>
+        </VisualStateGroup>
+
+        <VisualStateGroup x:Name="FocusStates">
+          <VisualState x:Name="Unfocused">
+            <VisualState.Setters>
+              <Setter Target="FocusRing.Visibility" Value="Collapsed" />
+              <Setter Target="FocusHalo.Visibility" Value="Collapsed" />
+            </VisualState.Setters>
+          </VisualState>
+          <VisualState x:Name="Focused">
+            <VisualState.Setters>
+              <Setter Target="FocusRing.Visibility" Value="Visible" />
+              <Setter Target="FocusHalo.Visibility" Value="Visible" />
+            </VisualState.Setters>
+          </VisualState>
+        </VisualStateGroup>
+      </VisualStateManager.VisualStateGroups>
+    </Grid>
+  </ControlTemplate>
+
+  <!-- ============================================================ styles -->
+
+  <Style x:Key="MediaHubPrimaryButton" TargetType="Button">
+    <Setter Property="Background" Value="{StaticResource PrismPrimaryBrush}" />
+    <Setter Property="Foreground" Value="#FF04110E" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="20,9" />
+    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="UseSystemFocusVisuals" Value="False" />
+    <Setter Property="controls:ButtonChrome.TrackFocus" Value="True" />
+    <Setter Property="Template" Value="{StaticResource PrismSurface}" />
+  </Style>
+
+  <Style x:Key="MediaHubGhostButton" TargetType="Button">
+    <Setter Property="Background" Value="{StaticResource PrismSurfaceBrush}" />
+    <Setter Property="Foreground" Value="#FFF2F5F8" />
+    <Setter Property="BorderBrush" Value="{StaticResource PrismEdgeBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="18,8" />
+    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="UseSystemFocusVisuals" Value="False" />
+    <Setter Property="controls:ButtonChrome.TrackFocus" Value="True" />
+    <Setter Property="Template" Value="{StaticResource PrismSurface}" />
+  </Style>
+
+  <Style x:Key="MediaHubDangerButton" TargetType="Button">
+    <Setter Property="Background" Value="{StaticResource PrismDangerBrush}" />
+    <Setter Property="Foreground" Value="#FFFFF3F1" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="18,8" />
+    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="UseSystemFocusVisuals" Value="False" />
+    <Setter Property="controls:ButtonChrome.TrackFocus" Value="True" />
+    <Setter Property="Template" Value="{StaticResource PrismSurface}" />
+  </Style>
+
+  <Style x:Key="MediaHubIconButton" TargetType="Button">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#FFF2F5F8" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Width" Value="36" />
+    <Setter Property="Height" Value="36" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="UseSystemFocusVisuals" Value="False" />
+    <Setter Property="controls:ButtonChrome.TrackFocus" Value="True" />
+    <Setter Property="Template" Value="{StaticResource PrismIcon}" />
+  </Style>
+
+  <Style x:Key="MediaHubCardButton" TargetType="Button">
+    <Setter Property="Background" Value="{StaticResource PrismSurfaceBrush}" />
+    <Setter Property="Foreground" Value="#FFF2F5F8" />
+    <Setter Property="BorderBrush" Value="{StaticResource PrismEdgeBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="14" />
+    <Setter Property="Padding" Value="18,15" />
+    <Setter Property="MinWidth" Value="176" />
+    <Setter Property="MinHeight" Value="76" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="UseSystemFocusVisuals" Value="False" />
+    <Setter Property="controls:ButtonChrome.TrackFocus" Value="True" />
+    <Setter Property="Template" Value="{StaticResource PrismSurface}" />
+  </Style>
+
+</ResourceDictionary>
