@@ -30,8 +30,9 @@ launch, UIA pattern calls, PrintWindow capture) and are exercised by quiet-ui\ve
 input abort so a run can proceed on a machine that is in use. A run made with it is not acceptance
 evidence and is logged as such. The locked/session/sleep checks still apply.
 
-Exit codes: 0 = ran (or skipped because the idle window never opened), 1 = at least one suite failed,
-2 = stopped with combinations still pending (only if a pause could not resume).
+Exit codes: 0 = ran and every combination passed, 1 = at least one suite failed, 2 = stopped with
+combinations still pending (only if a pause could not resume), 3 = the idle gate never opened
+(SKIPPED-GATE: nothing was measured, so it is not a pass and must not be counted as one).
 
 .EXAMPLE
 pwsh -File windows/tools/acceptance/run-quiet.ps1 -Suites u1,u2 -Servers emby
@@ -421,7 +422,12 @@ if ($remaining.Count -gt 0 -and -not $gateTimedOut) {
     Add-Line ('INCOMPLETE remaining=' + (($remaining | ForEach-Object { $_.key }) -join ',') + ' paused=' + $pausedCount)
     exit 2
 }
-if ($gateTimedOut) { exit 0 }
+if ($gateTimedOut) {
+    # Timeout on the idle gate is the absence of a measurement, not a pass. Exit 3 (the harness
+    # blocked code the other gates already use) keeps it out of the "all green" bucket.
+    Add-Line ('RESULT: SKIPPED-GATE no continuous ' + [int]($MinIdleSeconds / 60) + '-minute quiet window; nothing was measured completed=' + $completed.Count + '/' + $combos.Count)
+    exit 3
+}
 if ($failedKeys.Count -gt 0) {
     Add-Line ('RESULT: FAILED ' + (($failedKeys | Sort-Object -Unique) -join ', '))
     exit 1

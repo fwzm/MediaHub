@@ -19,6 +19,9 @@ Steps (each one is a checkpoint entry, so a pause never redoes a passed step):
 The gate runs before each attempt (and again after a pause), exactly like run-quiet.ps1. Evidence
 goes to <OutRoot>: PNGs, an JSON record and a timestamped summary log.
 
+Exit codes: 0 = every step passed, 1 = at least one step failed, 3 = the idle gate never opened
+(SKIPPED-GATE: no step was measured; a gated room is not a green room).
+
 -DevOverrideIdleGate is for developing the harness on a machine that is in use. A run made with it
 is not acceptance evidence and the log says so. Locked/session/sleep checks still apply.
 
@@ -421,7 +424,13 @@ $failed = @($results.Keys | Where-Object { -not $results[$_].pass })
 $evidencePath = Join-Path $OutRoot 'evidence.json'
 $results | ConvertTo-Json -Depth 14 | Set-Content -Path $evidencePath -Encoding UTF8
 
-if ($gateTimedOut) { exit 0 }
+if ($gateTimedOut) {
+    # A timed-out gate means the machine was never idle long enough to run a step. That is not a
+    # result: reporting exit 0 makes a fully skipped round indistinguishable from a fully passing
+    # one in CI logs and in the transcript summary.
+    Add-Note ('RESULT: SKIPPED-GATE no continuous ' + [int]($MinIdleSeconds / 60) + '-minute quiet window; no step was measured completed=' + $completed.Count + '/' + $steps.Count + ' evidence=' + $evidencePath)
+    exit 3
+}
 if ($failed.Count -gt 0) {
     Add-Note ('RESULT: FAILED ' + ($failed -join ', ') + ' evidence=' + $evidencePath)
     exit 1

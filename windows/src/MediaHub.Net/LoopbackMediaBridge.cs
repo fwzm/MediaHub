@@ -618,6 +618,18 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
             return value;
         }
 
+        // The playlist is server-supplied, so every reference in it is attacker-controlled input.
+        // Relaying one puts this machine's network position behind it: a hostile server could name
+        // http://192.168.1.1/... or a loopback-only service and have the client fetch it with the
+        // source's policy applied. Same-host references are always fine; every other target must be
+        // publicly routable, see HlsTargetPolicy.
+        if (!HlsTargetPolicy.IsAllowed(absolute, _target.Url))
+        {
+            throw new InvalidDataException(
+                "HLS 播放列表引用了不可中继的地址（" + absolute.Scheme + "://" + absolute.Host
+                + "）：只允许片源同主机或公网地址，已拒绝");
+        }
+
         return _hlsBase + RegisterHlsTarget(absolute) + SafeExtension(absolute);
     }
 

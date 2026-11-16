@@ -143,6 +143,12 @@ internal static class MpvNative
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern int mpv_get_property(IntPtr ctx, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, int format, out double data);
 
+    // MPV_FORMAT_FLAG is a C int (4 bytes), not a C long. The out-long overload marshals eight bytes
+    // and mpv writes only the low four, so an uninitialised high half could make a false flag read as
+    // true. Flags therefore get their own overload with the right width.
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "mpv_get_property", ExactSpelling = true)]
+    internal static extern int mpv_get_property_flag(IntPtr ctx, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, int format, out int data);
+
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "mpv_get_property", ExactSpelling = true)]
     internal static extern int mpv_get_property_node(IntPtr ctx, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, int format, out MpvNode node);
 
@@ -205,7 +211,7 @@ internal static class MpvNative
 
     internal static bool? GetFlag(IntPtr ctx, string name)
     {
-        int rc = mpv_get_property(ctx, name, MPV_FORMAT_FLAG, out long v);
+        int rc = mpv_get_property_flag(ctx, name, MPV_FORMAT_FLAG, out int v);
         return rc >= 0 ? v != 0 : null;
     }
 

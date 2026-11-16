@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.RegularExpressions;
 
 namespace MediaHub.Net;
 
@@ -218,7 +219,8 @@ public static class NetworkPolicyHandlerFactory
             case ProxyMode.Explicit:
                 handler.UseProxy = true;
                 var proxy = new WebProxy(policy.ProxyUrl!);
-                foreach (string host in policy.BypassList) proxy.BypassList = policy.BypassList.ToArray();
+                string[] bypass = BuildBypassPatterns(policy.BypassList);
+                if (bypass.Length > 0) proxy.BypassList = bypass;
                 handler.Proxy = proxy;
                 break;
 
@@ -239,5 +241,30 @@ public static class NetworkPolicyHandlerFactory
             handler.SslOptions.RemoteCertificateValidationCallback = static (_, _, _, _) => true;
 
         return handler;
+    }
+
+    /// <summary>
+    /// Turns host suffixes into the regular expressions <see cref="WebProxy.BypassList"/> expects.
+    /// </summary>
+    /// <remarks>
+    /// A bypass entry is documented and entered as a host suffix, but WebProxy treats every entry as a
+    /// regular expression matched against the whole URI. Passing the raw entries had two defects: they
+    /// were unanchored, so "example.com" also matched "evil-example.com", and a literal "(" made every
+    /// request through the proxy throw. Each suffix is escaped and anchored here, an optional leading
+    /// "*." or "." means "this host and its subdomains", and an empty entry is dropped rather than
+    /// matched against everything.
+    /// </remarks>
+    internal static string[] BuildBypassPatterns(IReadOnlyList<string> entries)
+    {
+        if (entries is null || entries.Count == 0) return Array.Empty<string>();
+
+        var patterns = new List<string>(entries.Count);
+        foreach (string raw in entries)
+        {
+            string host = (raw ?? "").Trim().Trim('*', '.');
+            if (host.Length == 0) continue;
+            patterns.Add("^https?://(?:[^/]+\\.)?" + Regex.Escape(host) + "(?::\\d+)?(?:/|$)");
+        }
+        return patterns.ToArray();
     }
 }

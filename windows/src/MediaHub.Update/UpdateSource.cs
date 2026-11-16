@@ -5,7 +5,11 @@ public enum UpdateSourceKind
     /// <summary>A directory on this machine, or a file:// URI pointing at one.</summary>
     LocalDirectory,
 
-    /// <summary>An http(s) static directory served as plain files.</summary>
+    /// <summary>
+    /// An https static directory served as plain files. Plain http is accepted only for a loopback
+    /// mirror: the manifest and the package come from the same place, so cleartext to a remote host
+    /// would let whoever is on the path rewrite both.
+    /// </summary>
     Http,
 }
 
@@ -28,6 +32,28 @@ public sealed class UpdateSource
 
     /// <summary>Directory path or absolute http(s) URL with a trailing slash.</summary>
     public string Root { get; }
+
+    /// <summary>True when this is an HTTP source on the loopback interface (a local mirror served for tests).</summary>
+    public bool IsLoopback => Kind == UpdateSourceKind.Http && IsLoopbackHost(new Uri(Root).Host);
+
+    /// <summary>
+    /// True when the package must prove its publisher before it may be installed.
+    /// </summary>
+    /// <remarks>
+    /// A remote manifest carries the package's hash, but both arrive from the same server: the digest
+    /// proves transport integrity, not authorship. Loopback and local-directory sources are under the
+    /// operator's own control and are exempt.
+    /// </remarks>
+    public bool RequiresSignedPackage => Kind == UpdateSourceKind.Http && !IsLoopback;
+
+    /// <summary>True for the loopback host names a local mirror is reachable under.</summary>
+    public static bool IsLoopbackHost(string? host)
+    {
+        if (string.IsNullOrWhiteSpace(host)) return false;
+        string value = host.Trim().Trim('[', ']');
+        return value.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+               || (System.Net.IPAddress.TryParse(value, out var address) && System.Net.IPAddress.IsLoopback(address));
+    }
 
     public string ManifestLocation => Kind == UpdateSourceKind.Http
         ? new Uri(new Uri(Root), ManifestFileName).AbsoluteUri
@@ -65,6 +91,12 @@ public sealed class UpdateSource
         if (Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
             (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
         {
+            if (uri.Scheme == Uri.UriSchemeHttp && !IsLoopbackHost(uri.Host))
+            {
+                error = "an update source must be https or a local directory; plain http is accepted only for loopback mirrors";
+                return false;
+            }
+
             string root = uri.AbsoluteUri;
             if (!root.EndsWith("/", StringComparison.Ordinal)) root += "/";
             source = new UpdateSource(UpdateSourceKind.Http, root);

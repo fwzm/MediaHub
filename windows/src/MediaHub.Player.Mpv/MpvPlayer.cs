@@ -826,6 +826,13 @@ public sealed class MpvPlayer : IPlaybackEngine, ITrackController, IAudioDeviceC
         Volatile.Write(ref _durationSeconds, 0);
         _observedTrackCount = -1;
 
+        // The appended entry was opened while the previous item was playing, with whatever header set
+        // LoadAsync applied. Re-apply it so a long playlist cannot inherit an expired credential, and so
+        // an empty set is explicitly cleared rather than silently kept. Best effort: an entry mpv has
+        // already prefetched may have its connection open. (The app currently passes no headers at all:
+        // credentials stay inside the loopback bridge.)
+        SetProperty("http-header-fields", MpvHeaders.Format(settings.Headers));
+
         SetProperty("volume", settings.Volume.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
         SetProperty("speed", _speed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
         SetProperty("sub-visibility", settings.SubtitleVisible ? "yes" : "no");

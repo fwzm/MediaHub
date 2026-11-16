@@ -440,8 +440,23 @@ public sealed partial class SourcesPage : Page
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
 
-        await App.Services.Servers.DeleteAsync(entry.ServerId);
-        ShowStatus(InfoBarSeverity.Success, "已删除", entry.DisplayName + " 及其凭据已从本机移除。");
+        BusyRing.IsActive = true;
+        try
+        {
+            await App.Services.Servers.DeleteAsync(entry.ServerId);
+            ShowStatus(InfoBarSeverity.Success, "已删除", entry.DisplayName + " 及其凭据已从本机移除。");
+        }
+        catch (Exception ex)
+        {
+            // An exception escaping an async void handler terminates the process. This is the only
+            // destructive action on the page, so it reports its own failure instead of taking the app
+            // down with it, and the busy indicator is always reset.
+            ShowStatus(InfoBarSeverity.Error, "删除失败", ex.Message);
+        }
+        finally
+        {
+            BusyRing.IsActive = false;
+        }
     }
 
     private async void OnRefreshClick(object sender, RoutedEventArgs e)

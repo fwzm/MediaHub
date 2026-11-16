@@ -125,6 +125,12 @@ public sealed class UpdateClient : IDisposable
                     $"update package failed SHA-256 verification: expected {manifest.Sha256}, got {actual}");
             }
 
+            // The digest proves the download was not corrupted in transit; it cannot prove who built
+            // the package, because the manifest carrying it came from the same server. A remote source
+            // therefore has to hand over a payload Windows itself trusts, checked here — on the same
+            // path that would otherwise pass the zip to the file-swapping agent.
+            if (source.RequiresSignedPackage) UpdatePackageVerifier.VerifySignedPackage(partPath);
+
             File.Move(partPath, finalPath, overwrite: true);
             return finalPath;
         }
