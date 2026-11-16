@@ -8,7 +8,7 @@ Owner: engine-dev (W5-H, W5-F). Nothing here is wired into the product yet.
 ## lgpl/ — LGPL-compatible libmpv
 
 Result: **windows/engine/lgpl/dist/libmpv-2.dll**, 3,327,274 bytes,
-sha256 20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a — a real build with
+sha256 a3f901d6b5bae54a4b5b87cd9d9d973fd3af079aa70a61851560c30e74722a68 — a real build with
 -Dgpl=false against an FFmpeg 8.1.1 built --disable-gpl --disable-version3 --disable-nonfree.
 It plays H.264 with d3d11va hardware decoding through gpu-next/libplacebo on a d3d11 context, with
 libass subtitles and WASAPI audio: MpvProbe reports PASS.

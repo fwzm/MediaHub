@@ -43,7 +43,7 @@ pwsh -NoProfile -File windows/tools/license-report.ps1 -OutDir windows/artifacts
 pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/artifacts/license-report/license-report.json
 ```
 
-57 项检查分三十六组：
+58 项检查分三十七组：
 
 | 组 | 检查 | 失败含义 |
 | --- | --- | --- |
@@ -83,6 +83,7 @@ pwsh -NoProfile -File windows/tools/check-licence-surface.ps1 -JsonPath windows/
 | W8 续播记录计数（W63 起） | `resume-record-count-claims` | `windows/docs/W8-HEADLESS-RESUME.md` §12 的 `resume-record-count-claims` 块与两份源码分叉：§4 的 16 条探针断言 id 与 `MediaHub.ResumeProbe/Program.cs` 里的 `Check("<id>")` 不再双向相等、驱动的固定/每服/服务器数/总数四个数字与 `headless-resume.ps1` 的调用点算不出来、或 §7 退出码表仍写着过期的驱动条数 |
 | W8 续播记录常量（W64 起） | `resume-record-constant-claims` | `windows/docs/W8-HEADLESS-RESUME.md` §13 的 `resume-record-constant-claims` 块与源码/算积分叉：`Program.cs` 的 `MinimumRuntimeTicks = <n> * TicksPerSecond`、`SettleMilliseconds` 默认值、`const int MaximumDepth` 三项与块里声明不再相等，600 s × ticks/s 的算积复现不出块里的四个分组数字，或正文仍写着旧的「固定等待 750 ms」「深度上限 3」「≥300 s」 |
 | W12「判不了」登记表（W65 起） | `doc-audit-untested-claims` | `windows/docs/W12-DOC-AUDIT.md` §7 的 `doc-audit-untested` 块与 §4 表格分叉：某条登记的行从 §4 表格里消失、行的 `status` 与声明不一致、有人把某一行的结论就地改成 `EXECUTED_PASS` / `DEVICE_VERIFIED`（本表按定义只收「不跑就判不了」的项）、词表被改宽，或 `cite=` 的工作流区间不再含被测命令 |
+| 许可面记录互引的章节号（W66 起） | `licence-record-section-claims` | `windows/docs/licensing/SBOM.md` 末尾一节的 `licence-record-section-claims` 块与六份许可面记录分叉：被引记录停用或改名了某个章节号、该章节正文里不再含声明的锚点短语、引用方不再写「文件 §编号」，或任何一份记录又写出块里没登记的「文件 §编号」——章节号是承诺，改序改号不会让任何既有检查变红 |
 
 
 `lgpl-licence-gaps` **W38 起应当 PASS**：`component-licences.txt` 已补齐 33 行（此前少 5 个包，是收集脚本从没问过 bzip2/expat/gettext-runtime/pcre2、并在 `pacman -Si` 查不到 `libwinpthread-git` 时静默跳过所致）。它现在只在真有行缺声明时给 WARN，`-FailOnLicenceGaps` 只用来复现 W38 之前的旧行为；「表是否被改坏」由 `lgpl-licence-table`（§3.6）按行核对。
@@ -201,7 +202,7 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 | 检查 | 判据 | 失败含义 |
 | --- | --- | --- |
-| `packaging-claims` | ① `PACKAGING.md` 必须含 §0 的六行且值逐字相符：`signing-status: blocked-no-certificate`、`packaging-form: portable-zip-self-contained`、`msix: not-implemented`、`installer: not-implemented`、`clean-machine-install: not-run`、`release-status: blocked-gpl-obligation`；② App csproj 必须仍有 `<WindowsPackageType>None</WindowsPackageType>`、`<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>`、`<SelfContained>true</SelfContained>`、`<RuntimeIdentifier>win-x64</RuntimeIdentifier>`；③ `.github/workflows` 下不得出现签名令牌（`signtool` / `AzureSignTool` / `CertificateThumbprint` / `signingCertificate` / `-p:SignPackage` / `codesign`）；④ `windows/` 下（排除 `obj/`、`bin/`、`artifacts/` 构建输出）不得有 `*.appxmanifest` 或 `*.wixproj`/`*.wxs`/`*.iss`/`*.nsi`/`*.msix`；⑤ `windows-ci.yml` 必须仍含 `-o ./artifacts/portable` 与 `mediahub-windows-` | 发布形态/签名/安装状态与文档不符——「证书还没签、MSIX 还没做」这类如实状态被悄悄改写，或反过来签名做完了文档没更新 |
+| `packaging-claims` | ① `PACKAGING.md` 必须含 §0 的六行且值逐字相符：`signing-status: blocked-no-certificate`、`packaging-form: portable-zip-self-contained`、`msix: not-implemented`、`installer: not-implemented`、`clean-machine-install: not-run`、`release-status: gpl-obligation-resolved-signing-still-blocked`；② App csproj 必须仍有 `<WindowsPackageType>None</WindowsPackageType>`、`<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>`、`<SelfContained>true</SelfContained>`、`<RuntimeIdentifier>win-x64</RuntimeIdentifier>`；③ `.github/workflows` 下不得出现签名令牌（`signtool` / `AzureSignTool` / `CertificateThumbprint` / `signingCertificate` / `-p:SignPackage` / `codesign`）；④ `windows/` 下（排除 `obj/`、`bin/`、`artifacts/` 构建输出）不得有 `*.appxmanifest` 或 `*.wixproj`/`*.wxs`/`*.iss`/`*.nsi`/`*.msix`；⑤ `windows-ci.yml` 必须仍含 `-o ./artifacts/portable` 与 `mediahub-windows-` | 发布形态/签名/安装状态与文档不符——「证书还没签、MSIX 还没做」这类如实状态被悄悄改写，或反过来签名做完了文档没更新 |
 
 `## 0` 七行由人工与 §1 一起维护；文档缺失时该项 SKIP（退出码仍 0）。负向对照见 §4.7。
 
@@ -253,7 +254,7 @@ W39 给该文档加了 §0 机器可读状态块（W40 起为七行），并新�
 
 | 判据 | 内容 | 失败含义 |
 | --- | --- | --- |
-| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 57） | 加了检查，但文档或 README 的数量没跟着改 |
+| A 数量漂移 | 本文件与 `README.md` 声明的数量都必须等于脚本第 13 段 `$declaredCheckIds` 的长度（当前 58） | 加了检查，但文档或 README 的数量没跟着改 |
 | B 文档缺口 | `$declaredCheckIds` 里的每个 id 都必须出现在本文件正文中 | 加了检查，本文件的表里没有它的行 |
 | C 未申报发射 | 本次运行 `$checks` 里出现的每个 id 都必须在清单里 | 加了检查但忘了登记清单（脚本与自证必须是同一个真源） |
 
@@ -819,7 +820,35 @@ W53 追加的混排判据来自一次真实损坏：本文件 §4.15 的围栏�
 刻意**不**做的两件事：不检查文档语义（那是各条 claims 检查的活），也不把 `residue-allow` 当白名单滥用——标记只允许出现在「本行就是要讨论这个记号」的行上，检查不做进一步判断，因为那需要读语义。
 
 本次还顺手修掉两个真实损坏（都是这条检查当场找出来的，不是假设）：`windows/docs/CAPABILITY-MAP.md` 的 8 处围栏/行内代码被写成占位符形态（整份文档一行真围栏都不剩），以及 `LICENSE-SURFACE-CHECK.md` 第 72 行由 W51 造成的表格行粘连（README 第 364 行同时留了一份整段重复的旧副本，已按新副本收敛为一段）。
-**2026-11-04（W61）追加两条判据：标题行粘连与标题行逐字重复。** 起因是一次真实损坏被 W60 的提交顺手带进来：本文件 `## 5. 这个工具**不**覆盖什么` 那一段标题被写成「自己接自己」（两段标题粘在同一行），渲染出来是一个标题加一长串正文，而第 46 项当时只看表格行粘连与占位符，一路绿。全仓普查（97 份 markdown）共命中三处同型损坏：本文件 `### 3.19 日期快照审计（W51，2026-10-31）` 重复、本文件 `## 5.` 那处粘连、以及仓库根 `TASKS.md` 的 `## V0.1 —— MVP（下一步）` 粘连。两条新判据都在围栏外、都可用 `residue-allow` 豁免：
+**2026-11-04（W61）追加两条判据：标题行粘连与标题行逐字重复。** 起因是一次真实损坏被 W60 的提交顺手带进来：本文件 `### 4.34 实测（2026-11-04，W66，本机）
+
+- 顺序：先写契约块（`SBOM.md` 里第 10 节的 20 条 `citer=`/`cite=`/`anchor=`），再加第 58 项。此轮**不改任何章节号** —— 20 条引用当时全部可解析，本轮是预防性契约，不是修 drift。
+
+- 首跑（守卫先落、两份文档未同步，`D:/mh-verify/w66-first.log`）：`checks=58 failed=1`，唯一红是 `check-inventory`（`LICENSE-SURFACE-CHECK.md claims 57 … declares 58`、`README.md claims 57 … declares 58`、`LICENSE-SURFACE-CHECK.md never names licence-record-section-claims`），**本项自身 PASS**：`every cross-record section number still resolves: 20 declared citation(s) over 6 record(s) …`。
+
+- 同步文档后又红过两次，都是**本项抓到自己新写的散文**：§3.32 与组表里写出了「`SBOM.md` 第 7.1 节 / 第 10 节」这样的字面引用（文件名紧贴章节号）却没登记（E 判据生效，报 `the record LICENSE-SURFACE-CHECK.md still cites SBOM.md 第 10 节 but the block does not declare it`）。改法是把这两处示例改成不带文件名的写法（「§7.1 的 flavour 表」「末尾一节」）。
+
+- 正向（`D:/mh-verify/w66-positive3.log`、`w66-positive4.log`）：`checks=58 failed=0 warnings=0 skipped=0` / `RESULT: PASS`。
+
+- 负向对照（副本树 `D:/mh-verify/w66-nc/`，未改仓库文件；副本经 `-LicenceSectionDocPath ../../mh-verify/w66-nc/NCn/SBOM.md` 传入）：
+
+| 用例 | 注入 | 结果 |
+| --- | --- | --- |
+| NC0 | 未改动的副本 | `checks=58 failed=0`（基线干净） |
+| NC1 | 一条条目的 `anchor=` 改成正文里不存在的说法 | 1 红：`section §0 of PACKAGING.md no longer contains the anchor phrase this block declares` |
+| NC2 | 一条 `cite=PACKAGING.md§0` 改成 `§99` | 1 红（本项 4 条问题）：`PACKAGING.md no longer has a section §99`、三个引用方都不再写 `PACKAGING.md` 第 99 节 |
+| NC3 | 删掉一条条目、`licence-section-count` 不动 | 1 红：`the block declares 20 citation(s) but lists 19` + 若干 `still cites … but the block does not declare it` |
+| NC4 | 往 `PACKAGING.md` 副本追加一句 `See REPRODUCIBLE-BUILD.md` 第 9 节 …（不登记） | 1 红：`the record PACKAGING.md still cites REPRODUCIBLE-BUILD.md 第 9 节 but the block does not declare it` |
+| NC5 | 删掉整块 BEGIN/END 标记 | 1 红：`the SBOM record no longer carries the licence-record-section-claims block`（缺失分支自己发 FAIL） |
+| NC6 | 引用方副本里把所有 `PACKAGING.md` 改成 `PACKAGING-DOC.md` | 1 红（本项 2 条问题）：`no longer writes the citation PACKAGING.md §0 / §1` |
+| NC7 | `-LicenceSectionDocPath` 指不存在的文件 | `checks=58 failed=0 warnings=0 skipped=1`、退出码 0（SKIP 通道） |
+
+- **NC6 抓出守卫自身缺陷（正向看不见）**：D 判据最初把章节号直接拼进正则，`§1` 会前缀命中 `§10` / `§1.x` —— 把引用方的 `PACKAGING.md §1` 整个删掉，判据仍能找到「`§1`」的开头，于是保持 PASS。修法是给章节号加边界。第一次修成 `(?![0-9.])` 立刻假红：`PACKAGING.md` 第 106 行写的是 `[SBOM.md](SBOM.md)` 第 4.2 节（句号收尾），句号被当成「还有小数位」。最终写成 `(?![0-9])(?!\.[0-9])` —— 挡住 `§10` 与 `§4.2` 的前缀，放过句末标点。这条修正后 NC6 才真红、正向仍全绿。
+
+- 守卫补丁前快照 `D:/mh-verify/w66-guard-pre.ps1`（222,379 B），补丁后 **229,917 B**，检查 57 → **58**；每次补丁后都用 `[System.Management.Automation.Language.Parser]::ParseFile` 自检（打印 `PARSE-OK`）。新增参数 `-LicenceSectionDocPath`。
+
+
+## 5. 这个工具**不**覆盖什么` 那一段标题被写成「自己接自己」（两段标题粘在同一行），渲染出来是一个标题加一长串正文，而第 46 项当时只看表格行粘连与占位符，一路绿。全仓普查（97 份 markdown）共命中三处同型损坏：本文件 `### 3.19 日期快照审计（W51，2026-10-31）` 重复、本文件 `## 5.` 那处粘连、以及仓库根 `TASKS.md` 的 `## V0.1 —— MVP（下一步）` 粘连。两条新判据都在围栏外、都可用 `residue-allow` 豁免：
 
 | 判据（W61 追加） | 失败含义 |
 | --- | --- |
@@ -1331,6 +1360,25 @@ PASS 文案会报出「多少条指针 / 多少个文件 / 每条区间仍含锚
 - 守卫补丁前快照 `D:/mh-verify/w64-guard-pre.ps1`（sha256 `89067655…`，206,128 B），补丁后 **212,962 B**（含上面那处正则修正），检查总数 **55 → 56**；落盘后先用 `[System.Management.Automation.Language.Parser]::ParseFile` 自检（`PARSE-OK`）再跑守卫。
 
 - 口径：本项只核**仓库内能当场重算的东西**。服务端策略（Jellyfin `MinResumePct=5` / `MinResumeDurationSeconds=300`、Emby 行为实测的 2%）来自运行中的服务器，仍由 §5 的实测记录与探针断言承担；`resume-fixture-seconds` 是夹具属性，记在块里只为让算术有唯一来源。
+
+
+### 3.32 许可面记录互引的章节号契约（W66，2026-11-04）
+
+许可面这六份记录（`LICENCE-DECISION.md` / `PACKAGING.md` / `REPRODUCIBLE-BUILD.md` / `SBOM.md` / `VULKAN-NECESSITY.md` / `W5-LGPL-BUILD.md`）互相引用时写的是**章节号**：§7.1 的 flavour 表、§8 的构建记录、§5.1 的组件表。章节号是承诺 —— 把某一节改名、合并或调序，所有指向它的引用会静默指向另一段话，而既有检查（钉内容、钉字节、钉行号）全部照旧通过。
+
+第 58 项把这条承诺钉成契约块（写在 `SBOM.md` 的末尾一节），判据五条：
+
+| 判据 | 内容 | 失败含义 |
+| --- | --- | --- |
+| A 块自指 | `licence-section-owner` 必须点名本项；`licence-section-count` 等于 `- citer=` 条目数（≥10）；同一 (引用方, 目标, 章节) 不得声明两次 | 块被删、键被改名、数量与条目不符 |
+| B 目标章节仍在 | 被引记录存在，且仍有编号为该章节的小节标题（`## N.` / `### N.N`） | 章节被改名、合并或删除 —— 引用成为悬空指针 |
+| C 锚点在区间内 | 该小节正文（到下一个编号标题为止）仍含条目声明的锚点短语 | 章节号还在，但正文已被换掉 —— 引用指对了编号、指错了内容 |
+| D 引用方仍写着它 | 引用方记录里仍能匹配到「目标文件名 + 至多 6 个字符 + §章节号」 | 引用方删掉了这条引用，块却没跟着删 |
+| E 没有未登记的引用 | 扫描六份记录全部文本（块本身剔除），任何「`文件名.md` §编号」形式的跨记录引用都必须已登记 | 新增引用不登记 —— 覆盖性判据，防止块变成只保护旧条目的死名单 |
+
+范围口径：只认**同一目录内**的 `.md` 记录、只认紧跟文件名（中间至多 6 个字符）的 `§编号` 写法；`LGPL-COMPLIANCE.md`、`W13-LGPL-ENGINE-PROBE.md` 等 `windows/docs/` 下的记录不在本项范围（它们与许可面目录之间的引用由第 52 项 `cross-doc-pointer-claims` 的行号契约覆盖）。新增参数 `-LicenceSectionDocPath`（默认 `windows/docs/licensing/SBOM.md`，经 `Resolve-RepoPath`）。
+
+PASS 文案会报出「多少条已声明引用 / 覆盖多少份记录 / 每节仍含锚点 / 没有未登记引用」，FAIL 文案末句固定为「没人重读的章节号就是一条悄悄改指别处的引用」。负向对照见 §4.34。
 
 
 ### 4.33 实测（2026-11-04，W65，本机）

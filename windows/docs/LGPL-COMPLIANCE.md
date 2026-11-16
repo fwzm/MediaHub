@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | 文件 | `windows/native/libmpv/libmpv-2.dll` | `windows/engine/lgpl/dist/libmpv-2.dll` |
 | 大小 | 120,989,696 B | 3,327,274 B |
-| sha256 | `6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9` | `20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a` |
+| sha256 | `6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9` | `a3f901d6b5bae54a4b5b87cd9d9d973fd3af079aa70a61851560c30e74722a68` |
 | 版本 | v0.41.0-1154-gec38361c5（内嵌 FFmpeg N-127521-g2ec8998c3） | 同源，`-Dgpl=false` 重建；引擎自报版本串为 `v0.41.0-UNKNOWN`（见 W5-LGPL-BUILD.md:247-249） |
 | 许可 | **GPL-3.0-or-later**（`gpl` 在 enabled-features 中） | LGPL-2.1-or-later 组合（`gpl` 不在 features 中） |
 | 证据 | `windows/THIRD-PARTY-NOTICES.md:16-41`、`windows/tools/fetch-libmpv.ps1:15-17` | `windows/docs/licensing/W5-LGPL-BUILD.md:16-22`、`windows/engine/lgpl/component-licences.txt` |

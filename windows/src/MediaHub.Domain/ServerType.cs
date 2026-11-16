@@ -10,6 +10,12 @@ public enum ServerType
     WebDav,
     Local,
     Smb,
+
+    /// <summary>A plain http(s) media file or m3u playlist. No server API, no account, no session.</summary>
+    Http,
+
+    /// <summary>Microsoft OneDrive, browsed through Microsoft Graph after an OAuth2 sign-in.</summary>
+    OneDrive,
 }
 
 /// <summary>Unified media item kind. Mirrors Android <c>com.mediahub.model.MediaType</c>.</summary>

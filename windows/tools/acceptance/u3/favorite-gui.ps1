@@ -6,7 +6,9 @@
 #   3) 「重启后仍显示已收藏」必须来自服务器回读，不是本地缓存——因此重启前后都直接查服务器。
 param(
   [ValidateSet('emby','jellyfin')][string]$Server = 'emby',
-  [string]$Exe = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.exe'
+  [string]$Exe = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.exe',
+  # 只跑 P0 前置（复位 + 来源播种）并回读 settings，用于验证 P0.6 的“只保留一条”修复。
+  [switch]$PreflightOnly
 )
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Continue'
@@ -30,9 +32,22 @@ if ($Server -eq 'emby') {
 }
 
 $checks = New-Object System.Collections.Generic.List[object]
+function Get-StepFile {
+  if (-not $script:stepFile) {
+    $dir = if ($env:MH_STEP_DIR) { $env:MH_STEP_DIR } else { $ev }
+    $script:stepFile = Join-Path $dir ('steps-' + $Server + '-u3.jsonl')
+  }
+  return $script:stepFile
+}
 function Check([string]$name, [bool]$pass, [string]$detail) {
   $checks.Add([pscustomobject]@{ name = $name; pass = $pass; detail = $detail })
+  Write-MhStepRecord -Combo ($Server + '/u3') -Name $name -Status $(if ($pass) { 'PASS' } else { 'FAIL' }) -Detail $detail -StepFile (Get-StepFile)
   Write-Host (('[{0}] {1} :: {2}' -f $(if ($pass) { 'PASS' } else { 'FAIL' }), $name, $detail))
+}
+# 需要真实前台（坐标点击 / 系统文件选择器 / 注入键鼠）的步骤：静默跑法下不执行、不判 FAIL。
+function Check-NeedsForeground([string]$name, [string]$detail) {
+  Write-MhStepRecord -Combo ($Server + '/u3') -Name $name -Status 'NEEDS-FOREGROUND' -Detail $detail -StepFile (Get-StepFile)
+  Write-Host (('[NEEDS-FOREGROUND] {0} :: {1}' -f $name, $detail))
 }
 
 # ---------------------------------------------------------------- 服务器 API
@@ -202,9 +217,12 @@ function Get-FavEmptyVisible {
   # 首跑只查 favorites.empty，拿到 emptyVisible=False 的假阴性（截图里空态文案明明在屏幕上）。
   $e = Find-MhAppElement -AutomationId 'favorites.empty' -IncludeOffscreen
   if ($e) { return (-not $e.Current.IsOffscreen) }
-  $t = Find-MhAppElement -Name '还没有收藏的内容。' -IncludeOffscreen
-  if (-not $t) { return $false }
-  return (-not $t.Current.IsOffscreen)
+  # 产品文案没有句号（FavoritesPage.xaml: StateTitle="还没有收藏的内容"），旧断言多写了一个「。」。
+  foreach ($needle in @('还没有收藏的内容', '条目就会出现在这里')) {
+    $t = Find-MhAppElement -Name $needle -IncludeOffscreen
+    if ($t) { return (-not $t.Current.IsOffscreen) }
+  }
+  return $false
 }
 function Dump-Tree([string]$name) {
   # 失败时能区分「条目按预期消失」与「整页没加载」：一行一个元素，含 ControlType/AutomationId/Name/offscreen。
@@ -238,7 +256,7 @@ Check 'P0.3 官方 API 复位后回读为未收藏' (-not $fav0) ('isFavorite=' 
 
 Stop-MhAppForced | Out-Null
 Start-Sleep -Milliseconds 800
-$kept = Keep-OnlyServer ($Server + ':*')
+$kept = Keep-OnlyServer ($Server + ':' + $serverId)
 & $seed $Server $base $user $pass $serverId $script:token $script:uid 2>&1 | ForEach-Object { Write-Host ('  seed: ' + $_) }
 $after = Get-Content $settings -Raw | ConvertFrom-Json
 $entry = @($after.Servers | Where-Object { $_.ServerId -eq ($Server + ':' + $serverId) })
@@ -246,14 +264,26 @@ Check 'P0.4 来源写入客户端配置' ($entry.Count -eq 1) ('keptBefore=' + $
 Stop-MhAppForced | Out-Null
 Start-Sleep -Milliseconds 800
 
+if ($PreflightOnly) {
+  $pf = Get-Content $settings -Raw | ConvertFrom-Json
+  $pfServers = @($pf.Servers)
+  Write-Host ('PREFLIGHT settings=' + $settings + ' servers=' + $pfServers.Count + ' ids=' + (($pfServers | ForEach-Object { $_.ServerId }) -join ','))
+  $pfPass = @($checks | Where-Object { $_.pass }).Count
+  $pfFail = @($checks | Where-Object { -not $_.pass }).Count
+  $checks | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $ev 'checks.json') -Encoding UTF8
+  Write-Host ('RESULT: ' + $pfPass + ' passed, ' + $pfFail + ' failed')
+  exit $(if ($pfFail -gt 0) { 1 } else { 0 })
+}
+
 # ---------------------------------------------------------------- P1 首次收藏
 Write-Host ''
 Write-Host '=== P1 详情页收藏（UI 触发 → 服务器回读） ==='
 $app = Start-MhApp -Exe $exe -ResetTrace -TimeoutSec 60
 Start-Sleep -Seconds 3
 $hwnd = Get-MhWindowHandle
-if ($hwnd) { Set-MhForeground -Hwnd $hwnd | Out-Null }
-Check 'P1.0 客户端启动且窗口在前台' (($null -ne $app) -and ($null -ne $hwnd)) ('pid=' + $app.pid)
+$uiaRoot = if ($hwnd) { Get-MhWindow } else { $null }
+$winInfo = if ($hwnd) { Get-MhWindowInfo } else { $null }
+Check 'P1.0 客户端启动且窗口可被 UIA 访问（静默运行：不抢前台、可后台驱动）' ([bool](($null -ne $app) -and ($null -ne $hwnd) -and ($null -ne $uiaRoot))) ('pid=' + $(if ($app) { $app.pid } else { 'n/a' }) + ' hwnd=' + $hwnd + ' visible=' + $(if ($winInfo) { $winInfo.visible } else { 'n/a' }) + ' foreground=' + $(if ($winInfo) { $winInfo.isForeground } else { 'n/a' }) + ' quiet=' + $env:MH_QUIET_UI)
 
 $open = Open-ItemDetail
 Check ('P1.1 媒体库 → ' + $libName + ' → ' + $itemName + ' 详情页可达') ($open -eq 'OK') $open
@@ -312,7 +342,8 @@ Check 'P2.0 客户端进程已退出' (-not (Get-Process MediaHub -ErrorAction S
 $app2 = Start-MhApp -Exe $exe -ResetTrace -TimeoutSec 60
 Start-Sleep -Seconds 3
 $hwnd2 = Get-MhWindowHandle
-if ($hwnd2) { Set-MhForeground -Hwnd $hwnd2 | Out-Null }
+$uiaRoot2 = if ($hwnd2) { Get-MhWindow } else { $null }
+Check 'P2.0R 重启后的窗口仍可被 UIA 访问（静默运行）' ([bool](($null -ne $app2) -and ($null -ne $hwnd2) -and ($null -ne $uiaRoot2))) ('pid=' + $(if ($app2) { $app2.pid } else { 'n/a' }) + ' hwnd=' + $hwnd2)
 $open2 = Open-ItemDetail
 Check 'P2.1 重启后仍能到达详情页' ($open2 -eq 'OK') $open2
 $name2 = Wait-FavoriteState $true 35

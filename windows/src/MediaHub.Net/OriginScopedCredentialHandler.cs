@@ -99,7 +99,7 @@ public sealed class OriginScopedCredentialHandler : DelegatingHandler
             ? origin
             : current;
 
-        bool sameOrigin = string.Equals(UrlRedactor.OriginOf(chainOrigin), UrlRedactor.OriginOf(target), StringComparison.OrdinalIgnoreCase);
+        bool sameOrigin = IsSameCredentialScope(chainOrigin, target);
 
         var next = new HttpRequestMessage(request.Method, target)
         {
@@ -137,6 +137,34 @@ public sealed class OriginScopedCredentialHandler : DelegatingHandler
 
         response.Dispose();
         return await FollowAsync(next, hop + 1, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// True when a redirect stays inside the party the credentials were issued for.
+    /// </summary>
+    /// <remarks>
+    /// Scheme, host and port must match — with one deliberate exception: <c>http</c> to <c>https</c> on
+    /// the same host, when both sides are on their scheme's default port. That is a transport upgrade to
+    /// the same server, not a different party, and refusing it breaks a very common deployment: a
+    /// reverse proxy (Cloudflare in front of Emby, for one) answers every plain-HTTP API call with
+    /// <c>301</c> to HTTPS. Treating that hop as cross-origin dropped the identity header, so the
+    /// retried <c>AuthenticateByName</c> POST reached the server without <c>X-Emby-Authorization</c> and
+    /// came back as <c>400</c> — a login failure with no visible cause. Credentials cannot leak to a
+    /// third party here: the host name does not change, and the TLS certificate still has to match it.
+    /// A scheme change that keeps a non-default port is <i>not</i> covered: <c>http://host:5000</c> and
+    /// <c>https://host:5000</c> can be two different services behind a port forward, so that hop stays
+    /// cross-origin and loses the credentials.
+    /// </remarks>
+    public static bool IsSameCredentialScope(Uri from, Uri to)
+    {
+        if (string.Equals(UrlRedactor.OriginOf(from), UrlRedactor.OriginOf(to), StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return string.Equals(from.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(to.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(from.Host, to.Host, StringComparison.OrdinalIgnoreCase)
+               && from.IsDefaultPort
+               && to.IsDefaultPort;
     }
 
     /// <summary>

@@ -55,6 +55,7 @@ internal static class MediaBrowserMapper
     public static MediaItem MapItem(string serverId, JsonElement item)
     {
         string id = GetString(item, "Id") ?? "";
+        var tech = ReadPrimaryTechnicalInfo(item);
         return new MediaItem
         {
             ServerId = serverId,
@@ -78,7 +79,79 @@ internal static class MediaBrowserMapper
             UserDataPlayed = GetBool(item, "UserData", "Played"),
             UserDataFavorite = GetBool(item, "UserData", "IsFavorite"),
             IsFolder = GetBool(item, "IsFolder") ?? false,
+            Width = tech.Width,
+            Height = tech.Height,
+            VideoCodec = tech.VideoCodec,
+            AudioCodec = tech.AudioCodec,
+            AudioChannels = tech.AudioChannels,
+            VideoRange = tech.VideoRange,
+            Container = tech.Container,
+            BitRate = tech.BitRate,
         };
+    }
+
+    /// <summary>Resolution and bitrate of one media source, for version ordering. Null when unknown.</summary>
+    public static (int? Height, long? BitRate) ReadSourceQuality(JsonElement source)
+    {
+        int? height = GetInt(source, "Height");
+        long? bitRate = GetLong(source, "BitRate");
+        JsonElement? streams = Navigate(source, ["MediaStreams"]);
+        if (streams is { ValueKind: JsonValueKind.Array } array)
+        {
+            foreach (JsonElement stream in array.EnumerateArray())
+            {
+                if (!string.Equals(GetString(stream, "Type"), "Video", StringComparison.OrdinalIgnoreCase)) continue;
+                height ??= GetInt(stream, "Height");
+                bitRate ??= GetLong(stream, "BitRate");
+            }
+        }
+        return (height, bitRate);
+    }
+
+    /// <summary>
+    /// Technical facts of the first source, when the response carried <c>MediaSources</c>. Used only
+    /// for the optional poster badges; an absent field stays null so the badge is simply not drawn.
+    /// </summary>
+    public static (int? Width, int? Height, string? VideoCodec, string? AudioCodec, int? AudioChannels,
+        string? VideoRange, string? Container, long? BitRate) ReadPrimaryTechnicalInfo(JsonElement item)
+    {
+        int? width = null, height = null, channels = null;
+        string? videoCodec = null, audioCodec = null, videoRange = null, container = null;
+        long? bitRate = null;
+
+        JsonElement? sources = Navigate(item, ["MediaSources"]);
+        bool hasSource = sources is { ValueKind: JsonValueKind.Array } sourceArray
+                         && sourceArray.GetArrayLength() > 0;
+        // Emby answers list queries with item-level MediaStreams and Container, and only the detail
+        // request carries MediaSources. Reading the item itself as a fallback keeps the poster badges
+        // populated for servers that never send a source array.
+        JsonElement source = hasSource ? ((JsonElement)sources!).EnumerateArray().First() : item;
+        container = GetString(source, "Container");
+        bitRate = GetLong(source, "BitRate");
+
+        JsonElement? streams = Navigate(source, ["MediaStreams"]);
+        if (streams is not { ValueKind: JsonValueKind.Array } streamArray) 
+            return (null, null, null, null, null, null, container, bitRate);
+
+        foreach (JsonElement stream in streamArray.EnumerateArray())
+        {
+            string? type = GetString(stream, "Type");
+            if (string.Equals(type, "Video", StringComparison.OrdinalIgnoreCase) && width is null)
+            {
+                width = GetInt(stream, "Width");
+                height = GetInt(stream, "Height");
+                videoCodec = GetString(stream, "Codec");
+                videoRange = GetString(stream, "VideoRange");
+                bitRate ??= GetLong(stream, "BitRate");
+            }
+            else if (string.Equals(type, "Audio", StringComparison.OrdinalIgnoreCase) && audioCodec is null)
+            {
+                audioCodec = GetString(stream, "Codec");
+                channels = GetInt(stream, "Channels");
+            }
+        }
+
+        return (width, height, videoCodec, audioCodec, channels, videoRange, container, bitRate);
     }
 
     public static MediaLibrary MapLibrary(JsonElement view) => new(
@@ -159,6 +232,92 @@ internal static class MediaBrowserMapper
     {
         if (!item.TryGetProperty("ImageTags", out var tags) || tags.ValueKind != JsonValueKind.Object) return null;
         return tags.TryGetProperty(imageType, out var tag) && tag.ValueKind == JsonValueKind.String ? tag.GetString() : null;
+    }
+
+    /// <summary>Every media source the server lists for an item, described for the version picker.</summary>
+    /// <remarks>
+    /// The order is the server's own, and the first entry is marked default because that is the one a
+    /// playback request without an explicit id resolves to. Nothing is synthesised when the response
+    /// omits a field: an unknown resolution stays unknown rather than being displayed as 0×0.
+    /// </remarks>
+    public static IReadOnlyList<MediaVersion> MapVersions(JsonElement item)
+    {
+        if (!item.TryGetProperty("MediaSources", out var sources) || sources.ValueKind != JsonValueKind.Array)
+            return Array.Empty<MediaVersion>();
+
+        var result = new List<MediaVersion>();
+        int index = 0;
+        foreach (JsonElement source in sources.EnumerateArray())
+        {
+            string? id = GetString(source, "Id");
+            if (string.IsNullOrEmpty(id)) continue;
+
+            JsonElement? video = null;
+            if (source.TryGetProperty("MediaStreams", out var streams) && streams.ValueKind == JsonValueKind.Array)
+            {
+                foreach (JsonElement stream in streams.EnumerateArray())
+                {
+                    if (GetString(stream, "Type") == "Video")
+                    {
+                        video = stream;
+                        break;
+                    }
+                }
+            }
+
+            int? width = video is { } v ? GetInt(v, "Width") : null;
+            int? height = video is { } vh ? GetInt(vh, "Height") : null;
+            string? codec = video is { } vc ? GetString(vc, "Codec") : null;
+            string? container = GetString(source, "Container");
+            bool directPlay = GetBool(source, "SupportsDirectPlay") ?? true;
+            bool directStream = GetBool(source, "SupportsDirectStream") ?? true;
+
+            result.Add(new MediaVersion
+            {
+                MediaSourceId = id!,
+                Label = VersionLabel(width, height, codec, container, directPlay, directStream),
+                Name = GetString(source, "Name"),
+                Container = container,
+                Width = width,
+                Height = height,
+                VideoCodec = codec,
+                BitRate = GetLong(source, "BitRate"),
+                SizeBytes = GetLong(source, "Size"),
+                SupportsDirectPlay = directPlay,
+                SupportsDirectStream = directStream,
+                IsDefault = index == 0,
+            });
+            index++;
+        }
+        return result;
+    }
+
+    private static string VersionLabel(int? width, int? height, string? codec, string? container, bool directPlay, bool directStream)
+    {
+        var parts = new List<string>(4);
+        if (width is { } w && height is { } h) parts.Add(w + "×" + h);
+        if (!string.IsNullOrWhiteSpace(codec)) parts.Add(codec!);
+        if (!string.IsNullOrWhiteSpace(container)) parts.Add(container!);
+        parts.Add(directPlay ? "直连" : directStream ? "直连流" : "仅转码");
+        return string.Join(" · ", parts);
+    }
+
+    /// <summary>Id of the first media source the server lists for an item, if any.</summary>
+    /// <remarks>
+    /// Subtitle endpoints are addressed through the media source, so a track's display URL needs one.
+    /// Only the first source is used here; the playback path resolves the exact source it plays and
+    /// passes that id explicitly, so a multi-version item never downloads another version's subtitle.
+    /// </remarks>
+    public static string? FirstMediaSourceId(JsonElement item)
+    {
+        if (!item.TryGetProperty("MediaSources", out var sources) || sources.ValueKind != JsonValueKind.Array)
+            return null;
+        foreach (var source in sources.EnumerateArray())
+        {
+            string? id = GetString(source, "Id");
+            if (!string.IsNullOrEmpty(id)) return id;
+        }
+        return null;
     }
 
     // ---------------------------------------------------------------- primitive readers

@@ -26,6 +26,21 @@ public sealed record EngineAudioTrack(
     bool IsDefault,
     bool IsExternal);
 
+/// <summary>
+/// One video track as the engine sees it. Kept alongside audio/subtitle so the player can show the
+/// real codec and resolution and remember the user's choice across episodes.
+/// </summary>
+public sealed record EngineVideoTrack(
+    long Id,
+    string? Language,
+    string? Title,
+    string? Codec,
+    int? Width,
+    int? Height,
+    double? Fps,
+    bool Selected,
+    bool IsDefault);
+
 /// <summary>One subtitle track as the engine sees it.</summary>
 public sealed record EngineSubtitleTrack(
     long Id,
@@ -70,9 +85,11 @@ public sealed record PlayerSnapshot
 
     public IReadOnlyList<EngineAudioTrack> AudioTracks { get; init; } = Array.Empty<EngineAudioTrack>();
     public IReadOnlyList<EngineSubtitleTrack> SubtitleTracks { get; init; } = Array.Empty<EngineSubtitleTrack>();
+    public IReadOnlyList<EngineVideoTrack> VideoTracks { get; init; } = Array.Empty<EngineVideoTrack>();
 
     public long? SelectedAudioId { get; init; }
     public long? SelectedSubtitleId { get; init; }
+    public long? SelectedVideoId { get; init; }
 
     public string? Error { get; init; }
 
@@ -93,6 +110,12 @@ public sealed record TechnicalInfo
     public string? ColorMatrix { get; init; }
     public string? ColorLevels { get; init; }
     public double? SignalPeak { get; init; }
+
+    /// <summary>
+    /// True when the engine recognised Dolby Vision metadata. Profile 5 and profile 8 both surface as
+    /// the "dolbyvision" colour matrix, which is what tells the renderer to undo the DV reshaping.
+    /// </summary>
+    public bool IsDolbyVision => string.Equals(ColorMatrix, "dolbyvision", StringComparison.OrdinalIgnoreCase);
     public string? AudioCodec { get; init; }
     public int? AudioChannels { get; init; }
     public int? AudioSampleRate { get; init; }
@@ -103,6 +126,15 @@ public sealed record TechnicalInfo
     public long? BitRate { get; init; }
     public int? FrameDrops { get; init; }
     public double? RenderFps { get; init; }
+
+    /// <summary>How much of the source is buffered ahead, in seconds; null when the engine does not say.</summary>
+    public double? CacheSeconds { get; init; }
+
+    /// <summary>Frames the engine delivered late (A/V sync), not the same as dropped frames.</summary>
+    public int? MistimedFrames { get; init; }
+
+    /// <summary>Current demuxer readahead speed in bytes per second, when the engine reports it.</summary>
+    public double? CacheSpeedBytesPerSecond { get; init; }
 
     /// <summary>True when the engine reports a PQ/HLG transfer, i.e. the source is HDR.</summary>
     public bool IsHdr => ColorTransfer is "pq" or "smpte2084" or "hlg" or "arib-std-b67";
@@ -134,7 +166,12 @@ public interface ITrackController
 {
     void SelectAudioTrack(long? engineTrackId);
     void SelectSubtitleTrack(long? engineTrackId);
-    void AddExternalSubtitle(string filePath);
+    void SelectVideoTrack(long? engineTrackId);
+    /// <param name="select">
+    /// True for a subtitle the user picked, which must become active. False for tracks discovered for
+    /// the item: the engine selects one of those only when nothing is selected yet.
+    /// </param>
+    void AddExternalSubtitle(string filePath, bool select = true);
     void SetSubtitleVisible(bool visible);
     void SetSubtitleDelay(double seconds);
     void SetSubtitlePosition(double position);
@@ -142,7 +179,30 @@ public interface ITrackController
     void SetSubtitleFont(string fontFamily);
     void SetSubtitleColor(string rgbHex);
     void SetSubtitleBorderSize(double size);
+    void SetSubtitleBold(bool bold);
     void SetSubtitleAssOverride(SubtitleAssOverride mode);
+}
+
+/// <summary>
+/// An audio output the engine can switch to. <see cref="Name"/> is the engine's own identifier and
+/// the value that must be written back to select it; <see cref="Description"/> is the human label.
+/// </summary>
+public sealed record EngineAudioDevice(string Name, string Description, bool IsDefault);
+
+/// <summary>Audio output selection. Separate from track selection: it is a device, not a stream.</summary>
+public interface IAudioDeviceController
+{
+    /// <summary>Devices the engine can see right now. Empty when the engine has no context yet.</summary>
+    IReadOnlyList<EngineAudioDevice> GetAudioDevices();
+
+    /// <summary>The device the engine is actually using, or null when nothing is open.</summary>
+    string? CurrentAudioDevice { get; }
+
+    /// <summary>
+    /// Switches the output. Null or empty means "follow the system default". Returns false when the
+    /// engine rejected the name or did not end up on it; the caller then falls back to the default.
+    /// </summary>
+    bool TrySetAudioDevice(string? name);
 }
 
 /// <summary>

@@ -2,30 +2,66 @@
 <Page
     x:Class="MediaHub.App.Views.LibraryPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="{StaticResource MediaHubGlassPageBrush}">
 
-  <Grid Padding="28,20,28,20" RowSpacing="12">
+  <Grid x:Name="RootGrid" Padding="36,24,36,24" RowSpacing="14">
+    <VisualStateManager.VisualStateGroups>
+      <VisualStateGroup x:Name="WindowWidthStates">
+        <VisualState x:Name="Wide">
+          <VisualState.StateTriggers>
+            <AdaptiveTrigger MinWindowWidth="900" />
+          </VisualState.StateTriggers>
+        </VisualState>
+        <VisualState x:Name="Narrow">
+          <VisualState.StateTriggers>
+            <AdaptiveTrigger MinWindowWidth="0" />
+          </VisualState.StateTriggers>
+          <VisualState.Setters>
+            <Setter Target="RootGrid.Padding" Value="20,16,20,16" />
+            <Setter Target="TitleText.FontSize" Value="20" />
+          </VisualState.Setters>
+        </VisualState>
+      </VisualStateGroup>
+    </VisualStateManager.VisualStateGroups>
+
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
-    <StackPanel Grid.Row="0" Spacing="6">
-      <StackPanel Orientation="Horizontal" Spacing="10">
-        <Button x:Name="BackButton" Click="OnBackClick" Background="Transparent">
-          <FontIcon Glyph="&#xE72B;" />
+    <StackPanel Grid.Row="0" Spacing="2">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button x:Name="BackButton" Click="OnBackClick" Style="{StaticResource MediaHubIconButton}"
+                AutomationProperties.Name="返回">
+          <FontIcon Glyph="&#xE72B;" FontSize="15" />
         </Button>
-        <TextBlock x:Name="TitleText" Style="{StaticResource MediaHubSectionHeader}" VerticalAlignment="Center" />
+        <TextBlock x:Name="TitleText" Style="{StaticResource MediaHubPageTitle}"
+                   VerticalAlignment="Center" Margin="4,0,0,0" />
       </StackPanel>
-      <TextBlock x:Name="CountText" Style="{StaticResource MediaHubCaption}" />
+      <TextBlock x:Name="CountText" Style="{StaticResource MediaHubCaption}" Margin="44,0,0,0" />
     </StackPanel>
 
     <InfoBar x:Name="StatusBar" Grid.Row="1" IsOpen="False" IsClosable="True" />
 
     <Grid Grid.Row="2">
-      <GridView x:Name="ItemGrid" SelectionMode="None" IsItemClickEnabled="True"
-                ItemClick="OnItemClick">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="*" />
+        <!-- "Load more" gets its own row: as an overlay it covered the last row of posters. -->
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <GridView x:Name="ItemGrid" Grid.Row="0" SelectionMode="None" IsItemClickEnabled="True"
+                ItemClick="OnItemClick" ItemContainerStyle="{StaticResource MediaHubGridViewItem}">
+        <!-- New pages arrive at the bottom of a long scroll. The entrance transition is what makes
+             "more items appeared" readable without moving the scroll position. -->
+        <GridView.ItemContainerTransitions>
+          <TransitionCollection>
+            <AddDeleteThemeTransition />
+            <RepositionThemeTransition />
+          </TransitionCollection>
+        </GridView.ItemContainerTransitions>
         <GridView.ItemTemplate>
           <DataTemplate>
             <!-- A tile is named after the item it shows. Without this the automation name of every
@@ -33,19 +69,51 @@
                  the grid - which is exactly the kind of fragile coupling that makes a UI test fail
                  for reasons unrelated to the behaviour under test. It is also what a screen reader
                  needs in order to announce anything useful. -->
-            <StackPanel Width="{Binding TileWidth}" Margin="0,0,14,16" Spacing="6"
+            <StackPanel Width="{Binding TileWidth}" Margin="0,0,16,18" Spacing="8"
                         AutomationProperties.Name="{Binding Title}"
                         AutomationProperties.AutomationId="{Binding AutomationId}"
                         AutomationProperties.HelpText="{Binding Subtitle}">
-              <Border Width="{Binding TileWidth}" Height="{Binding TileHeight}" CornerRadius="6"
-                      Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
-                      BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+              <StackPanel.ContextFlyout>
+                <MenuFlyout>
+                  <MenuFlyoutItem Text="{Binding OpenLabel}" Tag="{Binding}" Click="OnOpenMenuClick">
+                    <MenuFlyoutItem.Icon>
+                      <FontIcon Glyph="&#xE8A7;" />
+                    </MenuFlyoutItem.Icon>
+                  </MenuFlyoutItem>
+                  <MenuFlyoutItem Text="复制标题" Tag="{Binding}" Click="OnCopyTitleClick">
+                    <MenuFlyoutItem.Icon>
+                      <FontIcon Glyph="&#xE8C8;" />
+                    </MenuFlyoutItem.Icon>
+                  </MenuFlyoutItem>
+                </MenuFlyout>
+              </StackPanel.ContextFlyout>
+              <Border Width="{Binding TileWidth}" Height="{Binding TileHeight}"
+                      Style="{StaticResource MediaHubPosterFrame}">
                 <Grid>
                   <!-- Placeholder glyph stays visible until artwork arrives, so a slow or failed
                        poster never leaves an empty hole in the grid. -->
-                  <FontIcon Glyph="&#xE714;" FontSize="28" Opacity="0.35"
+                  <FontIcon Glyph="&#xE714;" FontSize="28" Opacity="0.3"
+                            Foreground="{StaticResource MediaHubTextSecondaryBrush}"
                             HorizontalAlignment="Center" VerticalAlignment="Center" />
                   <Image Source="{Binding Poster}" Stretch="UniformToFill" />
+                  <!-- Optional technical badges; the view-model returns an empty list when the user
+                       turned them off, so the overlay simply disappears. -->
+                  <ItemsControl ItemsSource="{Binding Badges}" HorizontalAlignment="Left"
+                                VerticalAlignment="Bottom" Margin="6" IsHitTestVisible="False">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal" Spacing="4" />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Border Background="#CC0B0D12" BorderBrush="#33FFFFFF" BorderThickness="1"
+                                CornerRadius="4" Padding="5,1">
+                          <TextBlock Text="{Binding}" FontSize="10" Foreground="#F2FFFFFF" />
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
                 </Grid>
               </Border>
               <TextBlock Text="{Binding Title}" FontSize="13" TextTrimming="CharacterEllipsis"
@@ -57,15 +125,35 @@
         </GridView.ItemTemplate>
       </GridView>
 
-      <StackPanel x:Name="EmptyPanel" HorizontalAlignment="Center" VerticalAlignment="Center"
-                  Spacing="10" Visibility="Collapsed">
-        <ProgressRing x:Name="LoadingRing" IsActive="False" Width="36" Height="36" />
-        <TextBlock x:Name="EmptyText" Text="正在加载…" HorizontalAlignment="Center" />
+      <!-- Skeleton and state share the grid row: one is visible at a time. -->
+      <ItemsControl x:Name="SkeletonPanel" Grid.Row="0" Visibility="Collapsed" IsHitTestVisible="False"
+                    ItemTemplate="{StaticResource MediaHubPosterSkeleton}"
+                    ItemsPanel="{StaticResource MediaHubSkeletonWrapPanel}" />
+
+      <StackPanel x:Name="EmptyPanel" Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Center"
+                  Spacing="14" Visibility="Collapsed" MaxWidth="460">
+        <Border x:Name="StateIcon" Style="{StaticResource MediaHubStateIcon}">
+          <FontIcon x:Name="StateGlyph" Style="{StaticResource MediaHubStateGlyph}" Glyph="&#xE714;" />
+        </Border>
+        <StackPanel Spacing="6">
+          <TextBlock x:Name="StateTitle" Style="{StaticResource MediaHubStateTitle}" Text="这里还没有内容" />
+          <TextBlock x:Name="EmptyText" Style="{StaticResource MediaHubStateDescription}" Text="正在加载…" />
+        </StackPanel>
+        <Button x:Name="RetryButton" Content="重试" Visibility="Collapsed" HorizontalAlignment="Center"
+                Click="OnRetryClick" Style="{StaticResource MediaHubGhostButton}"
+                AutomationProperties.AutomationId="library.retry" />
       </StackPanel>
 
-      <Button x:Name="LoadMoreButton" Content="加载更多" HorizontalAlignment="Center"
-              VerticalAlignment="Bottom" Margin="0,0,0,12" Visibility="Collapsed"
-              Click="OnLoadMoreClick" />
+      <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center"
+                  Margin="0,12,0,0" VerticalAlignment="Center">
+        <ProgressRing x:Name="MoreRing" IsActive="False" Width="16" Height="16" Visibility="Collapsed" />
+        <TextBlock x:Name="MoreText" Text="正在加载更多…" VerticalAlignment="Center"
+                   Style="{StaticResource MediaHubCaption}" Visibility="Collapsed" />
+        <Button x:Name="LoadMoreButton" Content="加载更多" Visibility="Collapsed"
+                Click="OnLoadMoreClick" Style="{StaticResource MediaHubGhostButton}" />
+        <TextBlock x:Name="EndText" Text="已全部加载" VerticalAlignment="Center"
+                   Style="{StaticResource MediaHubCaption}" Visibility="Collapsed" />
+      </StackPanel>
     </Grid>
   </Grid>
 </Page>

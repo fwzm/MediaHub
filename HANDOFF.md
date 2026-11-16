@@ -1,5 +1,17 @@
 # 交接文档（HANDOFF）—— 每个 AI 必读
 
+## 2026-11-14 Windows 播放器：杜比视界色彩映射 + HDR 动态元数据可配置（第一版）
+
+- 代码：`MpvColorPipeline` 固定 `target-colorspace-hint=auto` / `tone-mapping=auto`，`hdr-compute-peak`
+  由设置 `HdrDynamicMetadata`（默认 `auto`）决定；`MpvPlaybackErrors` 把引擎日志尾翻译为中文失败原因；
+  `TechnicalInfo.IsDolbyVision` 供播放页展示。决策与取证见 [ADR-W008](windows/docs/adr/ADR-W008-hdr-colour-pipeline.md)。
+- 已验证（引擎自报 + 像素差分，隐藏窗口、不抢焦点）：DV 8.1 片源 `colormatrix=dolbyvision`、
+  `bt.2020/pq`、`hwdec=d3d11va`、`vo=gpu-next/d3d11`，逐帧 `max-pq-y` 随镜头变化；与去 RPU 基线 PSNR ≈ 17.3 dB。
+- 未验证（如实登记）：profile 5 真实 IPTPQc2 素材色彩准确度（本地无法编码）；SDR 色调映射视觉路径
+  （本机桌面 HDR 开启，输出恒为 PQ 直通）；显示端色度计测量。
+- 门禁：`MediaHub.App` 0 警告 0 错误；新增 23 项测试通过。全量 `MediaHub.Tests` 仍有 2 项既存失败，
+  属并行分支的播放缓存改动（`PlayerCacheStore*` / `MpvPlaylistAndCacheTests`），本次未触碰。
+
 ## 2026-10-14 A4 收敛：候选并入 main（真机/真服验收由用户暂缓）
 
 - 主线 `369b5a77` = PR #24 合并（父：`e06ad3b`←PR #18 备份、`75b3d42`←PR #26 文档、`23ddd5b`←A4 线 + B 收敛候选 `22e424d`）。PR #23/#25 记为已合并；PR #22 以"被主线实现取代"关闭并附源码证据；PR #6/#16/#20 仍开启待处置。

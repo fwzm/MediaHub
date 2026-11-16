@@ -13,7 +13,13 @@ echo "=== mpv --version (this is the feature list baked into the binary) ==="
 
 echo
 echo "=== acceptance check 1: is 'gpl' in the enabled-features list? (expect NO) ==="
-feats=$(grep -m1 'List of enabled features' "$O/mpv-lgpl-version.txt" | sed 's/.*features: //')
+# A release build (version without a git suffix) suppresses the feature list in the plain --version
+# output, so take it from the verbose log instead and keep it in its own file.
+"$MP/mpv.exe" --no-config --msg-level=all=v --version 2>&1 \
+  | grep -m1 'List of enabled features' | sed 's/^\[[^]]*\] //' | tr -d '\r' > "$O/mpv-lgpl-features.txt"
+feats=$(sed 's/^List of enabled features:[[:space:]]*//' "$O/mpv-lgpl-features.txt")
+if [ -z "$feats" ]; then echo "  FATAL: could not read the enabled-features list"; exit 3; fi
+echo "  features: $feats"
 for t in gpl; do
   if printf '%s' "$feats" | tr ' ' '\n' | grep -qx "$t"; then echo "  '$t' PRESENT  <-- FAIL"; else echo "  '$t' absent   <-- PASS"; fi
 done

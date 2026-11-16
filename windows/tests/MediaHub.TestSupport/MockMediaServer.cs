@@ -68,7 +68,43 @@ public sealed class MockServerOptions
     /// deliberately jumbled list and still expect the client to pick the right successor.
     /// </remarks>
     public IReadOnlyList<MockEpisode> Episodes { get; init; } = Array.Empty<MockEpisode>();
+
+    /// <summary>
+    /// Media source capabilities <c>PlaybackInfo</c> reports, in order. Null means the default single
+    /// source that supports both direct play and direct stream.
+    /// </summary>
+    /// <remarks>
+    /// A real server lists every version of a title here, and a source that supports neither flag can
+    /// only be played by transcoding. Tests use this to pin which entry the client picks and what it
+    /// says when no entry is playable.
+    /// </remarks>
+    public IReadOnlyList<MockMediaSourceCapabilities>? PlaybackSources { get; init; }
+
+    /// <summary>
+    /// The account's <c>EnableVideoPlaybackTranscoding</c> policy, omitted when null.
+    /// </summary>
+    /// <remarks>
+    /// Both lab Emby accounts carry <c>false</c>, so a transcode request there is refused by policy
+    /// rather than by the source. A test needs the flag in the profile to pin the message that names
+    /// the policy instead of blaming the file.
+    /// </remarks>
+    public bool? EnableVideoPlaybackTranscoding { get; init; }
 }
+
+/// <summary>Capabilities of one <c>MediaSource</c>, as <c>PlaybackInfo</c> reports them.</summary>
+/// <remarks>
+/// <paramref name="TranscodingUrl"/> mirrors the field a real Jellyfin returns only when the request
+/// asks for transcoding <i>and</i> supplies an HLS device profile. A transcode-only source without it
+/// is the "server offers nothing playable" case.
+/// </remarks>
+public sealed record MockMediaSourceCapabilities(
+    bool SupportsDirectPlay,
+    bool SupportsDirectStream,
+    string? TranscodingUrl = null,
+    string? TranscodingContainer = null,
+    int Width = 1920,
+    int Height = 1080,
+    long BitRate = 8_000_000);
 
 /// <summary>
 /// Playback state as a server reports it in <c>UserData</c> — the fields Emby's <c>Filters=IsResumable</c>
@@ -167,6 +203,9 @@ public sealed class MockMediaServer : IAsyncDisposable
 
     /// <summary>Base for the play date a report stamps, so no assertion depends on the wall clock.</summary>
     private static readonly DateTime ReportEpoch = new(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>Body of the sidecar-subtitle route, deterministic so assertions can compare the text.</summary>
+    private const string MockSubtitle = "1\n00:00:01,000 --> 00:00:03,000\nMock external subtitle\n";
 
     /// <summary>A real 1x1 PNG: the artwork route serves image bytes rather than a placeholder string.</summary>
     private static readonly byte[] OnePixelPng = Convert.FromBase64String(
@@ -500,7 +539,7 @@ public sealed class MockMediaServer : IAsyncDisposable
         if (request.Method == HttpMethod.Post.Method)
         {
             if (segments is ["Users", "AuthenticateByName"]) { ServeAuthenticate(context, body); return; }
-            if (segments is ["Items", _, "PlaybackInfo"]) { ServePlaybackInfo(context, segments[1]); return; }
+            if (segments is ["Items", _, "PlaybackInfo"]) { ServePlaybackInfo(context, segments[1], body); return; }
             if (segments is ["Users", _, "FavoriteItems", var favoriteItemId]) { ServeFavorite(context, favoriteItemId, true); return; }
             if (segments is ["Sessions", "Playing"] or ["Sessions", "Progress"] or ["Sessions", "Stopped"] or ["Sessions", "Logout"]
                 || (segments is ["Sessions", "Playing", "Progress" or "Stopped"]))
@@ -557,6 +596,16 @@ public sealed class MockMediaServer : IAsyncDisposable
             if (segments is ["Videos", _, var streamName] && streamName.StartsWith("stream", StringComparison.OrdinalIgnoreCase))
             {
                 ServeMedia(context, request);
+                return;
+            }
+            // Sidecar subtitles. The catalogue's external track is a real SRT so a client that
+            // downloads it through the authenticated stack gets text it can hand to the engine.
+            // The route carries the media source id and the "Stream." suffix because that is the only
+            // shape Emby 4.9 answers; the shorter form it used to advertise returned 404 in the field.
+            if (segments is ["Videos", _, _, "Subtitles", _, _])
+            {
+                byte[] subtitle = Encoding.UTF8.GetBytes(MockSubtitle);
+                WriteBytes(context, 200, subtitle, 0, subtitle.Length, null, "application/x-subrip; charset=utf-8");
                 return;
             }
         }
@@ -893,12 +942,18 @@ public sealed class MockMediaServer : IAsyncDisposable
     /// <summary>The authenticated user, as a real server reports it.</summary>
     private void ServeCurrentUser(HttpListenerContext context)
     {
+        var policy = new JsonObject { ["IsAdministrator"] = true };
+        if (_options.EnableVideoPlaybackTranscoding is { } allowed)
+        {
+            policy["EnableVideoPlaybackTranscoding"] = allowed;
+        }
+
         WriteJson(context, 200, new JsonObject
         {
             ["Id"] = _options.UserId,
             ["Name"] = _options.UserName,
             ["ServerId"] = _options.ServerId,
-            ["Policy"] = new JsonObject { ["IsAdministrator"] = true },
+            ["Policy"] = policy,
         }.ToJsonString());
     }
 
@@ -1137,7 +1192,7 @@ public sealed class MockMediaServer : IAsyncDisposable
     /// <summary>Deterministic play time for a report, so <c>SortBy=DatePlayed</c> keeps a total order.</summary>
     private DateTime NextPlayedAt() => ReportEpoch.AddSeconds(++_reportSequence);
 
-    private void ServePlaybackInfo(HttpListenerContext context, string itemId)
+    private void ServePlaybackInfo(HttpListenerContext context, string itemId, string body)
     {
         MockItem? item = _items.FirstOrDefault(candidate => string.Equals(candidate.Id, itemId, StringComparison.Ordinal));
         if (item is null)
@@ -1146,32 +1201,70 @@ public sealed class MockMediaServer : IAsyncDisposable
             return;
         }
 
-        string mediaSourceId = "mediasource-" + item.Id;
-        string playSessionId = "playsession-" + item.Id;
-        var source = new JsonObject
+        // A real server only produces a TranscodingUrl for a request that opted into transcoding, so the
+        // mock does the same; otherwise a client that forgot the second negotiation would still pass.
+        bool transcodingRequested = false;
+        try
         {
-            ["Id"] = mediaSourceId,
-            ["Name"] = item.Name,
-            ["Path"] = item.Path,
-            ["Container"] = "mp4",
-            ["SupportsDirectPlay"] = true,
-            ["SupportsDirectStream"] = true,
-            ["SupportsTranscoding"] = false,
-            ["IsRemote"] = false,
-            ["RunTimeTicks"] = item.RunTimeTicks,
-            ["MediaStreams"] = MediaStreams(),
-            // Mixed on purpose: the provider must forward the harmless header and drop the
-            // credential-shaped one (see MediaBrowserProvider.BuildPlaybackHeaders).
-            ["RequiredHttpHeaders"] = new JsonObject
+            if (JsonNode.Parse(body) is JsonObject requestBody
+                && requestBody["EnableTranscoding"] is JsonValue enableValue)
             {
-                ["X-Media-Probe"] = "keep-me",
-                ["Authorization"] = "must-not-be-forwarded",
-            },
-        };
+                transcodingRequested = enableValue.TryGetValue(out bool enabled) && enabled;
+            }
+        }
+        catch (JsonException)
+        {
+            // A malformed body is answered as "transcoding not requested", matching the server's own
+            // refusal to transcode anything it was not asked to.
+        }
+
+        string playSessionId = "playsession-" + item.Id;
+
+        IReadOnlyList<MockMediaSourceCapabilities> capabilities = _options.PlaybackSources is { Count: > 0 } overrides
+            ? overrides
+            : new[] { new MockMediaSourceCapabilities(SupportsDirectPlay: true, SupportsDirectStream: true) };
+
+        var mediaSources = new JsonArray();
+        for (int index = 0; index < capabilities.Count; index++)
+        {
+            MockMediaSourceCapabilities capability = capabilities[index];
+            // The first source keeps the historical id so existing assertions stay exact; later versions
+            // are distinguishable, which is what the selection tests need.
+            string mediaSourceId = index == 0
+                ? "mediasource-" + item.Id
+                : "mediasource-" + item.Id + "-" + index;
+
+            var source = new JsonObject
+            {
+                ["Id"] = mediaSourceId,
+                ["Name"] = item.Name + (capabilities.Count > 1 ? " (" + (index + 1) + ")" : ""),
+                ["Path"] = item.Path,
+                ["Container"] = "mp4",
+                ["SupportsDirectPlay"] = capability.SupportsDirectPlay,
+                ["SupportsDirectStream"] = capability.SupportsDirectStream,
+                ["SupportsTranscoding"] = !capability.SupportsDirectPlay && !capability.SupportsDirectStream,
+                ["IsRemote"] = false,
+                ["RunTimeTicks"] = item.RunTimeTicks,
+                ["MediaStreams"] = MediaStreams(capability.Width, capability.Height, capability.BitRate),
+                // Mixed on purpose: the provider must forward the harmless header and drop the
+                // credential-shaped one (see MediaBrowserProvider.BuildPlaybackHeaders).
+                ["RequiredHttpHeaders"] = new JsonObject
+                {
+                    ["X-Media-Probe"] = "keep-me",
+                    ["Authorization"] = "must-not-be-forwarded",
+                },
+            };
+            if (transcodingRequested && !string.IsNullOrEmpty(capability.TranscodingUrl))
+            {
+                source["TranscodingUrl"] = capability.TranscodingUrl;
+                source["TranscodingContainer"] = capability.TranscodingContainer ?? "ts";
+            }
+            mediaSources.Add(source);
+        }
 
         WriteJson(context, 200, new JsonObject
         {
-            ["MediaSources"] = new JsonArray(source),
+            ["MediaSources"] = mediaSources,
             // Root only, which is where Jellyfin 12.2 actually puts it. The mock previously duplicated
             // it inside the media source as well, and that duplication is precisely why the client's
             // source-only lookup passed here and failed against every real server.
@@ -1300,16 +1393,16 @@ public sealed class MockMediaServer : IAsyncDisposable
         return bytes;
     }
 
-    private static JsonArray MediaStreams() => new(
+    private static JsonArray MediaStreams(int width = 1920, int height = 1080, long bitRate = 8_000_000) => new(
         new JsonObject
         {
             ["Type"] = "Video",
             ["Index"] = 0,
             ["Codec"] = "h264",
             ["Profile"] = "High",
-            ["Width"] = 1920,
-            ["Height"] = 1080,
-            ["BitRate"] = 8_000_000,
+            ["Width"] = width,
+            ["Height"] = height,
+            ["BitRate"] = bitRate,
             ["ColorPrimaries"] = "bt709",
             ["ColorTransfer"] = "bt709",
             ["PixelFormat"] = "yuv420p",

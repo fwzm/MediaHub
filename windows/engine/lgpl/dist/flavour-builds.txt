@@ -19,12 +19,12 @@ build result  : both "0 个警告 / 0 个错误" (0 warnings, 0 errors); the app
    output : D:\mh-out-lgpl\x64\Debug\net10.0-windows10.0.19041.0\win-x64
    files  : 385
    libmpv-2.dll bytes  : 3327274
-   libmpv-2.dll sha256 : 20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a
+   libmpv-2.dll sha256 : a3f901d6b5bae54a4b5b87cd9d9d973fd3af079aa70a61851560c30e74722a68
    engine DLLs in the output: 34 (libmpv-2.dll plus the 33 collected dependencies)
 
    name                          bytes     sha256                                                     matches dist source
    ----------------------------  --------  ---------------------------------------------------------  ------------------
-   libmpv-2.dll                  3327274  20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a  True
+   libmpv-2.dll                  3327274  a3f901d6b5bae54a4b5b87cd9d9d973fd3af079aa70a61851560c30e74722a68  True
    avcodec-62.dll               18603520  1faacb7a3bfd9d16c5b8258ede66baf03c31d2578d828af68ade215ada6d9f4d  True
    avdevice-62.dll                153088  af2075f1e5d17a04e0a109d76af8704ca15b6c1438054962ebdfa596ce793ef2  True
    avfilter-11.dll               5288448  c077cd1c46d337851e4035716fcfb218a48a771b073b27474cf86c1e4a6f9c05  True

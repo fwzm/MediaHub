@@ -36,6 +36,36 @@ public sealed record PlaybackRequest
     public int? SeasonNumber { get; init; }
     public int? EpisodeNumber { get; init; }
 
+    /// <summary>
+    /// Ask the source to serve this item as a transcode instead of direct play.
+    /// </summary>
+    /// <remarks>
+    /// Off by default, and it never travels through the local-file path: direct play stays the default
+    /// for every request that does not opt in. Only a source that can transcode can honour it; a
+    /// source that cannot returns its normal answer and the caller decides what to do with the
+    /// mismatch.
+    /// </remarks>
+    public bool ForceTranscode { get; init; }
+
     /// <summary>True when the request names a local file rather than a source item.</summary>
     public bool IsLocal => !string.IsNullOrEmpty(LocalPath);
+
+    /// <summary>
+    /// Which version of a multi-version item to open; null lets the source decide.
+    /// </summary>
+    /// <remarks>
+    /// Set by the version picker. The value is a media-source id, not a display label, because the
+    /// source is the authority on which file it serves; a label could match two different encodes.
+    /// </remarks>
+    public string? MediaSourceId { get; init; }
+
+    /// <summary>
+    /// Start at zero even when the source reports a resume position.
+    /// </summary>
+    /// <remarks>
+    /// A version switch is not a resume: the two files can differ in cut, length and audio, so carrying
+    /// the previous version's position into the new one would land the user somewhere unrelated. The
+    /// picker sets this so the switch starts the chosen version from its own beginning.
+    /// </remarks>
+    public bool StartFromBeginning { get; init; }
 }

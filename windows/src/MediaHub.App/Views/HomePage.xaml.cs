@@ -23,6 +23,7 @@ public sealed partial class HomePage : Page
                 // local-file branch must not swallow it. Parsing here keeps the click path honest
                 // instead of silently doing nothing for those rows.
                 bool isServer = TryParseServerIdentity(e.MediaPath, out string serverId, out string itemId)
+                    && IsKnownServer(serverId)
                     && !System.IO.File.Exists(e.MediaPath);
                 return new ContinueItem(
                     e.Title,
@@ -38,7 +39,7 @@ public sealed partial class HomePage : Page
             .ToList();
 
         ContinueGrid.ItemsSource = entries;
-        ContinueEmptyText.Visibility = entries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ContinueEmptyCard.Visibility = entries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
         // Counted over servers only. Including the local source in the same sentence produced
         // "1 configured, 2 available", which reads as a bug because it is one.
@@ -71,7 +72,7 @@ public sealed partial class HomePage : Page
                 ServerId = item.ServerId,
                 ItemId = item.ItemId,
                 Title = item.Title,
-                StartPositionTicks = App.Services.Settings.Current.ResumePlayback ? (serverEntry?.PositionTicks ?? 0) : 0,
+                StartPositionTicks = App.Services.Settings.Current.ResumePlayback ? (serverEntry?.ResumePositionTicks ?? 0) : 0,
             });
             return;
         }
@@ -84,7 +85,7 @@ public sealed partial class HomePage : Page
             LocalPath = item.Path,
             Title = item.Title,
             DisplayUrl = item.Path,
-            StartPositionTicks = App.Services.Settings.Current.ResumePlayback ? (entry?.PositionTicks ?? 0) : 0,
+            StartPositionTicks = App.Services.Settings.Current.ResumePlayback ? (entry?.ResumePositionTicks ?? 0) : 0,
             DeclaredDuration = entry is { DurationTicks: > 0 } ? TimeSpan.FromTicks(entry.DurationTicks) : null,
             ExternalSubtitles = LocalLibraryService.FindSiblingSubtitles(item.Path),
         });
@@ -107,6 +108,9 @@ public sealed partial class HomePage : Page
     /// store. Local paths never use that shape (they carry a directory separator), and the caller
     /// still prefers a real file when one exists.
     /// </summary>
+    private static bool IsKnownServer(string serverId)
+        => App.Services.Servers.Servers.Any(s => string.Equals(s.ServerId, serverId, StringComparison.Ordinal));
+
     private static bool TryParseServerIdentity(string value, out string serverId, out string itemId)
     {
         serverId = string.Empty;
@@ -120,7 +124,11 @@ public sealed partial class HomePage : Page
         string candidateServer = value[(at + 1)..];
         if (candidateItem.Contains(Path.DirectorySeparatorChar) || candidateItem.Contains(Path.AltDirectorySeparatorChar)) return false;
         if (candidateServer.Contains(Path.DirectorySeparatorChar) || candidateServer.Contains(Path.AltDirectorySeparatorChar)) return false;
-        if (candidateServer.Contains(':')) return false;
+        // Server ids are "<type>:<id>" ("emby:…", "jellyfin:…"), so a colon is the normal shape here.
+        // Rejecting it — as this used to — made every server history card parse as a local file and
+        // the click handler then returned silently: the home shelf could not resume anything.
+        // A real file path is excluded by the separator checks above and by the file-exists test at
+        // the call site, so identity is confirmed against the configured servers instead.
 
         itemId = candidateItem;
         serverId = candidateServer;

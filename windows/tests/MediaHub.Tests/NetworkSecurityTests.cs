@@ -222,6 +222,17 @@ public sealed class RedirectCredentialTests : IDisposable
     public void Downgrade_detection(string from, string to, bool expected)
         => Assert.Equal(expected, OriginScopedCredentialHandler.IsDowngrade(new Uri(from), new Uri(to)));
 
+    [Theory]
+    [InlineData("http://a.example.com/emby/x", "https://a.example.com/emby/x", true)]
+    [InlineData("http://A.EXAMPLE.com/x", "https://a.example.com/x", true)]
+    [InlineData("http://a.example.com/x", "https://b.example.com/x", false)]
+    [InlineData("https://a.example.com/x", "http://a.example.com/x", false)]
+    [InlineData("https://a.example.com/x", "https://a.example.com:8443/x", false)]
+    [InlineData("http://a.example.com:8080/x", "https://a.example.com:8443/x", false)]
+    [InlineData("http://127.0.0.1:5000/b", "https://127.0.0.1:5000/b", false)]
+    public void A_plain_http_to_https_upgrade_keeps_credentials_in_scope(string from, string to, bool expected)
+        => Assert.Equal(expected, OriginScopedCredentialHandler.IsSameCredentialScope(new Uri(from), new Uri(to)));
+
     [Fact]
     public void Sensitive_header_list_covers_every_provider_token_header()
     {

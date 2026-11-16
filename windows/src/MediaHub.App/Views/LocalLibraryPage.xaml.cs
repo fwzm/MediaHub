@@ -14,6 +14,7 @@ public sealed partial class LocalLibraryPage : Page
     {
         InitializeComponent();
         MediaGrid.ItemsSource = _items;
+        SkeletonPanel.ItemsSource = new object[8];
         App.Services.LocalLibrary.ItemDiscovered += OnItemDiscovered;
         App.Services.LocalLibrary.ScanCompleted += OnScanCompleted;
         Loaded += OnLoaded;
@@ -27,7 +28,7 @@ public sealed partial class LocalLibraryPage : Page
         {
             await ScanAsync();
         }
-        UpdateEmptyHint();
+        UpdateState();
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -39,7 +40,16 @@ public sealed partial class LocalLibraryPage : Page
     private void OnItemDiscovered(object? sender, LocalMediaEntry entry)
     {
         // Discovery runs on a worker thread; the observable collection must be touched on the UI thread.
-        DispatcherQueue.TryEnqueue(() => _items.Add(entry));
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            _items.Add(entry);
+            // The first file is proof the scan is working; placeholders would only cover real tiles.
+            if (_items.Count == 1)
+            {
+                HideSkeleton();
+                UpdateState();
+            }
+        });
     }
 
     private void OnScanCompleted(object? sender, EventArgs e)
@@ -47,7 +57,8 @@ public sealed partial class LocalLibraryPage : Page
         {
             ScanRing.IsActive = false;
             RescanButton.IsEnabled = true;
-            UpdateEmptyHint();
+            HideSkeleton();
+            UpdateState();
         });
 
     private void RefreshFolders()
@@ -56,14 +67,48 @@ public sealed partial class LocalLibraryPage : Page
         FolderList.ItemsSource = folders.Select(f => new FolderRow(f, System.IO.Directory.Exists(f))).ToList();
     }
 
-    private void UpdateEmptyHint()
-        => EmptyHint.IsOpen = App.Services.Settings.Current.LocalFolders.Count == 0;
+    /// <summary>
+    /// Distinguishes "no folder yet" from "folders, but nothing playable in them". They used to share
+    /// one banner, which told a user who had already added a folder to go add one.
+    /// </summary>
+    private void UpdateState()
+    {
+        bool scanning = ScanRing.IsActive;
+        bool hasFolders = App.Services.Settings.Current.LocalFolders.Count > 0;
+
+        if (_items.Count > 0 || scanning)
+        {
+            EmptyPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        StateTitle.Text = hasFolders ? "这些文件夹里没有找到视频" : "还没有添加本地文件夹";
+        EmptyText.Text = hasFolders
+            ? "支持常见视频与字幕格式。可以添加其他文件夹，或直接打开单个文件。"
+            : "点击“添加文件夹”选择包含视频的目录，或直接“打开文件…”播放单个视频。";
+        EmptyPanel.Visibility = Visibility.Visible;
+    }
+
+    private void ShowSkeleton()
+    {
+        EmptyPanel.Visibility = Visibility.Collapsed;
+        SkeletonPanel.Visibility = Visibility.Visible;
+        UiMotion.Pulse(SkeletonPanel);
+    }
+
+    private void HideSkeleton()
+    {
+        if (SkeletonPanel.Visibility != Visibility.Visible) return;
+        UiMotion.Settle(SkeletonPanel);
+        SkeletonPanel.Visibility = Visibility.Collapsed;
+    }
 
     private async Task ScanAsync()
     {
         ScanRing.IsActive = true;
         RescanButton.IsEnabled = false;
         _items.Clear();
+        if (App.Services.Settings.Current.LocalFolders.Count > 0) ShowSkeleton();
         await App.Services.LocalLibrary.ScanAsync();
     }
 
@@ -76,7 +121,7 @@ public sealed partial class LocalLibraryPage : Page
 
         App.MainWindow?.AddLocalFolder(folder);
         RefreshFolders();
-        UpdateEmptyHint();
+        UpdateState();
         await ScanAsync();
     }
 
@@ -102,7 +147,7 @@ public sealed partial class LocalLibraryPage : Page
             LocalPath = path,
             Title = System.IO.Path.GetFileNameWithoutExtension(path),
             DisplayUrl = path,
-            StartPositionTicks = App.Services.Settings.Current.ResumePlayback ? (entry?.PositionTicks ?? 0) : 0,
+            StartPositionTicks = App.Services.Settings.Current.ResumePlayback ? (entry?.ResumePositionTicks ?? 0) : 0,
             DeclaredDuration = entry is { DurationTicks: > 0 } ? TimeSpan.FromTicks(entry.DurationTicks) : null,
             ExternalSubtitles = LocalLibraryService.FindSiblingSubtitles(path),
         };

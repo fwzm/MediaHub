@@ -239,8 +239,14 @@ internal sealed class MediaBrowserApi
     public async Task<JsonDocument> GetUserAsync(string userId, CancellationToken ct)
         => await SendJsonAsync(NewRequest(HttpMethod.Get, "/Users/" + Uri.EscapeDataString(userId)), ct).ConfigureAwait(false);
 
+    /// <summary>
+    /// Item detail. <c>Fields</c> is not optional: Emby omits <c>MediaSources</c> from the detail
+    /// response unless it is asked for, which made every multi-version item show a single version.
+    /// </summary>
     public async Task<JsonDocument> GetItemAsync(string itemId, CancellationToken ct)
-        => await SendJsonAsync(NewRequest(HttpMethod.Get, "/Users/" + Require(UserId) + "/Items/" + Uri.EscapeDataString(itemId)), ct).ConfigureAwait(false);
+        => await SendJsonAsync(NewRequest(HttpMethod.Get,
+            "/Users/" + Require(UserId) + "/Items/" + Uri.EscapeDataString(itemId)
+            + "?Fields=MediaSources,MediaStreams"), ct).ConfigureAwait(false);
 
     /// <summary>
     /// Marks or unmarks an item as a favourite.
@@ -295,9 +301,24 @@ internal sealed class MediaBrowserApi
             "/Shows/" + Uri.EscapeDataString(seriesId) + "/Episodes" + query), ct).ConfigureAwait(false);
     }
 
-    public async Task<JsonDocument> GetPlaybackInfoAsync(string itemId, PlaybackOptions options, CancellationToken ct)
+    /// <summary>
+    /// Negotiates playback for one item.
+    /// </summary>
+    /// <remarks>
+    /// Transcoding stays off unless the caller asks for it, so the first call is the same direct-play
+    /// probe this client has always sent. The HLS fallback needs a device profile that declares an HLS
+    /// transcoding target: a real Jellyfin 12.2 answers <c>EnableTranscoding=true</c> without one with a
+    /// source that carries no <c>TranscodingUrl</c> at all (measured), so "allow transcoding" alone is not
+    /// enough to obtain a playable URL.
+    /// </remarks>
+    public async Task<JsonDocument> GetPlaybackInfoAsync(
+        string itemId, PlaybackOptions options, bool enableTranscoding, object? deviceProfile, CancellationToken ct)
     {
         var query = new Dictionary<string, string?> { ["UserId"] = Require(UserId) };
+        // A multi-version item is negotiated version by version: the server computes the supports
+        // flags for the source it was asked about, so without this the response describes only the
+        // version it happened to prefer.
+        if (!string.IsNullOrEmpty(options.MediaSourceId)) query["MediaSourceId"] = options.MediaSourceId;
         var request = NewRequest(HttpMethod.Post, "/Items/" + Uri.EscapeDataString(itemId) + "/PlaybackInfo", query);
 
         var body = new Dictionary<string, object?>
@@ -305,9 +326,10 @@ internal sealed class MediaBrowserApi
             ["UserId"] = Require(UserId),
             ["EnableDirectPlay"] = true,
             ["EnableDirectStream"] = true,
-            ["EnableTranscoding"] = false,
+            ["EnableTranscoding"] = enableTranscoding,
             ["AutoOpenLiveStream"] = false,
         };
+        if (deviceProfile is not null) body["DeviceProfile"] = deviceProfile;
         if (options.StartPositionTicks is > 0) body["StartTimeTicks"] = options.StartPositionTicks;
         request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
 
@@ -408,16 +430,76 @@ internal sealed class MediaBrowserApi
         return new Uri(_dialect.BuildUrl("/Items/" + Uri.EscapeDataString(itemId) + "/Images/" + imageType, query));
     }
 
-    public Uri SubtitleUrl(string itemId, int streamIndex, string? format)
+    /// <summary>Credential-free subtitle URL; kept for display and for sources that load URLs themselves.</summary>
+    public Uri SubtitleUrl(string itemId, string? mediaSourceId, int streamIndex, string? format)
+        => new(_dialect.BuildUrl(SubtitlePath(itemId, mediaSourceId, streamIndex, format), null));
+
+    /// <summary>
+    /// Downloads one server-rendered subtitle track as text bytes.
+    /// </summary>
+    /// <remarks>
+    /// Same request builder as the rest of the API, so the token stays in a header and a redirected
+    /// answer is re-checked against the source's origin. The response is bounded because a subtitle
+    /// is a text file: an endpoint that answers with a media body must not fill the process memory.
+    /// </remarks>
+    public async Task<byte[]> GetSubtitleBytesAsync(string itemId, string? mediaSourceId, int streamIndex, string format, CancellationToken ct)
     {
-        var query = new Dictionary<string, string?>
+        HttpRequestMessage request = NewRequest(HttpMethod.Get, SubtitlePath(itemId, mediaSourceId, streamIndex, format));
+
+        HttpResponseMessage response;
+        try
         {
-            ["api_key"] = "",
-        };
-        query.Remove("api_key");
-        string path = "/Videos/" + Uri.EscapeDataString(itemId) + "/" + Uri.EscapeDataString(streamIndex.ToString(CultureInfo.InvariantCulture)) + "/Subtitles/" +
-                      Uri.EscapeDataString(string.IsNullOrWhiteSpace(format) ? "srt" : format!);
-        return new Uri(_dialect.BuildUrl(path, query));
+            response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (HttpRequestException ex) { throw ProviderException.Network(_serverId, ex); }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+                throw new ProviderHttpException(_serverId, (int)response.StatusCode, "GET", UrlRedactor.Redact(request.RequestUri));
+            return await ReadBoundedAsync(response.Content, ct).ConfigureAwait(false);
+        }
+    }
+
+    private const int MaxSubtitleBytes = 8 * 1024 * 1024;
+
+    private async Task<byte[]> ReadBoundedAsync(HttpContent content, CancellationToken ct)
+    {
+        if (content.Headers.ContentLength is > MaxSubtitleBytes)
+            throw new ProviderException(_serverId, ProviderErrorCode.Parse, "字幕文件过大");
+
+        await using Stream stream = await content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+        byte[] chunk = new byte[16 * 1024];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, ct).ConfigureAwait(false)) > 0)
+        {
+            if (buffer.Length + read > MaxSubtitleBytes)
+                throw new ProviderException(_serverId, ProviderErrorCode.Parse, "字幕文件过大");
+            buffer.Write(chunk, 0, read);
+        }
+        return buffer.ToArray();
+    }
+
+    /// <remarks>
+    /// A subtitle stream belongs to a media source, and Emby 4.9 only answers
+    /// <c>/Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/Stream.{format}</c>: both the shorter
+    /// <c>/Videos/{itemId}/Subtitles/{index}/Stream.{format}</c> form and a source-id-less variant
+    /// answered 404 against the live server. The source id is therefore part of the path whenever the
+    /// caller knows which version it is playing.
+    /// </remarks>
+    private string SubtitlePath(string itemId, string? mediaSourceId, int streamIndex, string? format)
+    {
+        var path = new StringBuilder();
+        path.Append("/Videos/").Append(Uri.EscapeDataString(itemId)).Append('/');
+        if (!string.IsNullOrEmpty(mediaSourceId))
+            path.Append(Uri.EscapeDataString(mediaSourceId)).Append('/');
+        path.Append("Subtitles/")
+            .Append(Uri.EscapeDataString(streamIndex.ToString(CultureInfo.InvariantCulture)))
+            .Append("/Stream.")
+            .Append(Uri.EscapeDataString(string.IsNullOrWhiteSpace(format) ? "srt" : format!));
+        return path.ToString();
     }
 
     private string Require(string? value) => !string.IsNullOrEmpty(value) ? value! : throw ProviderException.AuthRequired(_serverId);

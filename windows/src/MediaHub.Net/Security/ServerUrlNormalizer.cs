@@ -80,8 +80,14 @@ public static class ServerUrlNormalizer
 
         if (text.Contains('?'))
         {
-            error = "服务器地址不能包含查询参数（?…），请只填写基地址。";
-            return false;
+            // A plain media address may legitimately carry a signed query string, so that shape is kept
+            // verbatim. For an API server the base address is stored in clear text next to the vault and
+            // must not smuggle credentials, which is why the refusal stays for every other type.
+            if (type != ServerType.Http)
+            {
+                error = "服务器地址不能包含查询参数（?…），请只填写基地址。";
+                return false;
+            }
         }
 
         // Without a scheme, "media.example.com:8096" parses as a URI whose scheme is "media.example.com". A
@@ -130,7 +136,10 @@ public static class ServerUrlNormalizer
         string authority = uri.IsDefaultPort
             ? uri.Host
             : uri.Host + ":" + uri.Port.ToString(CultureInfo.InvariantCulture);
-        string baseText = scheme + "://" + authority + path;
+        // Only a plain media address keeps its query string; it is part of the resource, not a credential
+        // slot in which a base address would hide one.
+        string query = type == ServerType.Http ? uri.Query : "";
+        string baseText = scheme + "://" + authority + path + query;
         var baseUri = new Uri(baseText, UriKind.Absolute);
 
         Uri apiRoot = type switch

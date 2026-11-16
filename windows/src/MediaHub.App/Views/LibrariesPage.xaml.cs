@@ -44,6 +44,7 @@ public sealed partial class LibrariesPage : Page
     public LibrariesPage()
     {
         InitializeComponent();
+        SkeletonPanel.ItemsSource = new object[6];
         Loaded += OnLoaded;
     }
 
@@ -57,6 +58,14 @@ public sealed partial class LibrariesPage : Page
         _loading = true;
         BusyRing.IsActive = true;
         StatusBar.IsOpen = false;
+
+        bool showSkeleton = LibraryGrid.ItemsSource is null;
+        if (showSkeleton)
+        {
+            EmptyPanel.Visibility = Visibility.Collapsed;
+            SkeletonPanel.Visibility = Visibility.Visible;
+            UiMotion.Pulse(SkeletonPanel);
+        }
 
         try
         {
@@ -85,11 +94,10 @@ public sealed partial class LibrariesPage : Page
             }
             if (entries.Count == 0)
             {
+                // An empty state with a way forward beats an informational banner: the banner said
+                // what was wrong but left the user to find the media-source page themselves.
                 LibraryGrid.ItemsSource = Array.Empty<LibraryCard>();
-                StatusBar.Severity = InfoBarSeverity.Informational;
-                StatusBar.Title = "没有可用的媒体库";
-                StatusBar.Message = "请先在“媒体源”中添加并登录 Emby、Jellyfin 或 WebDAV 服务器。";
-                StatusBar.IsOpen = true;
+                EmptyPanel.Visibility = Visibility.Visible;
                 return;
             }
 
@@ -147,6 +155,7 @@ public sealed partial class LibrariesPage : Page
             }
 
             LibraryGrid.ItemsSource = cards;
+            EmptyPanel.Visibility = cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
             if (failures.Count > 0)
             {
@@ -158,10 +167,18 @@ public sealed partial class LibrariesPage : Page
         }
         finally
         {
+            if (showSkeleton)
+            {
+                UiMotion.Settle(SkeletonPanel);
+                SkeletonPanel.Visibility = Visibility.Collapsed;
+            }
             BusyRing.IsActive = false;
             _loading = false;
         }
     }
+
+    private void OnAddSourceClick(object sender, RoutedEventArgs e)
+        => App.MainWindow?.NavigateShell(typeof(SourcesPage));
 
     /// <summary>Two or three characters describing why a source cannot be listed in full.</summary>
     private static string ShortStatus(ServerStatus status) => status switch
@@ -169,6 +186,8 @@ public sealed partial class LibrariesPage : Page
         ServerStatus.Unreachable => "离线",
         ServerStatus.AuthRequired => "需要登录",
         ServerStatus.AuthFailed => "认证失败",
+        ServerStatus.Forbidden => "无权限",
+        ServerStatus.NotConfigured => "未配置",
         ServerStatus.Checking => "连接中",
         _ => "未连接",
     };

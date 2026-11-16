@@ -22,6 +22,12 @@ public sealed record MpvPlayerOptions
     public string HwDecCodecs { get; init; } = "d3d11va";
 
     /// <summary>
+    /// How per-frame HDR metadata (HDR10+ / Dolby Vision RPU) feeds the colour pipeline. The default
+    /// keeps the engine's previous behaviour; see <see cref="MpvColorPipeline"/>.
+    /// </summary>
+    public HdrDynamicMetadataMode HdrDynamicMetadata { get; init; } = HdrDynamicMetadataMode.FollowSource;
+
+    /// <summary>
     /// Audio output driver. Empty selects the engine default (WASAPI on Windows).
     /// </summary>
     /// <remarks>

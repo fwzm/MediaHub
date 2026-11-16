@@ -35,6 +35,12 @@ public sealed record PlaybackOptions
     public bool ForceTranscode { get; init; }
     public double PlaybackRate { get; init; } = 1.0;
     public string? MediaSourceId { get; init; }
+
+    /// <summary>
+    /// Version preference when no explicit source was picked: null/"auto" keeps server order,
+    /// "highest" picks the largest direct-playable source, "lowest" the smallest.
+    /// </summary>
+    public string? QualityPreference { get; init; }
 }
 
 /// <summary>

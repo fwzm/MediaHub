@@ -151,6 +151,7 @@ public sealed partial class PlaylistsPage : Page
             Title = "删除播放列表",
             Content = "将删除“" + row.Name + "”及其中的 " + row.ItemCount + " 个条目。媒体本身不会被删除，此操作不可撤销。",
             PrimaryButtonText = "删除",
+            PrimaryButtonStyle = (Style)Application.Current.Resources["MediaHubDangerButton"],
             CloseButtonText = "取消",
             DefaultButton = ContentDialogButton.Close,
         };

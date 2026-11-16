@@ -15,10 +15,10 @@ test-count-authority: ci-print
 msix: not-implemented
 signing: blocked-no-certificate
 clean-machine-install: not-run
-engine-flavour-default: gpl
-engine-lgpl-candidate: built-not-switched
+engine-flavour-default: lgpl
+engine-lgpl-candidate: shipped-default
 licence-files-in-package: staged-by-ci
-release-blocker: gpl-obligation
+release-blocker: none
 ```
 <!-- END capability-map-status -->
 
@@ -69,6 +69,7 @@ release-blocker: gpl-obligation
 | 每媒体源 NetworkPolicy（系统/直连/显式代理） | EXECUTED_PASS |
 | 跨 origin 重定向剥离凭据（应用层） | EXECUTED_PASS（真实回环 socket，两个监听器） |
 | HTTPS→HTTP 降级拒绝 | EXECUTED_PASS |
+| 自签名证书（按服务器选择：证书指纹信任 / 该台不校验；无全局开关） | IMPLEMENTED_UNVERIFIED（真实本地 TLS 单测：未配置失败 / 指纹成功 / 不校验成功 / 探针在握手阶段中止且不发送任何请求；真实自签服务器未跑 GUI 验收） |
 | 重定向跳数上限 | EXECUTED_PASS |
 | 日志/诊断写入时脱敏 | EXECUTED_PASS |
 | **引擎只经本地转发取流，不持有服务器凭据** | EXECUTED_PASS（`Engine_through_the_bridge_never_delivers_the_token_to_a_redirect_target`） |
@@ -88,6 +89,8 @@ release-blocker: gpl-obligation
 | 播放 / 暂停 / 拖动 / 音量 / 倍速 | EXECUTED_PASS（引擎测试断言） |
 | 音轨 / 字幕轨道枚举 | EXECUTED_PASS（真实文件 + UIA，轨道列表跟随引擎内容签名） |
 | 内封 / 外挂字幕（SRT/ASS/SSA/VTT） | EXECUTED_PASS（外挂字幕经真实文件对话框加载，列表与提示均实测） |
+| 服务端外挂字幕（Emby/Jellyfin sidecar） | IMPLEMENTED_UNVERIFIED（Provider 取字节 → 临时落盘 → 引擎 `sub-add auto`；Mock 单测通过，真实服务器未跑 GUI 验收） |
+| 多版本片源选择（跳过仅转码源，全转码时明确报错） | IMPLEMENTED_UNVERIFIED（Mock 单测覆盖选择顺序、仅直串流、全部仅转码报错；真实多版本条目未验收） |
 | 字幕样式（字体/字号/颜色/描边/位置/延迟/ASS 覆盖） | IMPLEMENTED_UNVERIFIED |
 | 全屏切换 | IMPLEMENTED_UNVERIFIED（未截图确认） |
 | 播放进度恢复 | EXECUTED_PASS（真实 Jellyfin 12.2 与官方 Emby 4.10：中断回写 → 完全重启 → 引擎从服务端位置恢复） |
@@ -138,4 +141,4 @@ release-blocker: gpl-obligation
 | Windows CI | 已配置（`.github/workflows/windows-ci.yml`），结果见 PR 检查页 |
 | 便携版构建 | EXECUTED_PASS（331.6 MB，可启动） |
 | MSIX / 代码签名 / 干净机安装 | **MSIX NOT_IMPLEMENTED · 代码签名 SIGNING_BLOCKED（无证书） · 干净机安装 NOT_RUN**；随包许可文件自 W40 起 7 件；见 [PACKAGING.md](licensing/PACKAGING.md) §0 |
-| 第三方许可证与固定哈希 | 见 [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)；默认 engine flavour 仍是 **GPL 基线**（`-p:LibMpvFlavour=lgpl` 只是旁路开关，见 [LGPL-ENGINE-SWITCH.md](LGPL-ENGINE-SWITCH.md)），LGPL 候选件已构建未切换；**RELEASE BLOCKER（GPL 义务）未解除** |
+| 第三方许可证与固定哈希 | 见 [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)；默认 engine flavour 是 **LGPL-2.1-or-later 构建**（`-p:LibMpvFlavour=gpl` 只是把 GPL 基线拉回来做对比回归，见 [LGPL-ENGINE-SWITCH.md](LGPL-ENGINE-SWITCH.md)）；**GPL 义务导致的 RELEASE BLOCKER 已解除**（2026-11-12，判定与证据见 [LICENCE-DECISION.md](licensing/LICENCE-DECISION.md) §9） |

@@ -252,6 +252,132 @@ public sealed class MediaBrowserMapperTests
     }
 
     [Fact]
+    public void Every_media_source_becomes_a_labelled_version()
+    {
+        // Shape taken from a live Jellyfin 12.2 item: one id per file, per-source MediaStreams, and
+        // the supports flags the server computed for this client.
+        const string json = """
+        {
+          "Id": "item-9",
+          "Name": "Version Movie",
+          "MediaSources": [
+            {
+              "Id": "src-1080",
+              "Name": "1080p",
+              "Container": "mp4",
+              "SupportsDirectPlay": true,
+              "SupportsDirectStream": true,
+              "MediaStreams": [ { "Type": "Video", "Codec": "h264", "Width": 1920, "Height": 1080 } ]
+            },
+            {
+              "Id": "src-720",
+              "Name": "720p",
+              "Container": "mp4",
+              "SupportsDirectPlay": false,
+              "SupportsDirectStream": false,
+              "MediaStreams": [ { "Type": "Video", "Codec": "hevc", "Width": 1280, "Height": 720 } ]
+            }
+          ]
+        }
+        """;
+
+        using var doc = JsonDocument.Parse(json);
+        var versions = MediaBrowserMapper.MapVersions(doc.RootElement);
+
+        Assert.Equal(2, versions.Count);
+        Assert.Equal("src-1080", versions[0].MediaSourceId);
+        Assert.Equal("1920×1080 · h264 · mp4 · 直连", versions[0].Label);
+        Assert.True(versions[0].IsDefault);
+        Assert.False(versions[0].TranscodeOnly);
+        Assert.Equal("1280×720 · hevc · mp4 · 仅转码", versions[1].Label);
+        Assert.True(versions[1].TranscodeOnly);
+    }
+
+    [Fact]
+    public void An_item_without_media_sources_has_no_versions()
+    {
+        using var doc = JsonDocument.Parse("""{ "Id": "x", "Name": "y", "Type": "Movie" }""");
+        Assert.Empty(MediaBrowserMapper.MapVersions(doc.RootElement));
+    }
+
+    [Fact]
+    public void Technical_badges_come_from_the_first_media_source()
+    {
+        // A multi-version title: the poster badge must describe the version the client will play
+        // (the first one the server lists), not the second file's resolution.
+        const string json = """
+        {
+          "Id": "item-2",
+          "Name": "Multi Version",
+          "Type": "Movie",
+          "MediaSources": [
+            {
+              "Id": "src-4k",
+              "Container": "mkv",
+              "BitRate": 60000000,
+              "MediaStreams": [
+                { "Type": "Video", "Codec": "hevc", "Width": 3840, "Height": 2160, "VideoRange": "HDR", "BitRate": 58000000 },
+                { "Type": "Audio", "Codec": "truehd", "Channels": 8 }
+              ]
+            },
+            {
+              "Id": "src-1080",
+              "Container": "mp4",
+              "BitRate": 8000000,
+              "MediaStreams": [
+                { "Type": "Video", "Codec": "h264", "Width": 1920, "Height": 1080 },
+                { "Type": "Audio", "Codec": "aac", "Channels": 2 }
+              ]
+            }
+          ]
+        }
+        """;
+
+        using var doc = JsonDocument.Parse(json);
+        var item = MediaBrowserMapper.MapItem("srv", doc.RootElement);
+
+        Assert.Equal(3840, item.Width);
+        Assert.Equal(2160, item.Height);
+        Assert.Equal("hevc", item.VideoCodec);
+        Assert.Equal("truehd", item.AudioCodec);
+        Assert.Equal(8, item.AudioChannels);
+        Assert.Equal("HDR", item.VideoRange);
+        Assert.Equal("mkv", item.Container);
+        Assert.Equal(60000000, item.BitRate);
+        Assert.Equal(2, MediaBrowserMapper.MapVersions(doc.RootElement).Count);
+    }
+
+    [Fact]
+    public void Item_level_streams_fill_badges_when_the_answer_has_no_media_sources()
+    {
+        // The list query's own shape: Emby answers item-level MediaStreams/Container for entries that
+        // have a single file, and no MediaSources array at all.
+        using var doc = JsonDocument.Parse(SampleItemJson);
+        var item = MediaBrowserMapper.MapItem("srv", doc.RootElement);
+
+        Assert.Equal(3840, item.Width);
+        Assert.Equal(2160, item.Height);
+        Assert.Equal("hevc", item.VideoCodec);
+        Assert.Equal("truehd", item.AudioCodec);
+        Assert.Equal(8, item.AudioChannels);
+    }
+
+    [Fact]
+    public void Source_quality_prefers_the_source_fields_and_falls_back_to_its_video_stream()
+    {
+        using var explicitQuality = JsonDocument.Parse("""{ "Height": 2160, "BitRate": 40000000 }""");
+        Assert.Equal((2160, 40000000L), MediaBrowserMapper.ReadSourceQuality(explicitQuality.RootElement));
+
+        using var streamOnly = JsonDocument.Parse("""
+        { "MediaStreams": [ { "Type": "Video", "Height": 1080, "BitRate": 9000000 } ] }
+        """);
+        Assert.Equal((1080, 9000000L), MediaBrowserMapper.ReadSourceQuality(streamOnly.RootElement));
+
+        using var unknown = JsonDocument.Parse("""{ "Id": "src" }""");
+        Assert.Equal((null, null), MediaBrowserMapper.ReadSourceQuality(unknown.RootElement));
+    }
+
+    [Fact]
     public void Missing_fields_stay_null_rather_than_being_invented()
     {
         using var doc = JsonDocument.Parse("""{ "Id": "x", "Name": "y", "Type": "Movie" }""");
@@ -262,6 +388,10 @@ public sealed class MediaBrowserMapperTests
         Assert.Null(item.CommunityRating);
         Assert.Null(item.FileSizeBytes);
         Assert.Null(item.UserDataPlaybackPositionTicks);
+        Assert.Null(item.Width);
+        Assert.Null(item.Height);
+        Assert.Null(item.VideoCodec);
+        Assert.Null(item.AudioCodec);
         Assert.Empty(MediaBrowserMapper.MapStreams(doc.RootElement));
     }
 

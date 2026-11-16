@@ -243,7 +243,9 @@ public sealed class MockServerIntegrationTests
 
         Assert.Equal("127.0.0.1", source.Url.Host);
         Assert.Equal(mock.BaseUri.Port, source.Url.Port);
-        Assert.Equal(PlaybackMode.Stream, source.Mode);
+        // The mock's only source supports direct play, so that is what gets reported. The URL is the
+        // same static stream either way; the mode only tells the server how the file was played.
+        Assert.Equal(PlaybackMode.DirectPlay, source.Mode);
         Assert.Equal("mp4", source.Container);
         Assert.Equal("/emby/Videos/item-000/stream.mp4", source.Url.AbsolutePath);
 
@@ -304,6 +306,72 @@ public sealed class MockServerIntegrationTests
         using JsonDocument stoppedBody = JsonDocument.Parse(stopped.Body!);
         Assert.True(stoppedBody.RootElement.TryGetProperty("PositionTicks", out JsonElement position));
         Assert.Equal(0, position.GetInt64());
+    }
+
+    [Theory]
+    [InlineData(ServerType.Emby)]
+    [InlineData(ServerType.Jellyfin)]
+    public async Task Item_detail_asks_for_media_sources_and_streams(ServerType type)
+    {
+        // Emby omits MediaSources from the detail response unless Fields names it, which is what made
+        // every multi-version item render as one version. Assert the wire request, not the object:
+        // the mapper can only map what the server was asked to send.
+        IMediaProviderFactory factory = type == ServerType.Emby ? new EmbyProviderFactory() : new JellyfinProviderFactory();
+        await using var mock = await MockMediaServer.StartAsync(type);
+        using ProviderHandle handle = await ConnectAsync(mock, factory);
+        MediaItem item = await FirstItemAsync(handle);
+
+        MediaDetail detail = await handle.Detail!.GetItemDetailAsync(item.Id);
+
+        RecordedRequest request = Assert.Single(
+            mock.Requests,
+            r => r.PathAndQuery.Contains("/Items/" + item.Id + "?", StringComparison.Ordinal));
+        Assert.Contains("Fields=", request.PathAndQuery, StringComparison.Ordinal);
+        Assert.Contains("MediaSources", request.PathAndQuery, StringComparison.Ordinal);
+        Assert.Contains("MediaStreams", request.PathAndQuery, StringComparison.Ordinal);
+        Assert.Equal(item.Id, detail.Item.Id);
+    }
+
+    [Fact]
+    public async Task Start_is_sent_to_the_server_before_the_first_progress_report()
+    {
+        await using var mock = await MockMediaServer.StartAsync(ServerType.Emby);
+        using ProviderHandle handle = await ConnectAsync(mock, new EmbyProviderFactory());
+        MediaItem item = await FirstItemAsync(handle);
+        PlaybackSource source = await handle.Playback!.ResolvePlaybackAsync(item, new PlaybackOptions());
+        var progress = new PlaybackProgress
+        {
+            ServerId = "mock-server",
+            ItemId = item.Id,
+            PositionTicks = 5_000_000,
+            SessionId = source.SessionId,
+            Mode = PlaybackMode.DirectPlay,
+        };
+
+        // The order the coordinator now enforces: await the start report, then report progress. A
+        // progress report that arrives first belongs to no open session and is discarded by the
+        // server, which is how the resume point stayed stale for one interval.
+        await handle.Progress!.ReportPlaybackStartedAsync(progress);
+        await handle.Progress!.ReportProgressAsync(progress);
+
+        IReadOnlyList<RecordedRequest> requests = mock.Requests;
+        int startIndex = IndexOf(requests, "/Sessions/Playing");
+        int progressIndex = IndexOf(requests, "/Sessions/Playing/Progress");
+        Assert.True(startIndex >= 0, "the start report must reach the server");
+        Assert.True(progressIndex > startIndex, "the progress report must follow the start report");
+    }
+
+    private static int IndexOf(IReadOnlyList<RecordedRequest> requests, string path)
+    {
+        for (int i = 0; i < requests.Count; i++)
+        {
+            string pathAndQuery = requests[i].PathAndQuery;
+            int queryStart = pathAndQuery.IndexOf('?');
+            string onlyPath = queryStart >= 0 ? pathAndQuery[..queryStart] : pathAndQuery;
+            // "Playing" is a prefix of "Playing/Progress", so match the full trailing segment.
+            if (onlyPath.EndsWith(path, StringComparison.Ordinal)) return i;
+        }
+        return -1;
     }
 
     // ---------------------------------------------------------------- media bytes and range
@@ -443,6 +511,67 @@ public sealed class MockServerIntegrationTests
         Assert.Contains("maxWidth=300", image.PathAndQuery);
         Assert.Contains("tag=primary-item-000", image.PathAndQuery);
     }
+
+    // ---------------------------------------------------------------- sidecar subtitles
+
+    [Fact]
+    public async Task Emby_sidecar_subtitle_is_downloaded_through_the_authenticated_stack()
+    {
+        await using var mock = await MockMediaServer.StartAsync(ServerType.Emby);
+        using ProviderHandle handle = await ConnectAsync(mock, new EmbyProviderFactory());
+        MediaItem item = await FirstItemAsync(handle);
+
+        IReadOnlyList<SubtitleTrack> tracks = await handle.Subtitle!.GetSubtitlesAsync(item.Id);
+        SubtitleTrack external = Assert.Single(tracks, t => t.IsExternal);
+
+        // Format, not codec: a server renders "subrip" as "srt" and would 404 on the raw codec name.
+        // The mock's item payload carries no MediaSources, so the display URL keeps the source-less
+        // route; the download below names the playing source explicitly, exactly as playback does.
+        Assert.Equal(mock.Url("/Videos/" + item.Id + "/Subtitles/2/Stream.srt").ToString(), external.DeliveryUrl);
+        Assert.DoesNotContain("api_key", external.DeliveryUrl!, StringComparison.OrdinalIgnoreCase);
+
+        Assert.NotNull(handle.SubtitleContent);
+        byte[] bytes = await handle.SubtitleContent!.FetchSubtitleAsync(item.Id, external, "mediasource-" + item.Id);
+
+        Assert.Contains("Mock external subtitle", System.Text.Encoding.UTF8.GetString(bytes), StringComparison.Ordinal);
+        RecordedRequest download = Assert.Single(mock.RequestsFor(
+            "/emby/Videos/" + item.Id + "/mediasource-" + item.Id + "/Subtitles/2/Stream.srt"));
+        Assert.Equal(Token, download.Token);
+        Assert.DoesNotContain("api_key", download.PathAndQuery, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Bitmap_subtitle_is_rejected_instead_of_offered_as_text()
+    {
+        await using var mock = await MockMediaServer.StartAsync(ServerType.Emby);
+        using ProviderHandle handle = await ConnectAsync(mock, new EmbyProviderFactory());
+
+        // PGS cannot become a sidecar file the engine can render; asking for "srt" would produce
+        // garbage or a server-side burn-in, which is transcoding.
+        var bitmap = new SubtitleTrack(4, "eng", "PGS", "pgssub", IsExternal: true, IsDefault: false, IsForced: false);
+
+        ProviderException failure = await Assert.ThrowsAsync<ProviderException>(
+            () => handle.SubtitleContent!.FetchSubtitleAsync("item-000", bitmap));
+        Assert.Equal(ProviderErrorCode.NotImplemented, failure.Code);
+        Assert.Empty(mock.RequestsFor("/emby/Videos/item-000/4/Subtitles"));
+    }
+
+    [Theory]
+    [InlineData("subrip", "srt", "srt")]
+    [InlineData("ASS", "ass", "ass")]
+    [InlineData("ssa", "ass", "ass")]
+    [InlineData("webvtt", "vtt", "vtt")]
+    [InlineData("mov_text", "srt", "srt")]
+    public void Text_subtitle_codecs_resolve_to_a_renderable_format(string codec, string format, string extension)
+    {
+        Assert.True(SubtitleFormats.TryResolve(codec, out string resolvedFormat, out string resolvedExtension));
+        Assert.Equal(format, resolvedFormat);
+        Assert.Equal(extension, resolvedExtension);
+    }
+
+    [Fact]
+    public void Unknown_subtitle_codec_is_not_resolved()
+        => Assert.False(SubtitleFormats.TryResolve("hdmv_pgs_subtitle", out _, out _));
 
     [Fact]
     public async Task Probe_reports_the_identity_from_the_public_endpoint()

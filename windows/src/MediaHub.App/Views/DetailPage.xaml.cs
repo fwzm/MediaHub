@@ -6,6 +6,7 @@ using MediaHub.Storage;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace MediaHub.App.Views;
 
@@ -234,6 +235,27 @@ public sealed partial class DetailPage : Page
         PlayItem(row.Id, row.Title, 0, row.SeriesId, row.SeasonNumber, row.EpisodeNumber);
     }
 
+    private void OnPlayEpisodeMenuClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not EpisodeRow row) return;
+        PlayItem(row.Id, row.Title, 0, row.SeriesId, row.SeasonNumber, row.EpisodeNumber);
+    }
+
+    private void OnCopyEpisodeTitleClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not EpisodeRow row) return;
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(row.Title);
+            Clipboard.SetContent(package);
+        }
+        catch (Exception ex)
+        {
+            StartupTrace.Write("detail:clipboard FAILED " + ex.GetType().Name);
+        }
+    }
+
     private void OnPlayClick(object sender, RoutedEventArgs e)
         => PlayItem(_navigation!.ItemId, _detail?.Item.Name ?? _navigation!.Title, 0,
             _detail?.Item.SeriesId, _detail?.Item.SeasonNumber, _detail?.Item.EpisodeNumber);
@@ -426,5 +448,28 @@ public sealed partial class DetailPage : Page
         StatusBar.Message = message;
         StatusBar.IsOpen = true;
         BusyRing.IsActive = false;
+
+        // A page that failed before it ever rendered is a dead end without this: the only way back
+        // used to be leaving the page and finding it again.
+        if (_detail is null)
+        {
+            var retry = new Button
+            {
+                Content = "重试",
+                Style = (Style)Application.Current.Resources["MediaHubGhostButton"],
+            };
+            retry.Click += async (_, _) =>
+            {
+                StatusBar.IsOpen = false;
+                StatusBar.ActionButton = null;
+                _loaded = false;
+                await LoadAsync();
+            };
+            StatusBar.ActionButton = retry;
+        }
+        else
+        {
+            StatusBar.ActionButton = null;
+        }
     }
 }

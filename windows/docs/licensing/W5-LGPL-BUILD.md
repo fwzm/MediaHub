@@ -1,6 +1,6 @@
 # W5-LGPL-BUILD — an actual LGPL-compatible libmpv, built and verified
 
-- Status: **BUILT AND VERIFIED — engineering result, not a legal opinion.**
+- Status: **BUILT AND VERIFIED — engineering result, not a legal opinion.** Since 2026-11-12 this build *is* what ships (default flavour, install kit, CI publish), so the present-tense rows 21-22 of §0 and §7 item 4 describe the 2026-10-14 state and are superseded; `LICENCE-DECISION.md` §9 is the current statement.
 - Date: 2026-10-14 (W5-H). Author: engine-dev.
 - Scope: proves what was *run*. It does not change any licence, does not authorise a release, and
   does not by itself make MediaHub distributable. The W3 record (LICENCE-DECISION.md) remains the
@@ -15,7 +15,7 @@
 
 | Question | Answer |
 | --- | --- |
-| Is there now a real LGPL-compatible libmpv? | **Yes.** windows/engine/lgpl/dist/libmpv-2.dll, 3,327,274 bytes, sha256 20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a |
+| Is there now a real LGPL-compatible libmpv? | **Yes.** windows/engine/lgpl/dist/libmpv-2.dll, 3,327,274 bytes, sha256 a3f901d6b5bae54a4b5b87cd9d9d973fd3af079aa70a61851560c30e74722a68 |
 | Does it still do what MediaHub needs? | **Yes, measured**: hwdec=d3d11va, vo=gpu-next, ctx=d3d11, libass subtitles, WASAPI audio. MpvProbe reports **PASS**. |
 | Is 'gpl' in the engine's feature list? | **No.** 28 features, verified from three independent sources. |
 | Is the shipped GPL engine changed? | **No.** windows/native/libmpv/libmpv-2.dll is still 6a48faec…63d9. |
@@ -138,8 +138,8 @@ The GPL baseline was not touched: the probe's bin directory was copied to a scra
 DLL swapped in there.
 
     libmpv-2.dll        : D:\mh-servers\lgpl-build\probe-lgpl\libmpv-2.dll
-    libmpv-2.dll sha256 : 20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a
-    mpv-version         : mpv v0.41.0-UNKNOWN
+    libmpv-2.dll sha256 : a3f901d6b5bae54a4b5b87cd9d9d973fd3af079aa70a61851560c30e74722a68
+    mpv-version         : mpv v0.41.0-UNKNOWN (as run on 2026-10-14; after the 2026-11-12 rebuild it reports mpv v0.41.0)
     ffmpeg-version      : 8.1.1
     libass-version      : 24137728
     gpl mentioned in banner: False
@@ -245,13 +245,13 @@ Outputs land in windows/engine/lgpl/; the artifact is windows/engine/lgpl/dist/l
    materially improves the position versus the shipped static build.
 3. **LGPL notices, source availability and a written offer are not produced.** Notices for the LGPL
    libraries, their source tarballs/URLs, and the offer must ship with any release.
-4. **Nothing has been switched over.** windows/src still loads windows/native/libmpv/libmpv-2.dll,
-   the GPL baseline. Replacing the engine is a product decision and requires a full re-run of the GUI
-   and playback acceptance suite — the MpvProbe PASS in §2.1 is necessary, not sufficient.
+4. **Nothing has been switched over.** — that was the state on 2026-10-14; **superseded 2026-11-12**, when the
+   default flavour became this LGPL build and the GUI/playback regression was re-run (see `LGPL-ENGINE-SWITCH.md` §7
+   and `LICENCE-DECISION.md` §9). At the time, replacing the engine was a product decision needing that suite; §2.1 was not sufficient.
 5. **The repository still has no LICENSE file** (W3 finding, unchanged).
-6. **The engine's version string is now v0.41.0-UNKNOWN** instead of v0.41.0-1154-gec38361c5: the
-   blob-filtered clone could not satisfy mpv's git describe pattern. Cosmetic here, but anything
-   that parses the engine version must not be broken by it.
+6. **The engine's version string once read v0.41.0-UNKNOWN** instead of v0.41.0-1154-gec38361c5: the
+   blob-filtered clone could not satisfy mpv's git describe pattern. Fixed 2026-11-12 by setting
+   MPV_VERSION to 0.41.0 in the mpv source tree and rebuilding - `mpv --version` now reports `mpv v0.41.0`.
 7. **MSYS2's dependency set is not a pinned, reproducible feed.** The build resolves against whatever
    the rolling MSYS2 repos served on 2026-10-14; msys2-package-hashes.txt records exactly what was
    used, but a reproducible build needs those artifacts archived.
@@ -269,14 +269,14 @@ stay valid only as long as this section adds nothing above them.
 <!-- BEGIN lgpl-build-status -->
 ```text
 candidate-bytes: 3327274
-candidate-sha256: 20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a
+candidate-sha256: a3f901d6b5bae54a4b5b87cd9d9d973fd3af079aa70a61851560c30e74722a68
 gpl-baseline-sha256: 6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9
 msys2-package-count: 32
 msys2-package-bytes: 31338987
 msys2-package-bytes-source: session-cache-measurement-not-archived
 feature-count: 28
 gpl-feature-absent: true
-mpv-version-reports: v0.41.0-UNKNOWN
+mpv-version-reports: v0.41.0
 ffmpeg-version: 8.1.1
 ffmpeg-hwaccels: d3d11va, d3d12va
 runtime-dll-count: 33

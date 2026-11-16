@@ -19,6 +19,7 @@
     <ProjectReference Include="..\..\src\MediaHub.Player.Mpv\MediaHub.Player.Mpv.csproj" />
     <ProjectReference Include="..\..\src\MediaHub.Storage\MediaHub.Storage.csproj" />
     <ProjectReference Include="..\MediaHub.TestSupport\MediaHub.TestSupport.csproj" />
+    <ProjectReference Include="..\..\src\MediaHub.Update\MediaHub.Update.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- The playback engine tests need a real media file; it is committed so the tests are hermetic. -->

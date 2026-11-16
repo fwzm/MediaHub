@@ -28,7 +28,9 @@
 #       pwsh -File windows\tools\acceptance\u1\continue-watching-gui.ps1 -Server jellyfin
 param(
   [ValidateSet('emby','jellyfin')][string]$Server = 'emby',
-  [string]$Exe = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.exe'
+  [string]$Exe = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.exe',
+  # 只跑 P0 前置（复位 + 来源播种）并回读 settings，用于验证 P0.6 的“只保留一条”修复。
+  [switch]$PreflightOnly
 )
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Continue'
@@ -59,9 +61,22 @@ $durationSec = 600   # Long Resume 约 600 s（容差见 P1.5）
 $navNames = @('首页','媒体库','搜索','继续观看','我的收藏','媒体源','设置')
 
 $checks = New-Object System.Collections.Generic.List[object]
+function Get-StepFile {
+  if (-not $script:stepFile) {
+    $dir = if ($env:MH_STEP_DIR) { $env:MH_STEP_DIR } else { $ev }
+    $script:stepFile = Join-Path $dir ('steps-' + $Server + '-u1.jsonl')
+  }
+  return $script:stepFile
+}
 function Check([string]$name, [bool]$pass, [string]$detail) {
   $checks.Add([pscustomobject]@{ name = $name; pass = $pass; detail = $detail })
+  Write-MhStepRecord -Combo ($Server + '/u1') -Name $name -Status $(if ($pass) { 'PASS' } else { 'FAIL' }) -Detail $detail -StepFile (Get-StepFile)
   Write-Host (('[{0}] {1} :: {2}' -f $(if ($pass) { 'PASS' } else { 'FAIL' }), $name, $detail))
+}
+# 需要真实前台（坐标点击 / 系统文件选择器 / 注入键鼠）的步骤：静默跑法下不执行、不判 FAIL。
+function Check-NeedsForeground([string]$name, [string]$detail) {
+  Write-MhStepRecord -Combo ($Server + '/u1') -Name $name -Status 'NEEDS-FOREGROUND' -Detail $detail -StepFile (Get-StepFile)
+  Write-Host (('[NEEDS-FOREGROUND] {0} :: {1}' -f $name, $detail))
 }
 function Note([string]$text) { Write-Host ('  · ' + $text) }
 function Print-Evidence {
@@ -517,9 +532,14 @@ function Get-EmptyStateVisible {
   # continue.empty 是空态 StackPanel 的 AutomationId；Collapsed 时整个子树不在 UIA 树里。
   $e = Find-MhAppElement -AutomationId 'continue.empty' -IncludeOffscreen
   if ($e) { return (-not $e.Current.IsOffscreen) }
-  $t = Find-MhAppElement -Name '还没有可继续观看的内容。' -IncludeOffscreen
-  if (-not $t) { return $false }
-  return (-not $t.Current.IsOffscreen)
+  # 产品文案没有句号（ContinueWatchingPage.xaml: StateTitle="还没有可继续观看的内容"），
+  # 旧断言多写了一个「。」，导致空态明明已经在屏幕上却判失败（p4-after-played.png 可见）。
+  # 同时认 StateTitle / EmptyText 这两个真实呈现的文本节点。
+  foreach ($needle in @('还没有可继续观看的内容', '在任意媒体源上开始播放后')) {
+    $t = Find-MhAppElement -Name $needle -IncludeOffscreen
+    if ($t) { return (-not $t.Current.IsOffscreen) }
+  }
+  return $false
 }
 # InfoBar 没有 AutomationId（产品事实），只能按文案扫全树。命中即说明页面报过错 —— P2/P4 判 FAIL。
 function Get-WarningTexts {
@@ -600,7 +620,7 @@ try {
 
   Stop-MhAppForced | Out-Null
   Start-Sleep -Milliseconds 800
-  $kept = Keep-OnlyServer ($Server + ':*')
+  $kept = Keep-OnlyServer ($Server + ':' + $serverId)
   & $seed $Server $base $user $pass $serverId $script:token $script:uid 2>&1 | ForEach-Object { Write-Host ('  seed: ' + $_) }
   $cfg = Get-Content $settings -Raw | ConvertFrom-Json
   $entry = @($cfg.Servers | Where-Object { $_.ServerId -eq ($Server + ':' + $serverId) })
@@ -617,14 +637,23 @@ try {
   Stop-MhAppForced | Out-Null
   Start-Sleep -Milliseconds 800
 
+  if ($PreflightOnly) {
+    $pf = Get-Content $settings -Raw | ConvertFrom-Json
+    $pfServers = @($pf.Servers)
+    Write-Host ('PREFLIGHT settings=' + $settings + ' servers=' + $pfServers.Count + ' ids=' + (($pfServers | ForEach-Object { $_.ServerId }) -join ','))
+    $pfFail = @($checks | Where-Object { -not $_.pass }).Count
+    exit $(if ($pfFail -gt 0) { 1 } else { 0 })
+  }
+
   # -------------------------------------------------------------- P1 产生真实进度
   Write-Host ''
   Write-Host '=== P1 媒体库 → 长片 → 播放 → 播到中点 → 退出（产生真实进度）==='
   $app = Start-MhApp -Exe $exe -ResetTrace -TimeoutSec 60
   Start-Sleep -Seconds 3
   $hwnd = Get-MhWindowHandle
-  if ($hwnd) { Set-MhForeground -Hwnd $hwnd | Out-Null }
-  Check 'P1.0 客户端启动且窗口在前台' (($null -ne $app) -and ($null -ne $hwnd)) ('pid=' + $(if ($app) { $app.pid } else { 'n/a' }) + ' hwnd=' + $hwnd)
+  $uiaRoot = if ($hwnd) { Get-MhWindow } else { $null }
+  $winInfo = if ($hwnd) { Get-MhWindowInfo } else { $null }
+  Check 'P1.0 客户端启动且窗口可被 UIA 访问（静默运行：不抢前台、可后台驱动）' ([bool](($null -ne $app) -and ($null -ne $hwnd) -and ($null -ne $uiaRoot))) ('pid=' + $(if ($app) { $app.pid } else { 'n/a' }) + ' hwnd=' + $hwnd + ' visible=' + $(if ($winInfo) { $winInfo.visible } else { 'n/a' }) + ' foreground=' + $(if ($winInfo) { $winInfo.isForeground } else { 'n/a' }) + ' quiet=' + $env:MH_QUIET_UI)
 
   Set-LogMark
   $open = Open-ItemDetail $libName $itemName

@@ -2,6 +2,41 @@
 
 > 状态：TODO / IN PROGRESS / DONE / BLOCKED。由完成任务的 AI 更新。
 
+## 2026-11-14 杜比视界色彩映射 + HDR 动态元数据可配置（第一版）🔄 代码+测试完成，SDR 显示验证待补
+
+- [x] DONE `MpvColorPipeline`：显式固定 `target-colorspace-hint=auto` / `tone-mapping=auto`，
+  `hdr-compute-peak` 由设置决定（`auto` / `no` / `yes`）。三个值与当前引擎默认一致，不改变既有播放结果。
+- [x] DONE 设置项 `HdrDynamicMetadata`（默认 `auto` 跟随片源）落到设置页"播放引擎（高级）"，
+  经 `PlayerHostService` → `MpvPlayerOptions` 进入引擎；详情见 ADR-W008。
+- [x] DONE DV 识别：`TechnicalInfo.IsDolbyVision`（`colormatrix == dolbyvision`），播放页信息面板与
+  引擎启动日志展示；`max-pq-y` / `avg-pq-y` 一并写入日志。
+- [x] DONE 可读失败原因：`mpv_request_log_messages("warn")` + 事件线程保留 8 行日志尾，
+  `MpvPlaybackErrors.Describe` 翻译为显卡/解码器/401/404/网络/证书等中文原因，不再静默黑屏。
+- [x] EXECUTED_PASS 引擎侧取证（隐藏窗口，不置顶/不抢焦点）：`dv81_dv3.mkv` 自报
+  `bt.2020/pq/dolbyvision`、`hwdec=d3d11va`、`vo=gpu-next/d3d11`、`out=bt.2020/pq`，
+  `max-pq-y` 0.508@1s / 0.752@4.5s；与去 RPU 基线同刻 PSNR ≈ 17.3 dB。
+  截图：`.tools/shots/dv_src_a.png`、`dv_src_b.png`、`dv81_hdr10_t1.png`。
+- [x] EXECUTED_PASS 三种 `hdr-compute-peak` 取值均在引擎侧读回；截图逐像素相同（PQ 直通，无色调映射）。
+  截图：`dv_meta_a/b.png`、`dv_compute_a/b.png`。
+- [x] EXECUTED_PASS `MediaHub.Player.Mpv` / `MediaHub.App`：0 警告 0 错误；新增
+  `MpvColorPipelineTests` / `MpvPlaybackErrorTests` 23 项全通过。
+- [ ] NOT_RUN profile 5 真实 IPTPQc2 素材比对（本地 ffmpeg/x265 无法编码，需真实母版）。
+- [ ] NOT_RUN SDR 色调映射视觉验证（本机桌面为 HDR 模式，输出恒为 PQ 直通；需关闭 Windows HDR 或 SDR 显示器）。
+- [ ] NOT_RUN 显示端色度计测量；当前结论仅来自引擎自报参数与像素差分。
+- [ ] 既存失败（与本次无关）：`PlayerCacheStoreTests.EnforceCapacity_*` 与
+  `MpvPlaylistAndCacheTests.Cache_options_*` 在并行分支的缓存改动下失败，未触碰。
+
+## 2026-11-12 Windows 客户端代码审查与缺陷修复（report `review-6e0bbdc5`）
+
+- [x] DONE 审查范围：`windows/` 近期批次（自签名证书信任、服务端外挂字幕、上一集/下一集、方向键与滚轮、可选截图），25 个文件逐行核对；报告已发布，共 3 条（1 major / 2 minor）。
+- [x] DONE major：`PlaybackCoordinator.ResolveAsync` 转发会话硬编码 `NetworkPolicy.FollowSystem`，导致已确认指纹的服务器只能浏览不能播放。改为经 `ServerManager.PolicyFor(entry)` 派生（该校验入口改为 `public static`），找不到条目才退回系统策略。
+- [x] DONE minor：截图实际目录 `MediaHub Screenshots` 与两处界面文案 `图片\MediaHub 截图` 不一致；按要求把代码目录改为中文名，与既有文案统一。
+- [x] DONE minor：`MpvPlayer.TakeScreenshot` 重复且矛盾的 `<summary>` 已删除过期一条。
+- [x] EXECUTED_PASS 本机门禁（2026-11-12）：`dotnet build MediaHub.Windows.sln -c Debug` → 0 警告 0 错误；`MediaHub.Tests` 521/521、`MediaHub.WebDav.Tests` 104/104，全通过、0 跳过。
+- [x] EXECUTED_PASS 真实自签名服务器上的播放复验（2026-11-12，本地自签 TLS 端到端）：临时 Kestrel HTTPS 反向代理（CN=MediaHub Self-Signed Verify，SHA-256 `E5EDD7264F656F996EFA6847487F1A21E41F07F5617B684E058035007AF73C9F`）转发到进程内 Mock Emby，媒体由代理在 TLS 边缘按 Range/206 供给；应用走真实 UI 流程。16 项检查全通过、0 失败：A 指纹弹窗（弹窗指纹与证书逐字符一致）→ 确认后添加成功且 settings 存有指纹、未关闭校验、凭据入 vault；B 播放出画面（引擎自报 640×360、时钟推进、视频区域截图非黑，代理日志可见 `stream` 请求带会话与 `Range` 并回 206）；C 删除后选“该台不校验”可连可播（`AllowUntrustedCertificate=true`、无指纹）；D 取消指纹确认后提示“未添加媒体源”，settings 与凭据库字节哈希均未变化。证据目录 `D:\mh-verify\evidence`（`results.md`/`results.json`、截图、`proxy.log`）。账号密码仅运行时注入，未写入仓库或夹具；复验后已还原用户 settings/credentials。
+- [ ] NOT_RUN GUI 手测：截图目录实际落盘位置、方向键/滚轮分流、上一集/下一集按钮。
+- [ ] 已排除、不修（非缺陷或超出本次范围）：播放准备阶段重复请求的延迟优化、`SeekStepSeconds` 已无消费者、`PlayerPage` 卸载时的潜在竞态、`_brightness` 只写不读、`NetworkPolicy` 中 `BypassList` 冗余循环。
+
 ## 2026-10-14 收敛队列：A4 联合候选并入 main（用户指示：先收敛，暂不做真机/真服验收）
 
 - [x] PR #26 并入 main（`75b3d42`）：`BackupSerializer` KDoc 澄清有界读取责任边界（1 文件 5+/3−），CI run 36663380493 通过。

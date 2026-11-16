@@ -7,15 +7,17 @@
 | .NET Runtime | 10.0 | MIT | 运行时（自包含） | 随发布产物 |
 | Windows App SDK (WinUI 3) | 1.8.260921001 | Microsoft Software License / MIT | UI 框架 | NuGet |
 | System.Security.Cryptography.ProtectedData | 10.0.13 | MIT | DPAPI 凭据加密 | NuGet |
-| **libmpv (mpv)** | **v0.41.0-1154-gec38361c5** | **GPL-3.0-or-later（见下）** | 播放引擎 | `tools/fetch-libmpv.ps1` |
-| FFmpeg (libav*) | N-127521-g2ec8998c3 | **GPL-3.0-or-later**（随本构建） | 解复用与解码 | 随 libmpv |
-| rubberband / libdvdnav / libdvdread | 随 mpv 构建 | **GPL-2.0** | 变速、DVD 导航 | 随 libmpv（静态链接） |
-| libplacebo / libass / libcurl 等 | 随 mpv 构建 | LGPL-2.1-or-later / ISC 等 | 渲染、字幕、网络 | 随 libmpv |
+| **libmpv (mpv)** | **v0.41.0（LGPL 构建）** | **LGPL-2.1-or-later** | 播放引擎（随包分发，`engine/lgpl/dist`） | `windows/engine/lgpl/build-*.sh` + `tools/collect-lgpl-runtime.ps1` |
+| FFmpeg (libav*) | 8.1.1（LGPL 构建） | **LGPL-2.1-or-later**（动态链接） | 解复用与解码（`avcodec-62` 等 7 个 DLL） | 随 LGPL 引擎，`--disable-gpl --enable-shared` |
+| libplacebo / libass / libshaderc 等 26 个 UCRT64 依赖 | 随 LGPL 引擎 | LGPL-2.1-or-later / ISC / Apache-2.0 等 | 渲染、字幕、字体、颜色管理 | `tools/collect-lgpl-runtime.ps1`，逐项见 `windows/engine/lgpl/component-licences.txt` |
+| **libmpv (mpv) — GPL 基线（对比夹具）** | v0.41.0-1154-gec38361c5 | **GPL-3.0-or-later** | 仅用于 `-p:LibMpvFlavour=gpl` 的对比回归，**不随包分发** | `tools/fetch-libmpv.ps1` |
 | xunit | 2.9.3 | Apache-2.0 | 测试 | NuGet（仅测试） |
 
-## libmpv 的许可证判定（依据实际二进制，非推测）
+## GPL 基线夹具的许可证判定（依据实际二进制，非推测）
 
-**结论：本构建为 GPL 构建，具体为 GPL-3.0-or-later。以当前产物对外分发将触发 GPL 义务。**
+**结论：`windows/native/libmpv` 那份是 GPL 构建，具体为 GPL-3.0-or-later；它已不是随包分发的引擎**
+（2026-11-12 起默认分发 LGPL 构建，判定见 `windows/docs/licensing/LICENCE-DECISION.md` §9）。
+下面的分析保留下来，是因为一旦有人用 `-p:LibMpvFlavour=gpl` 把这份二进制发出去，义务就重新成立。
 
 版本是 **3.0-or-later 而不是 2.0-or-later**：构建方（shinchiro/mpv-winbuild-cmake 的
 `packages/ffmpeg.cmake`）为 FFmpeg 传入 `--enable-gpl` **且** `--enable-version3`，
@@ -58,18 +60,20 @@ mpv 自身的代码是 LGPL-2.1+，但**与 GPL 组件链接后的整体按 GPL 
 
 ### 当前状态
 
-**RELEASE BLOCKER —— 未解决。** 在上述任一路径落实之前，
-**不得将 Windows 便携包作为正式发行版对外分发**。
-本仓库自身为 MIT，该许可**不覆盖** `libmpv-2.dll`。
+**已解除（2026-11-12）。** 路径 A（自建 LGPL 引擎）已落地：默认构建与安装包分发的是
+`windows/engine/lgpl/dist` 下的 LGPL-2.1-or-later 引擎，FFmpeg 动态链接、依赖 DLL 可替换。
+GPL-3.0-or-later 基线保留为对比夹具（`-p:LibMpvFlavour=gpl`），不再随包分发，因此
+未被分发整体的 GPL 义务不再适用。判定与证据见 `windows/docs/licensing/LICENCE-DECISION.md` §9。
+本仓库自身仍为 MIT；该许可不覆盖任何随包的第三方 DLL，它们的许可见下表与 `windows/engine/lgpl/component-licences.txt`。
 
-## LGPL flavour 额外带入的运行时依赖（默认 flavour 不分发）
+## 随包分发的 LGPL 引擎及其运行时依赖（默认 flavour）
 
-默认构建（`-p:LibMpvFlavour=gpl`）只带一个引擎 DLL：`windows/native/libmpv/libmpv-2.dll`
-（120,989,696 字节，GPL-3.0-or-later，判定见上一节）。以 `-p:LibMpvFlavour=lgpl` 构建时，引擎换成
+默认构建（`-p:LibMpvFlavour=lgpl`）带两个引擎二进制——`libmpv-2.dll` 与 `mpv.exe`——外加 33 个运行时 DLL：
 
 `windows/engine/lgpl/dist/libmpv-2.dll`（**3,327,274 字节**，SHA-256
-`20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a`），并**额外带入 33 个运行时 DLL**，
-合计 58,826,576 字节。实测树的差别只有这些：`dotnet publish` 文件数 526 → 559，字节数
+`a3f901d6b5bae54a4b5b87cd9d9d973fd3af079aa70a61851560c30e74722a68`，`mpv v0.41.0`），
+另有 `mpv.exe`（3,367,273 字节，`0f6e3d261783c11c4496b201e44935b66e23ece2f5a1ca953ea1fd62d730f3c2`）。
+**额外带入 33 个运行时 DLL**，合计 58,826,576 字节。实测树的差别只有这些：`dotnet publish` 文件数 526 → 559，字节数
 348,275,148 → 289,439,302（引擎从 115.4 MB 降到 3.2 MB，抵消了这 58.8 MB 依赖）。证据：
 `windows/engine/lgpl/dist/flavour-builds.txt`、`windows/engine/lgpl/dist/runtime-dependencies-collected.txt`。
 
@@ -97,12 +101,12 @@ mpv 自身的代码是 LGPL-2.1+，但**与 GPL 组件链接后的整体按 GPL 
    逐行证据（文件名/字节/SHA-256/来源路径/许可/证据行号）见 `windows/docs/THIRD-PARTY-NOTICES.md` §3.3；核对器的 `lgpl-licence-table`（W38）
    会回到 `component-licences.txt` 逐行核对：行被改写、行号指针失效、清单与报告行数不符都判 FAIL，`-FailOnLicenceGaps` 只保留旧行为。
 
-上述任何一项都不改变本文件开头的结论：在维护者拍板之前，`libmpv-2.dll` 的 GPL 问题仍是 **RELEASE BLOCKER**，
-默认 flavour 仍随包分发 GPL 构建。
+上述任何一项都不改变当前结论：**自 2026-11-12 起默认 flavour 分发 LGPL 构建，GPL 义务不再被触发**；
+GPL 基线只在显式 `-p:LibMpvFlavour=gpl` 时参与对比回归，不进入任何发行包。
 
-## 供应链固定
+## 供应链固定（GPL 对比夹具）
 
-`windows/tools/fetch-libmpv.ps1` 固定两个摘要并在安装前强制校验：
+`windows/tools/fetch-libmpv.ps1` 固定两个摘要并在安装前强制校验（该夹具不随包分发）：
 
 | 对象 | SHA-256 |
 | --- | --- |

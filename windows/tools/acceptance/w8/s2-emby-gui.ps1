@@ -5,7 +5,7 @@
 #   3) 跨服务端差异单独记录：Emby 的 Resume 端点是 /Users/{uid}/Items/Resume，Jellyfin 是 /UserItems/Resume。
 # -OnlyP5：跳过 P1..P4 的播放流程，只重跑 P5 的失败/认证路径（P0 的复位、播种、启动照跑）。
 # 正式留证时必须不带该开关完整跑一遍。
-param([switch]$OnlyP5)
+param([switch]$OnlyP5, [switch]$PreflightOnly)
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Continue'
 $R = 'D:\deepseek_test\MediaHub_Win\'
@@ -275,7 +275,7 @@ Check 'P0.3 官方 API 复位后回读为未观看' ((-not $before.played) -and 
 # 播种前先确保客户端没在运行：它的正常退出会把内存设置回写 settings.json。
 Stop-MhAppForced | Out-Null
 Start-Sleep -Milliseconds 800
-$keptCount = Keep-OnlyServer 'emby:*'
+$keptCount = Keep-OnlyServer ('emby:' + $emServer)
 # 播种「产品真实的恢复态」：UI 登录成功后客户端同时保存 token 与 userId。
 & $seed emby $emBase $emUser $emPass $emServer $script:token $script:uid 2>&1 | ForEach-Object { Write-Host ('  seed: ' + $_) }
 $after = Get-Content $settings -Raw | ConvertFrom-Json
@@ -284,6 +284,17 @@ Check 'P0.4 来源写入客户端自己的配置' ($emEntry.Count -eq 1) ('keptB
 
 Stop-MhAppForced | Out-Null
 Start-Sleep -Milliseconds 800
+
+if ($PreflightOnly) {
+  $pf = Get-Content $settings -Raw | ConvertFrom-Json
+  $pfServers = @($pf.Servers)
+  Write-Host ('PREFLIGHT settings=' + $settings + ' servers=' + $pfServers.Count + ' ids=' + (($pfServers | ForEach-Object { $_.ServerId }) -join ','))
+  $pfPass = @($checks | Where-Object { $_.pass }).Count
+  $pfFail = @($checks | Where-Object { -not $_.pass }).Count
+  $checks | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $ev 'checks.json') -Encoding UTF8
+  Write-Host ('RESULT: ' + $pfPass + ' passed, ' + $pfFail + ' failed')
+  exit $(if ($pfFail -gt 0) { 1 } else { 0 })
+}
 
 # ---------------------------------------------------------------- 阶段 P1
 Write-Host ''

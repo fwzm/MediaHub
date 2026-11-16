@@ -2,48 +2,87 @@
 <Page
     x:Class="MediaHub.App.Views.DetailPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="{StaticResource MediaHubGlassPageBrush}">
 
   <Grid>
+    <VisualStateManager.VisualStateGroups>
+      <VisualStateGroup x:Name="WindowWidthStates">
+        <VisualState x:Name="Wide">
+          <VisualState.StateTriggers>
+            <AdaptiveTrigger MinWindowWidth="900" />
+          </VisualState.StateTriggers>
+        </VisualState>
+        <VisualState x:Name="Narrow">
+          <VisualState.StateTriggers>
+            <AdaptiveTrigger MinWindowWidth="0" />
+          </VisualState.StateTriggers>
+          <VisualState.Setters>
+            <Setter Target="DetailScroll.Padding" Value="20,0,20,28" />
+            <!-- A poster and a description side by side stop reading as a hero below ~900px:
+                 the description column is narrower than the buttons it has to hold. -->
+            <Setter Target="InfoPanel.(Grid.Row)" Value="1" />
+            <Setter Target="InfoPanel.(Grid.Column)" Value="0" />
+            <Setter Target="InfoPanel.(Grid.ColumnSpan)" Value="2" />
+            <Setter Target="InfoPanel.Margin" Value="0,18,0,0" />
+            <Setter Target="InfoPanel.VerticalAlignment" Value="Top" />
+            <Setter Target="TitleText.FontSize" Value="24" />
+            <Setter Target="ActionRow.Orientation" Value="Vertical" />
+            <Setter Target="ActionRow.HorizontalAlignment" Value="Left" />
+          </VisualState.Setters>
+        </VisualState>
+      </VisualStateGroup>
+    </VisualStateManager.VisualStateGroups>
+
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
-    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10" Padding="20,14,20,6">
-      <Button x:Name="BackButton" Click="OnBackClick" Background="Transparent">
-        <FontIcon Glyph="&#xE72B;" />
+    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8" Padding="28,18,28,8">
+      <Button x:Name="BackButton" Click="OnBackClick" Style="{StaticResource MediaHubIconButton}"
+              AutomationProperties.Name="返回">
+        <FontIcon Glyph="&#xE72B;" FontSize="15" />
       </Button>
-      <TextBlock x:Name="HeaderText" VerticalAlignment="Center" Style="{StaticResource MediaHubCaption}" />
+      <TextBlock x:Name="HeaderText" VerticalAlignment="Center" Margin="4,0,0,0"
+                 Style="{StaticResource MediaHubCaption}" TextTrimming="CharacterEllipsis" MaxLines="1" />
     </StackPanel>
 
-    <ScrollViewer Grid.Row="1" Padding="28,0,28,28">
-      <StackPanel Spacing="18" MaxWidth="1080" HorizontalAlignment="Left">
+    <ScrollViewer x:Name="DetailScroll" Grid.Row="1" Padding="36,0,36,36">
+      <StackPanel Spacing="26" MaxWidth="1120" HorizontalAlignment="Left">
 
         <InfoBar x:Name="StatusBar" IsOpen="False" IsClosable="True" />
 
-        <Grid ColumnSpacing="20">
+        <Grid ColumnSpacing="28" RowSpacing="0">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="*" />
           </Grid.ColumnDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
 
-          <Border Grid.Column="0" Width="220" Height="330" CornerRadius="8"
-                  Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
-                  BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+          <Border Grid.Row="0" Grid.Column="0" Width="232" Height="348" CornerRadius="10"
+                  Style="{StaticResource MediaHubPosterFrame}">
             <Grid>
-              <FontIcon Glyph="&#xE714;" FontSize="34" Opacity="0.35"
+              <FontIcon Glyph="&#xE714;" FontSize="34" Opacity="0.3"
+                        Foreground="{StaticResource MediaHubTextSecondaryBrush}"
                         HorizontalAlignment="Center" VerticalAlignment="Center" />
               <Image x:Name="PosterImage" Stretch="UniformToFill" />
             </Grid>
           </Border>
 
-          <StackPanel Grid.Column="1" Spacing="10">
-            <TextBlock x:Name="TitleText" FontSize="26" FontWeight="SemiBold" TextWrapping="Wrap" />
-            <TextBlock x:Name="MetaText" Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" />
-            <TextBlock x:Name="SourceText" Style="{StaticResource MediaHubCaption}" />
-            <StackPanel Orientation="Horizontal" Spacing="10">
-              <Button x:Name="PlayButton" Click="OnPlayClick" Style="{StaticResource AccentButtonStyle}"
+          <StackPanel x:Name="InfoPanel" Grid.Row="0" Grid.Column="1" Spacing="12"
+                      VerticalAlignment="Center" MaxWidth="760">
+            <TextBlock x:Name="TitleText" FontSize="30" FontWeight="SemiBold" CharacterSpacing="-20"
+                       TextWrapping="Wrap" Foreground="{StaticResource MediaHubTextPrimaryBrush}" />
+            <TextBlock x:Name="MetaText" Style="{StaticResource MediaHubCaption}" FontSize="13"
+                       TextWrapping="Wrap" />
+            <TextBlock x:Name="SourceText" Style="{StaticResource MediaHubCaption}"
+                       Foreground="{StaticResource MediaHubTextTertiaryBrush}" />
+            <StackPanel x:Name="ActionRow" Orientation="Horizontal" Spacing="10" Margin="0,6,0,0">
+              <Button x:Name="PlayButton" Click="OnPlayClick" Style="{StaticResource MediaHubPrimaryButton}"
                       AutomationProperties.Name="播放" AutomationProperties.AutomationId="detail.play">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <FontIcon Glyph="&#xE768;" FontSize="14" />
@@ -51,6 +90,7 @@
                 </StackPanel>
               </Button>
               <Button x:Name="ResumeButton" Click="OnResumeClick" Visibility="Collapsed"
+                      Style="{StaticResource MediaHubGhostButton}"
                       AutomationProperties.Name="继续观看" AutomationProperties.AutomationId="detail.resume">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <FontIcon Glyph="&#xE81C;" FontSize="14" />
@@ -58,6 +98,7 @@
                 </StackPanel>
               </Button>
               <Button x:Name="FavoriteButton" Click="OnFavoriteClick" Visibility="Collapsed"
+                      Style="{StaticResource MediaHubGhostButton}"
                       AutomationProperties.Name="收藏" AutomationProperties.AutomationId="detail.favorite">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <FontIcon x:Name="FavoriteIcon" Glyph="&#xE734;" FontSize="14" />
@@ -67,6 +108,7 @@
               <!-- Entries are filled in when the flyout opens, because playlists are created, renamed
                    and deleted while this page is alive. -->
               <Button x:Name="AddToPlaylistButton" Visibility="Collapsed"
+                      Style="{StaticResource MediaHubGhostButton}"
                       AutomationProperties.Name="加入播放列表" AutomationProperties.AutomationId="detail.addtoplaylist">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <FontIcon Glyph="&#xE710;" FontSize="14" />
@@ -78,30 +120,53 @@
               </Button>
               <ProgressRing x:Name="BusyRing" IsActive="False" Width="20" Height="20" />
             </StackPanel>
-            <TextBlock x:Name="OverviewText" TextWrapping="Wrap" MaxLines="6" TextTrimming="CharacterEllipsis" />
+            <TextBlock x:Name="OverviewText" Style="{StaticResource MediaHubBody}"
+                       MaxLines="6" TextTrimming="CharacterEllipsis" Margin="0,4,0,0" />
           </StackPanel>
         </Grid>
 
         <!-- Episodes: only populated for series, and hidden rather than shown empty. -->
         <StackPanel x:Name="EpisodesSection" Spacing="10" Visibility="Collapsed">
-          <TextBlock Text="剧集" FontSize="18" FontWeight="SemiBold" />
-          <ComboBox x:Name="SeasonCombo" MinWidth="260" SelectionChanged="OnSeasonChanged" />
+          <TextBlock Text="剧集" Style="{StaticResource MediaHubSectionHeader}" />
+          <ComboBox x:Name="SeasonCombo" MinWidth="260" SelectionChanged="OnSeasonChanged"
+                    CornerRadius="10" />
           <ListView x:Name="EpisodeList" SelectionMode="None" IsItemClickEnabled="True"
-                    ItemClick="OnEpisodeClick" MaxHeight="420">
+                    ItemClick="OnEpisodeClick" MaxHeight="420"
+                    ItemContainerStyle="{StaticResource MediaHubListViewItem}">
             <ListView.ItemTemplate>
               <DataTemplate>
-                <Grid Padding="6" ColumnSpacing="12">
+                <Grid Padding="8,8" ColumnSpacing="14">
+                  <Grid.ContextFlyout>
+                    <MenuFlyout>
+                      <MenuFlyoutItem Text="播放" Tag="{Binding}" Click="OnPlayEpisodeMenuClick">
+                        <MenuFlyoutItem.Icon>
+                          <FontIcon Glyph="&#xE768;" />
+                        </MenuFlyoutItem.Icon>
+                      </MenuFlyoutItem>
+                      <MenuFlyoutItem Text="复制标题" Tag="{Binding}" Click="OnCopyEpisodeTitleClick">
+                        <MenuFlyoutItem.Icon>
+                          <FontIcon Glyph="&#xE8C8;" />
+                        </MenuFlyoutItem.Icon>
+                      </MenuFlyoutItem>
+                    </MenuFlyout>
+                  </Grid.ContextFlyout>
                   <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="60" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                   </Grid.ColumnDefinitions>
-                  <TextBlock Grid.Column="0" Text="{Binding EpisodeLabel}" VerticalAlignment="Center" />
-                  <StackPanel Grid.Column="1" Spacing="2">
-                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                  <Border Grid.Column="0" MinWidth="46" Padding="8,4" CornerRadius="999"
+                          Background="{StaticResource MediaHubSurfaceHoverBrush}"
+                          VerticalAlignment="Center">
+                    <TextBlock Text="{Binding EpisodeLabel}" FontSize="12" HorizontalAlignment="Center"
+                               Foreground="{StaticResource MediaHubTextSecondaryBrush}" />
+                  </Border>
+                  <StackPanel Grid.Column="1" Spacing="3">
+                    <TextBlock Text="{Binding Title}" FontSize="14" TextTrimming="CharacterEllipsis" />
                     <TextBlock Text="{Binding ProgressLabel}" Style="{StaticResource MediaHubCaption}" />
                   </StackPanel>
-                  <FontIcon Grid.Column="2" Glyph="&#xE768;" FontSize="13" VerticalAlignment="Center" />
+                  <FontIcon Grid.Column="2" Glyph="&#xE768;" FontSize="13" VerticalAlignment="Center"
+                            Foreground="{StaticResource MediaHubTextSecondaryBrush}" />
                 </Grid>
               </DataTemplate>
             </ListView.ItemTemplate>
@@ -109,19 +174,20 @@
         </StackPanel>
 
         <StackPanel x:Name="VersionsSection" Spacing="8" Visibility="Collapsed">
-          <TextBlock Text="播放源" FontSize="18" FontWeight="SemiBold" />
+          <TextBlock Text="播放源" Style="{StaticResource MediaHubSectionHeader}" />
           <TextBlock Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap"
                      Text="以下信息来自服务器返回的媒体源描述；未上报的字段显示为“未知”，不做推测。" />
           <ItemsControl x:Name="StreamList">
             <ItemsControl.ItemTemplate>
               <DataTemplate>
-                <Grid Margin="0,2" ColumnSpacing="10">
+                <Grid Margin="0,3" ColumnSpacing="12">
                   <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="90" />
                     <ColumnDefinition Width="*" />
                   </Grid.ColumnDefinitions>
                   <TextBlock Grid.Column="0" Text="{Binding Label}" Style="{StaticResource MediaHubCaption}" />
-                  <TextBlock Grid.Column="1" Text="{Binding Value}" FontSize="12" TextWrapping="Wrap" />
+                  <TextBlock Grid.Column="1" Text="{Binding Value}" FontSize="12" TextWrapping="Wrap"
+                             Foreground="{StaticResource MediaHubTextPrimaryBrush}" />
                 </Grid>
               </DataTemplate>
             </ItemsControl.ItemTemplate>

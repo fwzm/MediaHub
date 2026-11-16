@@ -1,8 +1,8 @@
 # Runtime bundle of the LGPL libmpv-2.dll (W5-H)
-# generated 2026-10-14T16:09:46+08:00
+# generated 2026-11-12T21:19:07+08:00
 #
 # Core artifact:
-20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a */d/mh-servers/lgpl-build/prefix-mpv/bin/libmpv-2.dll
+a3f901d6b5bae54a4b5b87cd9d9d973fd3af079aa70a61851560c30e74722a68 */d/mh-servers/lgpl-build/prefix-mpv/bin/libmpv-2.dll
 
 # FFmpeg shared libraries - LGPL-2.1-or-later, built by windows/engine/lgpl/build-ffmpeg-lgpl.sh
 1faacb7a3bfd9d16c5b8258ede66baf03c31d2578d828af68ade215ada6d9f4d */d/mh-servers/lgpl-build/prefix/bin/avcodec-62.dll

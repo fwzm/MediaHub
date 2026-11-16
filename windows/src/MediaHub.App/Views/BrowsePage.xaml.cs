@@ -4,6 +4,7 @@ using MediaHub.Providers;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace MediaHub.App.Views;
 
@@ -67,6 +68,7 @@ public sealed partial class BrowsePage : Page
     public BrowsePage()
     {
         InitializeComponent();
+        SkeletonPanel.ItemsSource = new object[6];
         Loaded += OnLoaded;
     }
 
@@ -138,10 +140,8 @@ public sealed partial class BrowsePage : Page
         StartupTrace.Write("browse:load gen=" + generation + " title=" + title
             + " folder=" + (folder?.Id ?? "<root>"));
 
-        LoadingRing.IsActive = true;
-        EmptyPanel.Visibility = Visibility.Visible;
+        ShowSkeleton();
         RetryButton.Visibility = Visibility.Collapsed;
-        EmptyText.Text = "正在读取目录…";
         StatusBar.IsOpen = false;
 
         try
@@ -170,8 +170,15 @@ public sealed partial class BrowsePage : Page
             // A failed listing must never look like an empty folder: only a successful response that
             // genuinely carried no entries may say so.
             bool empty = rows.Count == 0;
-            EmptyPanel.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
-            if (empty) EmptyText.Text = "这个目录是空的。";
+            HideSkeleton();
+            if (empty)
+            {
+                ShowEmptyState("\uE8B7", "这个目录是空的", "没有找到子文件夹或可播放的文件。");
+            }
+            else
+            {
+                EmptyPanel.Visibility = Visibility.Collapsed;
+            }
         }
         catch (ProviderException ex)
         {
@@ -185,7 +192,7 @@ public sealed partial class BrowsePage : Page
         {
             if (generation == _generation)
             {
-                LoadingRing.IsActive = false;
+                HideSkeleton();
                 _busy = false;
                 if (_pendingReload)
                 {
@@ -194,6 +201,31 @@ public sealed partial class BrowsePage : Page
                 }
             }
         }
+    }
+
+    private void ShowSkeleton()
+    {
+        EmptyPanel.Visibility = Visibility.Collapsed;
+        SkeletonPanel.Visibility = Visibility.Visible;
+        UiMotion.Pulse(SkeletonPanel);
+    }
+
+    private void HideSkeleton()
+    {
+        if (SkeletonPanel.Visibility != Visibility.Visible) return;
+        UiMotion.Settle(SkeletonPanel);
+        SkeletonPanel.Visibility = Visibility.Collapsed;
+    }
+
+    private void ShowEmptyState(string glyph, string title, string message)
+    {
+        StateIcon.Style = (Style)Application.Current.Resources["MediaHubStateIcon"];
+        StateGlyph.Style = (Style)Application.Current.Resources["MediaHubStateGlyph"];
+        StateGlyph.Glyph = glyph;
+        StateTitle.Text = title;
+        EmptyText.Text = message;
+        RetryButton.Visibility = Visibility.Collapsed;
+        EmptyPanel.Visibility = Visibility.Visible;
     }
 
     private static BrowseRow ToRow(MediaItem item)
@@ -246,7 +278,11 @@ public sealed partial class BrowsePage : Page
     private async void OnItemClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is not BrowseRow row) return;
+        await OpenRowAsync(row);
+    }
 
+    private async Task OpenRowAsync(BrowseRow row)
+    {
         MediaItem item = row.Item;
         if (item.IsFolder || item.Type == MediaType.Folder)
         {
@@ -269,6 +305,27 @@ public sealed partial class BrowsePage : Page
             SeasonNumber = item.SeasonNumber,
             EpisodeNumber = item.EpisodeNumber,
         });
+    }
+
+    private async void OnOpenMenuClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is BrowseRow row) await OpenRowAsync(row);
+    }
+
+    private void OnCopyNameClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not BrowseRow row) return;
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(row.Name);
+            Clipboard.SetContent(package);
+        }
+        catch (Exception ex)
+        {
+            // The clipboard is shared with other processes; losing a copy is not worth an error.
+            StartupTrace.Write("browse:clipboard FAILED " + ex.GetType().Name);
+        }
     }
 
     private void OnRootsClick(object sender, RoutedEventArgs e)
@@ -300,10 +357,14 @@ public sealed partial class BrowsePage : Page
     private void Fail(string message, string title, string breadcrumb, bool canGoUp)
     {
         StartupTrace.Write("browse:load fail title=" + title + " message=" + message);
-        LoadingRing.IsActive = false;
+        HideSkeleton();
         _busy = false;
         ItemList.ItemsSource = null;
         EmptyPanel.Visibility = Visibility.Visible;
+        StateIcon.Style = (Style)Application.Current.Resources["MediaHubStateIconError"];
+        StateGlyph.Style = (Style)Application.Current.Resources["MediaHubStateGlyphError"];
+        StateGlyph.Glyph = "\uE783";
+        StateTitle.Text = "无法读取目录";
         RetryButton.Visibility = Visibility.Visible;
         EmptyText.Text = message;
         TitleText.Text = title;

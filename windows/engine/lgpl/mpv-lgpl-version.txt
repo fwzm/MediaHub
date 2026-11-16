@@ -1,5 +1,5 @@
-mpv v0.41.0-UNKNOWN Copyright © 2000-2026 mpv/MPlayer/mplayer2 projects
- built on Oct 14 2026 16:03:40
+mpv v0.41.0 Copyright © 2000-2026 mpv/MPlayer/mplayer2 projects
+ built on Nov 12 2026 20:30:18
 libplacebo version: v7.360.1
 FFmpeg version: 8.1.1
 FFmpeg library versions:

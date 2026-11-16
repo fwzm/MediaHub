@@ -1,18 +1,24 @@
 using System.Text.Json;
+using MediaHub.Domain;
 using Microsoft.UI.Windowing;
 using Windows.Graphics;
 
 namespace MediaHub.App.Services;
 
 /// <summary>
-/// Remembers where the window was, and puts it back somewhere the user can actually see it.
+/// Chooses the main window's first rectangle, remembers the one the user left it at, and puts it
+/// back somewhere they can actually see.
 /// </summary>
 /// <remarks>
 /// <para>
+/// A fresh profile opens at roughly half the work area with visible margins instead of filling the
+/// screen, so the app can sit beside whatever else is in use.
+/// </para>
+/// <para>
 /// Restoring a saved rectangle verbatim is the classic way to lose a window: unplug the second monitor
 /// it was on and the window opens off-screen with no way to reach it. The saved rectangle is therefore
-/// validated against the displays that exist <i>now</i> and discarded if it no longer overlaps any of
-/// them.
+/// clamped into the work area of the display that is nearest to it <i>now</i>; the arithmetic lives in
+/// <see cref="WindowGeometry"/> so it is covered by tests.
 /// </para>
 /// <para>
 /// Placement lives in the same settings file as everything else, so a portable installation keeps its
@@ -21,26 +27,51 @@ namespace MediaHub.App.Services;
 /// </remarks>
 public static class WindowPlacementStore
 {
-    private const int MinimumVisiblePixels = 120;
-    private const int MinimumWidth = 640;
-    private const int MinimumHeight = 480;
-
-    /// <summary>The rectangle a maximised window should return to.</summary>
+    /// <summary>The rectangle the window occupies while it is not maximised.</summary>
     public readonly record struct Placement(int X, int Y, int Width, int Height, bool Maximized);
 
-    public static void Restore(AppWindow window, SettingsStore settings)
+    /// <summary>
+    /// Applies the remembered placement, or the default one when nothing usable was saved.
+    /// </summary>
+    /// <returns>
+    /// The normal-state rectangle that was applied, so the caller can persist it even when the window
+    /// is immediately maximised and therefore never reports a normal size of its own.
+    /// </returns>
+    public static WindowRect? RestoreOrApplyDefault(AppWindow window, SettingsStore settings)
     {
-        Placement? saved = Read(settings);
-        if (saved is not { } placement) return;
-
         try
         {
-            window.MoveAndResize(new RectInt32(placement.X, placement.Y, placement.Width, placement.Height));
-            if (placement.Maximized && window.Presenter is OverlappedPresenter presenter) presenter.Maximize();
+            Placement? saved = Read(settings);
+            WindowRect applied;
+
+            if (saved is { } placement)
+            {
+                var desired = new WindowRect(placement.X, placement.Y, placement.Width, placement.Height);
+                // The saved rectangle may belong to a monitor that no longer exists. Asking for the
+                // nearest work area turns "nowhere" into "the closest screen that does exist".
+                WindowRect? workArea = WorkAreaFor(desired);
+                applied = workArea is { } area ? WindowGeometry.ClampTo(desired, area) : desired;
+            }
+            else
+            {
+                WindowRect? workArea = WorkAreaForWindow(window);
+                if (workArea is not { } area) return null;
+                applied = WindowGeometry.DefaultFor(area);
+            }
+
+            window.MoveAndResize(new RectInt32(applied.X, applied.Y, applied.Width, applied.Height));
+            // Maximize() is a show-and-activate call. A quiet test run parks the window off-screen
+            // instead, so the saved maximised bit is deliberately not applied there.
+            if (saved is { Maximized: true } && !App.QuietStartRequested &&
+                window.Presenter is OverlappedPresenter presenter)
+                presenter.Maximize();
+
+            return applied;
         }
         catch (Exception)
         {
             // An unusable rectangle must never prevent the window from appearing.
+            return null;
         }
     }
 
@@ -74,48 +105,45 @@ public static class WindowPlacementStore
         catch (JsonException) { return null; }
 
         if (saved is null) return null;
-        if (saved.Width < MinimumWidth || saved.Height < MinimumHeight) return null;
-        // Wider than any plausible display means a hand-edited or foreign settings file.
+        if (saved.Width <= 0 || saved.Height <= 0) return null;
+        // Wider than any plausible display means a hand-edited or foreign settings file; falling back
+        // to the default is better than clamping nonsense into a visible but unusable window.
         if (saved.Width > 20000 || saved.Height > 20000) return null;
-        if (!IsReachable(saved)) return null;
 
         return new Placement(saved.X, saved.Y, saved.Width, saved.Height, saved.Maximized);
     }
 
-    /// <summary>
-    /// True when the saved rectangle still lands on a display that exists now.
-    /// </summary>
-    /// <remarks>
-    /// Probes the rectangle's corners and centre rather than enumerating displays, because
-    /// <see cref="DisplayArea.GetFromPoint"/> is the API that answers "is there a screen here" for a
-    /// point, and three well-chosen points cover the realistic failures: the monitor was removed, the
-    /// resolution shrank, or the window was dragged mostly off the edge. A window that merely starts
-    /// off-screen but still overlaps a display is accepted on purpose — that is a legitimate position.
-    /// </remarks>
-    private static bool IsReachable(SavedPlacement saved)
+    /// <summary>The work area of the display the saved rectangle belongs to, or of the nearest one.</summary>
+    private static WindowRect? WorkAreaFor(WindowRect saved)
     {
-        var probes = new[]
+        try
         {
-            new PointInt32(saved.X + MinimumVisiblePixels, saved.Y + MinimumVisiblePixels),
-            new PointInt32(saved.X + saved.Width / 2, saved.Y + saved.Height / 2),
-            new PointInt32(saved.X + saved.Width - MinimumVisiblePixels, saved.Y + saved.Height - MinimumVisiblePixels),
-        };
-
-        foreach (PointInt32 probe in probes)
-        {
-            try
-            {
-                if (DisplayArea.GetFromPoint(probe, DisplayAreaFallback.None) is not null) return true;
-            }
-            catch (Exception)
-            {
-                // The topology could not be queried. Restoring is the safer default: the window is at
-                // least where the user last had it.
-                return true;
-            }
+            var centre = new PointInt32(saved.X + saved.Width / 2, saved.Y + saved.Height / 2);
+            DisplayArea? area = DisplayArea.GetFromPoint(centre, DisplayAreaFallback.Nearest);
+            return area is null ? null : ToWindowRect(area.WorkArea);
         }
-        return false;
+        catch (Exception)
+        {
+            return null;
+        }
     }
+
+    /// <summary>The work area of the display the window is currently on.</summary>
+    private static WindowRect? WorkAreaForWindow(AppWindow window)
+    {
+        try
+        {
+            DisplayArea? area = DisplayArea.GetFromWindowId(window.Id, DisplayAreaFallback.Primary);
+            return area is null ? null : ToWindowRect(area.WorkArea);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static WindowRect ToWindowRect(RectInt32 rect)
+        => new(rect.X, rect.Y, rect.Width, rect.Height);
 
     private sealed record SavedPlacement
     {

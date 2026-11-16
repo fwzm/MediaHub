@@ -137,7 +137,7 @@ MockMediaServer 已按真服语义收紧：非递归空 `ParentId` 只回库文�
 | U2 Emby 目录级产物 | 部分被覆盖（结论仍可复核） | W9 的 35/35 产物被 W10 中断跑（2026-10-24 01:53，23 通过 / 12 失败，失败项全是「守卫拒绝开窗」）覆盖；同一目录的 W9 `run-console.log`（`RESULT: 35 passed, 0 failed`）+ `run-exit.txt`（`0`）仍在，以此为据。Jellyfin 侧 35/35 产物完整。见 [W12-DOC-AUDIT.md](W12-DOC-AUDIT.md) |
 | 收藏/播放列表跨端同步（W6） | BLOCKED | PR #39 停在 01233ca（base=`feature/windows-client`，相对当前分支 21 behind、mergeable=UNKNOWN）；Android 侧无收藏写入、无播放列表模型 |
 | Android 侧对应能力 | NOT_IMPLEMENTED | 收藏只读筛选；`autoPlayNextEpisode` 是死开关（9 处引用无消费方）；无播放列表/队列 |
-| 引擎 LGPL 替换（libmpv 当前 GPL-3.0-or-later） | RELEASE_BLOCKED | LGPL 构建**已产出**（[W5-LGPL-BUILD.md](licensing/W5-LGPL-BUILD.md)：BUILT AND VERIFIED，3,327,274 B / `20035902…3C0A`），但随包发布的仍是 GPL 构建（`windows/native/libmpv/libmpv-2.dll` 120,989,696 B / `6A48FAEC…63D9`，见 [LGPL-COMPLIANCE.md](LGPL-COMPLIANCE.md) 与 `sbom-windows.cdx.json`）；切换与签名决策未做，故仍阻塞 |
+| 引擎 LGPL 替换（libmpv 当前 GPL-3.0-or-later） | RELEASE_BLOCKED | LGPL 构建**已产出**（[W5-LGPL-BUILD.md](licensing/W5-LGPL-BUILD.md)：BUILT AND VERIFIED，3,327,274 B / `a3f901d6…2a68`），但随包发布的仍是 GPL 构建（`windows/native/libmpv/libmpv-2.dll` 120,989,696 B / `6A48FAEC…63D9`，见 [LGPL-COMPLIANCE.md](LGPL-COMPLIANCE.md) 与 `sbom-windows.cdx.json`）；切换与签名决策未做，故仍阻塞 |
 | 代码签名 / MSIX / 干净机安装 | SIGNING_BLOCKED | 与 W7/W8 同结论，未动 |
 | HDR / 多 GPU / 音频独占 / 设备兼容矩阵 | NOT_RUN / DEVICE_UNVERIFIED | 单机单卡环境，未执行 |
 | PR #33 转正式（取消 Draft） | BLOCKED（需维护者决定） | 分支 CI 全绿，Draft 状态只能由人解除；本项目不自称 RELEASE READY |

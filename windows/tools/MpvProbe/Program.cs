@@ -81,8 +81,24 @@ internal static class Program
             AudioOutput = ao ?? "",
             ExtraOptions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["msg-level"] = "all=v" },
         };
+
+        // Extra engine options for colour-pipeline experiments (e.g. "hdr-compute-peak=no;tone-mapping=bt.2390").
+        string? extraSpec = Environment.GetEnvironmentVariable("MEDIAHUB_MPV_EXTRA");
+        if (!string.IsNullOrEmpty(extraSpec))
+        {
+            var extra = new Dictionary<string, string>(options.ExtraOptions, StringComparer.OrdinalIgnoreCase);
+            foreach (string entry in extraSpec.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                string[] parts = entry.Split('=', 2);
+                if (parts.Length == 2) extra[parts[0].Trim()] = parts[1].Trim();
+            }
+            options = options with { ExtraOptions = extra };
+        }
+        // Mirrors the settings page: the same stored value the app passes to MpvPlayerOptions.
+        options = options with { HdrDynamicMetadata = MpvColorPipeline.Parse(Environment.GetEnvironmentVariable("MEDIAHUB_MPV_HDRMETA")) };
         Console.WriteLine("vo=" + options.VideoOutput + " hwdec=" + options.HwDec + " ctx=" + options.GpuContext
-            + " ao=" + (string.IsNullOrEmpty(options.AudioOutput) ? "(default)" : options.AudioOutput));
+            + " ao=" + (string.IsNullOrEmpty(options.AudioOutput) ? "(default)" : options.AudioOutput)
+            + " hdr-dynamic-metadata=" + MpvColorPipeline.ToStorageValue(options.HdrDynamicMetadata));
         var player = new MpvPlayer(options);
 
         var observed = new List<PlayerSnapshot>();
@@ -150,6 +166,31 @@ internal static class Program
         // Track enumeration must produce at least one audio track for a normal movie file.
         if (final.AudioTracks.Count == 0) failures.Add("no audio tracks were enumerated");
 
+        // Colour-pipeline evidence. Optional so ordinary probe runs keep their output; used when
+        // checking that an HDR/Dolby Vision source reaches the renderer with the intended metadata.
+        string? shotSpec = Environment.GetEnvironmentVariable("MEDIAHUB_MPV_SHOTS");
+        if (Environment.GetEnvironmentVariable("MEDIAHUB_MPV_COLOR") == "1" || !string.IsNullOrEmpty(shotSpec))
+        {
+            PrintColour(player, "options");
+            foreach (string entry in (shotSpec ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                string[] parts = entry.Split('=', 2);
+                if (parts.Length != 2
+                    || !double.TryParse(parts[0], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out double at))
+                {
+                    continue;
+                }
+
+                player.SeekAbsolute(at);
+                player.Play();
+                Thread.Sleep(1200);
+                PrintColour(player, $"t={at:0.###}");
+                if (player.TakeScreenshot(parts[1])) Console.WriteLine($"  screenshot -> {parts[1]}");
+                else Console.Error.WriteLine($"  screenshot FAILED -> {parts[1]}");
+            }
+        }
+
         // The engine holds an exclusive handle on its log until it is shut down.
         player.Dispose();
 
@@ -172,6 +213,19 @@ internal static class Program
 
         foreach (string f in failures) Console.Error.WriteLine("MPV_PROBE FAIL: " + f);
         return 1;
+    }
+
+    /// <summary>Prints the source and output colour parameters the engine reports right now.</summary>
+    private static void PrintColour(MpvPlayer player, string label)
+    {
+        string V(string property) => player.GetProperty(property) ?? "-";
+        Console.WriteLine($"COLOUR [{label}] src={V("video-params/primaries")}/{V("video-params/gamma")}/{V("video-params/colormatrix")}"
+            + $" peak={V("video-params/sig-peak")} min-luma={V("video-params/min-luma")} max-luma={V("video-params/max-luma")}"
+            + $" max-cll={V("video-params/max-cll")} max-pq-y={V("video-params/max-pq-y")} avg-pq-y={V("video-params/avg-pq-y")}"
+            + $" out={V("video-out-params/primaries")}/{V("video-out-params/gamma")} out-peak={V("video-out-params/sig-peak")}"
+            + $" tone-mapping={V("options/tone-mapping")} hdr-compute-peak={V("options/hdr-compute-peak")}"
+            + $" target-peak={V("options/target-peak")} hint={V("options/target-colorspace-hint")}"
+            + $" hwdec={V("hwdec-current")} vo={V("current-vo")}/{V("gpu-context")}");
     }
 
     /// <summary>Prints the engine's build identity, used by the dependency record.</summary>

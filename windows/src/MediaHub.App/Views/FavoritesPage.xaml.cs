@@ -3,6 +3,7 @@ using MediaHub.Domain;
 using MediaHub.Providers;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace MediaHub.App.Views;
 
@@ -21,6 +22,7 @@ public sealed partial class FavoritesPage : Page
     public FavoritesPage()
     {
         InitializeComponent();
+        SkeletonPanel.ItemsSource = new object[6];
         Loaded += (_, _) => _ = LoadAsync();
     }
 
@@ -32,6 +34,14 @@ public sealed partial class FavoritesPage : Page
         _loading = true;
         BusyRing.IsActive = true;
         StatusBar.IsOpen = false;
+        EmptyPanel.Visibility = Visibility.Collapsed;
+
+        bool showSkeleton = ItemGrid.ItemsSource is null;
+        if (showSkeleton)
+        {
+            SkeletonPanel.Visibility = Visibility.Visible;
+            UiMotion.Pulse(SkeletonPanel);
+        }
 
         var rows = new List<FavoriteRow>();
         var failures = new List<string>();
@@ -74,6 +84,11 @@ public sealed partial class FavoritesPage : Page
         }
         finally
         {
+            if (showSkeleton)
+            {
+                UiMotion.Settle(SkeletonPanel);
+                SkeletonPanel.Visibility = Visibility.Collapsed;
+            }
             BusyRing.IsActive = false;
             _loading = false;
         }
@@ -89,7 +104,30 @@ public sealed partial class FavoritesPage : Page
     private void OnItemClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is not FavoriteRow row) return;
-        App.MainWindow?.NavigateShell(typeof(DetailPage),
+        Open(row);
+    }
+
+    private static void Open(FavoriteRow row)
+        => App.MainWindow?.NavigateShell(typeof(DetailPage),
             new DetailNavigation(row.ServerId, row.ItemId, row.Title));
+
+    private void OnOpenMenuClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is FavoriteRow row) Open(row);
+    }
+
+    private void OnCopyTitleClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not FavoriteRow row) return;
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(row.Title);
+            Clipboard.SetContent(package);
+        }
+        catch (Exception ex)
+        {
+            StartupTrace.Write("favorites:clipboard FAILED " + ex.GetType().Name);
+        }
     }
 }

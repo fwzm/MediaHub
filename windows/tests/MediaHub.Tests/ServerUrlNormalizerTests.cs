@@ -149,4 +149,33 @@ public sealed class ServerUrlNormalizerTests
         Assert.Equal("http://[::1]:8096/emby", result.ApiRoot.AbsoluteUri);
         Assert.True(result.HadExplicitPort);
     }
+
+    [Fact]
+    public void An_http_source_keeps_its_query_string()
+    {
+        // A plain address is the resource itself: a signed query is part of it, not a base address hiding
+        // a credential, which is why only this type is allowed to carry one.
+        Assert.True(ServerUrlNormalizer.TryNormalize(
+            "https://cdn.example.com/video.mp4?token=abc&expires=99", ServerType.Http,
+            out NormalizedServerUrl result, out string? error), error);
+
+        Assert.Equal("https://cdn.example.com/video.mp4?token=abc&expires=99", result.DisplayText);
+        Assert.Equal(result.DisplayText, result.BaseUri.AbsoluteUri);
+        // There is no API root for a plain address; the resource URL is the root.
+        Assert.Equal(result.BaseUri, result.ApiRoot);
+    }
+
+    [Theory]
+    [InlineData("https://cdn.example.com/list.m3u8#timed", "片段")]
+    [InlineData("https://alice:hunter2@cdn.example.com/a.mp4", "用户名或密码")]
+    public void An_http_source_still_refuses_fragments_and_embedded_credentials(string input, string expectedFragment)
+    {
+        // A query is data the server needs; a fragment never reaches it, and user-info is a credential in
+        // the one place this client will not read one from.
+        Assert.False(ServerUrlNormalizer.TryNormalize(input, ServerType.Http, out NormalizedServerUrl result, out string? error));
+
+        Assert.Null(result);
+        Assert.NotNull(error);
+        Assert.Contains(expectedFragment, error!);
+    }
 }

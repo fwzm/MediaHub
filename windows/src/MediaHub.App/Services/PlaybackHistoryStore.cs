@@ -1,4 +1,5 @@
 using System.Text.Json;
+using MediaHub.Domain;
 
 namespace MediaHub.App.Services;
 
@@ -11,7 +12,16 @@ public sealed record PlaybackHistoryEntry
     public DateTime LastPlayedUtc { get; init; } = DateTime.UtcNow;
 
     public double ProgressFraction => DurationTicks > 0 ? Math.Clamp((double)PositionTicks / DurationTicks, 0, 1) : 0;
-    public bool IsFinished => ProgressFraction >= 0.95;
+    public bool IsFinished => PlaybackResumePolicy.IsFinished(PositionTicks, DurationTicks);
+
+    /// <summary>
+    /// Where a replay should begin: the stored position, or zero once the title is finished.
+    /// </summary>
+    /// <remarks>
+    /// A finished entry keeps its final position for the history list, but handing it back as a start
+    /// point resumes on the last second and ends instantly.
+    /// </remarks>
+    public long ResumePositionTicks => PlaybackResumePolicy.ResumePositionTicks(PositionTicks, DurationTicks);
     public TimeSpan Position => TimeSpan.FromTicks(PositionTicks);
     public TimeSpan Duration => TimeSpan.FromTicks(DurationTicks);
 }

@@ -1,10 +1,14 @@
 using MediaHub.Domain;
 using MediaHub.App.Services;
 using MediaHub.App.Views;
+using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using System.Runtime.InteropServices;
 using Windows.Graphics;
+using Windows.UI.ViewManagement;
 using WinRT.Interop;
 
 namespace MediaHub.App;
@@ -26,11 +30,24 @@ public sealed partial class MainWindow : Window
         Services.StartupTrace.Write("MainWindow:player-ready");
 
         Title = "MediaHub";
-        ShellFrame.Navigate(typeof(HomePage));
+        ApplyDarkTitleBar();
+        ApplyGlassChrome();
         Nav.SelectedItem = Nav.MenuItems[0];
+        if (Environment.GetEnvironmentVariable("MEDIAHUB_BUTTON_LAB") == "1")
+        {
+            // Diagnostic surface only; see ButtonLabPage. Navigated after the nav selection so the
+            // selection handler cannot replace it. Clearing the selection afterwards means a later
+            // click on "首页" is a real selection change and can leave the lab.
+            ShellFrame.Navigate(typeof(ButtonLabPage));
+            Nav.SelectedItem = null;
+        }
+        else
+        {
+            ShellFrame.Navigate(typeof(HomePage));
+        }
 
-        WindowPlacementStore.Restore(AppWindow, App.Services.Settings);
-        AttachWindowPlacementTracking();
+        WindowRect? restored = WindowPlacementStore.RestoreOrApplyDefault(AppWindow, App.Services.Settings);
+        AttachWindowPlacementTracking(restored);
         AttachFileDrop();
 
         // Restoring configured sources hits the network, so it runs after the shell is on screen
@@ -42,6 +59,134 @@ public sealed partial class MainWindow : Window
     }
 
     public IntPtr WindowHandle => WindowNative.GetWindowHandle(this);
+
+    // ---------------------------------------------------------------- glass chrome
+
+    private Brush? _solidShellBackground;
+    private bool _glassEnabled;
+
+    /// <summary>
+    /// Turns on the window-level acrylic backdrop, or leaves the shell on its solid palette.
+    /// </summary>
+    /// <remarks>
+    /// The veils in the theme are translucent, so they need something behind them. When glass is on
+    /// that is the backdrop; when it is off it is <c>MediaHubBgBrush</c>, which this method leaves in
+    /// place. Every disabling condition below is one Windows itself honours - a compositor that
+    /// cannot do acrylic, the system "transparency effects" switch, or high contrast - and all of
+    /// them must land on the solid palette rather than on a window that has become see-through.
+    /// </remarks>
+    private void ApplyGlassChrome()
+    {
+        _solidShellBackground = RootGrid.Background;
+        try
+        {
+            string reason = "";
+            // The override exists so the solid palette - which is also the Windows 10 / transparency-off
+            // form - can be exercised on a machine that does support acrylic. It is a diagnostic switch
+            // only: nothing in the product sets it.
+            if (Environment.GetEnvironmentVariable("MEDIAHUB_FORCE_SOLID") == "1") reason = "forced-solid";
+            // The controller is what actually backs the acrylic: if the compositor cannot provide it
+            // (Windows 10, a remote session, a GPU without the effect), the window must stay solid.
+            else if (!DesktopAcrylicController.IsSupported()) reason = "backdrop-unsupported";
+            else if (new AccessibilitySettings().HighContrast) reason = "high-contrast";
+            else if (!new UISettings().AdvancedEffectsEnabled) reason = "transparency-disabled";
+            else if (IsBatterySaverOn()) reason = "battery-saver";
+
+            if (reason.Length > 0)
+            {
+                Services.StartupTrace.Write("glass:solid reason=" + reason);
+                return;
+            }
+
+            SystemBackdrop = new DesktopAcrylicBackdrop();
+            RootGrid.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            _glassEnabled = true;
+            Services.StartupTrace.Write("glass:acrylic");
+        }
+        catch (Exception ex)
+        {
+            // A missing compositor capability must not cost the window its background.
+            SystemBackdrop = null;
+            RootGrid.Background = _solidShellBackground;
+            Services.StartupTrace.Write("glass:solid reason=" + ex.GetType().Name);
+        }
+    }
+
+    /// <summary>
+    /// Gives the player a solid shell while it is open.
+    /// </summary>
+    /// <remarks>
+    /// The video is a native child surface, so the letterbox around it and the side panel are XAML.
+    /// Leaving the backdrop active there would show the desktop through those areas - the "glass
+    /// leaking out of the video" defect - and it would also compete with the surface for composition.
+    /// The player therefore always paints the solid background, whether or not glass is enabled.
+    /// </remarks>
+    private void SetShellSurface(bool playerActive)
+    {
+        if (!_glassEnabled || _solidShellBackground is null) return;
+        RootGrid.Background = playerActive
+            ? _solidShellBackground
+            : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SystemPowerStatus
+    {
+        public byte AcLineStatus;
+        public byte BatteryFlag;
+        public byte BatteryLifePercent;
+        public byte SystemStatusFlag;
+        public int BatteryLifeTime;
+        public int BatteryFullLifeTime;
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern bool GetSystemPowerStatus(out SystemPowerStatus status);
+
+    /// <summary>
+    /// Battery saver is the signal Windows uses to drop visual effects to save power, so the shell
+    /// treats it the same way: solid surfaces instead of a live blur the machine cannot afford.
+    /// </summary>
+    private static bool IsBatterySaverOn()
+    {
+        try
+        {
+            return GetSystemPowerStatus(out var status) && status.SystemStatusFlag == 1;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Tints the system title bar to match the shell. The app is dark by design, so leaving the
+    /// bar on the system light theme puts a bright strip above every page.
+    /// </summary>
+    private void ApplyDarkTitleBar()
+    {
+        try
+        {
+            if (!AppWindowTitleBar.IsCustomizationSupported()) return;
+
+            var bar = AppWindow.TitleBar;
+            var background = Windows.UI.Color.FromArgb(255, 14, 17, 22);
+            var foreground = Windows.UI.Color.FromArgb(255, 242, 245, 248);
+
+            bar.BackgroundColor = background;
+            bar.InactiveBackgroundColor = background;
+            bar.ForegroundColor = foreground;
+            bar.InactiveForegroundColor = Windows.UI.Color.FromArgb(255, 158, 169, 181);
+            bar.ButtonBackgroundColor = background;
+            bar.ButtonInactiveBackgroundColor = background;
+            bar.ButtonForegroundColor = foreground;
+            bar.ButtonInactiveForegroundColor = Windows.UI.Color.FromArgb(255, 105, 115, 127);
+        }
+        catch
+        {
+            // Title-bar colouring is unavailable on older builds; the window still works.
+        }
+    }
 
     private async Task RestoreSourcesAsync()
     {
@@ -85,10 +230,17 @@ public sealed partial class MainWindow : Window
     /// <remarks>
     /// The bounds are captured while the window is in its normal state. Reading them at shutdown
     /// instead would store the maximised size as the "restored" size, so un-maximising after a restart
-    /// would leave a full-screen-sized window.
+    /// would leave a full-screen-sized window. <paramref name="applied"/> seeds that rectangle for the
+    /// case where the window opens maximised and never reports a normal size before closing.
     /// </remarks>
-    private void AttachWindowPlacementTracking()
+    private void AttachWindowPlacementTracking(WindowRect? applied)
     {
+        if (applied is { } bounds)
+        {
+            _restoredBounds = new RectInt32(bounds.X, bounds.Y, bounds.Width, bounds.Height);
+            _hasRestoredBounds = true;
+        }
+
         void CaptureIfNormal()
         {
             try
@@ -120,8 +272,13 @@ public sealed partial class MainWindow : Window
             RectInt32 bounds = _hasRestoredBounds
                 ? _restoredBounds
                 : new RectInt32(AppWindow.Position.X, AppWindow.Position.Y, AppWindow.Size.Width, AppWindow.Size.Height);
-            WindowPlacementStore.Save(App.Services.Settings, new WindowPlacementStore.Placement(
-                bounds.X, bounds.Y, bounds.Width, bounds.Height, maximized));
+            // A quiet run parks the window outside the desktop; persisting that rectangle would
+            // make the next real launch open off-screen.
+            if (!App.QuietStartRequested)
+            {
+                WindowPlacementStore.Save(App.Services.Settings, new WindowPlacementStore.Placement(
+                    bounds.X, bounds.Y, bounds.Width, bounds.Height, maximized));
+            }
 
             // The engine and the player host own native resources. Disposing them on close is what
             // makes "no leftover process after exit" true rather than hopeful.
@@ -129,6 +286,13 @@ public sealed partial class MainWindow : Window
             _ = ShutdownAsync();
         };
     }
+
+    /// <summary>
+    /// Closes the window through the normal path, which saves placement and disposes the engine and
+    /// relay before the process exits. The update flow uses this so the agent's wait for this PID is
+    /// a real graceful shutdown rather than a kill.
+    /// </summary>
+    public void RequestClose() => Close();
 
     private async Task ShutdownAsync()
     {
@@ -393,6 +557,7 @@ public sealed partial class MainWindow : Window
 
         Nav.Visibility = Visibility.Collapsed;
         PlayerLayer.Visibility = Visibility.Visible;
+        SetShellSurface(playerActive: true);
         PlayerFrame.Navigate(typeof(PlayerPage), request);
     }
 
@@ -402,6 +567,7 @@ public sealed partial class MainWindow : Window
         PlayerFrame.Content = null;
         PlayerLayer.Visibility = Visibility.Collapsed;
         Nav.Visibility = Visibility.Visible;
+        SetShellSurface(playerActive: false);
     }
 
     /// <summary>

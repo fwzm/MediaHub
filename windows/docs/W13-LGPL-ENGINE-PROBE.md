@@ -18,7 +18,7 @@ flavour-pair: gpl-baseline, lgpl-candidate
 gpl-baseline-bytes: 120989696
 gpl-baseline-sha256: 6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9
 lgpl-candidate-bytes: 3327274
-lgpl-candidate-sha256: 20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a
+lgpl-candidate-sha256: a3f901d6b5bae54a4b5b87cd9d9d973fd3af079aa70a61851560c30e74722a68
 assertion-count: 24
 assertion-formula: unlooped-plus-looped-per-flavour
 decode-surface: vo-null-and-ao-null
@@ -57,7 +57,7 @@ evidence-directory: windows/tools/acceptance/evidence/engine/
 | flavor | 路径 | 字节数 | SHA-256 |
 | --- | --- | ---: | --- |
 | gpl-baseline（当前随包） | windows/native/libmpv/libmpv-2.dll | 120,989,696 | 6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9 |
-| lgpl-candidate（W5-H 产物） | windows/engine/lgpl/dist/libmpv-2.dll | 3,327,274 | 20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a |
+| lgpl-candidate（W5-H 产物） | windows/engine/lgpl/dist/libmpv-2.dll | 3,327,274 | a3f901d6b5bae54a4b5b87cd9d9d973fd3af079aa70a61851560c30e74722a68 |
 
 素材：`D:\mh-media\playback-180s.mp4`（H.264 1280x720 + AAC，180 s），目标 10 s，进度下限 9 s。
 
@@ -68,7 +68,7 @@ evidence-directory: windows/tools/acceptance/evidence/engine/
 | 加载方式 | native-library（无需额外目录） | native-library+user-dirs（需 FFmpeg 8.1.1 + MSYS2 UCRT64 依赖目录） |
 | 依赖目录 | 无 | D:\mh-servers\lgpl-build\prefix\bin; C:\msys64\ucrt64\bin |
 | client api | 2.5 (0x00020005) | 2.5 (0x00020005) |
-| mpv-version | mpv v0.41.0-1154-gec38361c5 | mpv v0.41.0-UNKNOWN |
+| mpv-version | mpv v0.41.0-1154-gec38361c5 | mpv v0.41.0-UNKNOWN（当时；已于 2026-11-12 修复，现报 mpv v0.41.0） |
 | ffmpeg-version | N-127521-g2ec8998c3 | 8.1.1 |
 | file-loaded | True | True |
 | max time-pos | 10.000 s | 10.080 s |
@@ -135,4 +135,4 @@ windows/src/MediaHub.EngineProbe/bin/Debug/net10.0/MediaHub.EngineProbe.exe \
 5. 单机单次：每个 flavor 只跑一次 10 秒，不做长时间稳定性、seek、变速、chapter 跳转。
 6. 依赖目录是环境事实（D:\mh-servers\lgpl-build\prefix\bin、C:\msys64\ucrt64\bin），脚本把它们作为参数默认值写死；换机器需显式传入或安装同版本依赖。
 7. 探针不评估许可合规本身（源码提供、NOTICE、构建脚本可复现性见 LGPL-COMPLIANCE.md 与 windows/engine/lgpl/*）。
-8. 候选的 mpv-version 是 `mpv v0.41.0-UNKNOWN`（构建时没有 git 描述），因此无法用版本串判断它就是同一 commit 的构建——身份判定只用 sha256 + feature 集。
+8. 候选的 mpv-version 曾为 `mpv v0.41.0-UNKNOWN`（构建时没有 git 描述），因此当时无法用版本串判断它就是同一 commit 的构建——身份判定只用 sha256 + feature 集。该问题已于 2026-11-12 通过把 mpv 源码树的 MPV_VERSION 设为 0.41.0 并重建解决，当前 `mpv --version` 输出 `mpv v0.41.0`。

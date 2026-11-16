@@ -128,14 +128,19 @@
 
 .PARAMETER QuietRunbookPath
     The quiet-run acceptance runbook. Default: windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md. The
-    quiet-run-claims check compares its status block with the runner and the two PowerShell
+    quiet-run-claims check compares its status block with the runner and the three PowerShell
     modules that actually implement the gate.
 
 .PARAMETER QuietRunnerPath
     The runner that owns the idle gate. Default: windows/tools/acceptance/run-quiet.ps1.
 
 .PARAMETER QuietModulePath
-    The module with the idle/QUNS/watchdog primitives. Default: windows/tools/acceptance/lib/MhQuiet.psm1.
+    The module with the idle/QUNS primitives. Default: windows/tools/acceptance/lib/MhQuiet.psm1.
+
+.PARAMETER QuietUiModulePath
+    The module with the non-activating launch, UIA pattern calls, PrintWindow capture, pause/resume
+    checkpoint and the watchdog that enforces the 30-minute window. Default:
+    windows/tools/acceptance/lib/MhQuietUi.psm1.
 
 .PARAMETER UiaModulePath
     The module whose Start-MhApp refuses to open a window once the run was aborted. Default:
@@ -267,6 +272,7 @@ param(
     [string] $QuietRunbookPath,
     [string] $QuietRunnerPath,
     [string] $QuietModulePath,
+    [string] $QuietUiModulePath,
     [string] $UiaModulePath,
     [string] $CapabilityMapPath,
     [string] $ResumeFloorDocPath,
@@ -291,6 +297,7 @@ param(
     [string] $ReproBuildDocPath,
     [string] $PointerContractDocPath,
     [string] $ResumeSourceDocPath,
+    [string] $LicenceSectionDocPath,
     [switch] $FailOnLicenceGaps
 )
 
@@ -327,6 +334,7 @@ $gitIgnoreFile = Resolve-RepoPath -Path $GitIgnorePath -Default '.gitignore'
 $quietRunbookFile = Resolve-RepoPath -Path $QuietRunbookPath -Default 'windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md'
 $quietRunnerFile = Resolve-RepoPath -Path $QuietRunnerPath -Default 'windows/tools/acceptance/run-quiet.ps1'
 $quietModuleFile = Resolve-RepoPath -Path $QuietModulePath -Default 'windows/tools/acceptance/lib/MhQuiet.psm1'
+$quietUiModuleFile = Resolve-RepoPath -Path $QuietUiModulePath -Default 'windows/tools/acceptance/lib/MhQuietUi.psm1'
 $uiaModuleFile = Resolve-RepoPath -Path $UiaModulePath -Default 'windows/tools/acceptance/lib/MhUia.psm1'
 $resumeFloorDocFile = Resolve-RepoPath -Path $ResumeFloorDocPath -Default 'windows/docs/W8-RESUME-FLOOR-CONTRACT.md'
 $mockServerFile = Resolve-RepoPath -Path $MockServerPath -Default 'windows/tests/MediaHub.TestSupport/MockMediaServer.cs'
@@ -339,6 +347,7 @@ $appServicesFile = Resolve-RepoPath -Path $AppServicesPath -Default 'windows/src
 $logFileTestFile = Resolve-RepoPath -Path $LogFileTestPath -Default 'windows/tests/MediaHub.Tests/LogFileSinkTests.cs'
 $docAuditFile = Resolve-RepoPath -Path $DocAuditPath -Default 'windows/docs/W12-DOC-AUDIT.md'
 $resumeSourceFile = Resolve-RepoPath -Path $ResumeSourceDocPath -Default 'windows/docs/W8-HEADLESS-RESUME.md'
+$licenceSectionFile = Resolve-RepoPath -Path $LicenceSectionDocPath -Default 'windows/docs/licensing/SBOM.md'
 $docsScanRoot = if ($DocsScanRoot) { Resolve-RepoPath -Path $DocsScanRoot -Default '' } else { $RepoRoot }
 $engineProbeDocFile = Resolve-RepoPath -Path $EngineProbeDocPath -Default 'windows/docs/W13-LGPL-ENGINE-PROBE.md'
 $engineProbeScriptFile = Resolve-RepoPath -Path $EngineProbeScriptPath -Default 'windows/tools/acceptance/engine/engine-probe.ps1'
@@ -388,8 +397,8 @@ if (Test-Path -LiteralPath $noticesFile) {
     Add-Check 'notices-exist' 'PASS' ($noticesFile + ' (' + ([System.Text.Encoding]::UTF8.GetByteCount($notices)).ToString() + ' B)')
     $noticeExpectations = @(
         @('notices-libmpv-engine', 'libmpv-2.dll'),
-        @('notices-engine-licence', 'GPL-3.0-or-later'),
-        @('notices-lgpl-dependency-section', '### 3.3 LGPL flavour'),
+        @('notices-engine-licence', 'LGPL-2.1-or-later'),
+        @('notices-lgpl-dependency-section', '### 3.3 LGPL 引擎运行时依赖'),
         @('notices-lgpl-evidence', 'component-licences.txt'),
         @('notices-reproduce-command', 'license-report.ps1')
     )
@@ -956,12 +965,13 @@ else {
 }
 
 # --- 10. packaging and signing claims ---------------------------------------------------------
-# windows/docs/licensing/PACKAGING.md states the shipping state (portable, self-contained,
-# unsigned, no MSIX, no installer, never installed on a clean machine, release blocked by the GPL
-# obligation). Nothing compared that statement with the repository, so the first signing step, the
-# first Package.appxmanifest or a changed packaging property would leave the document describing
-# the old state while every gate stayed green. Build output (obj/bin/artifacts) is not the
-# repository: the MSIX tooling writes .msix files into obj on every Debug build.
+# windows/docs/licensing/PACKAGING.md states the shipping state (portable self-contained tree plus a
+# per-user PowerShell installer, unsigned, x64 only, no MSIX, never installed on a clean machine,
+# release blocked by the GPL obligation, until 2026-11-12 when the LGPL engine replaced it). Nothing
+# compared that statement with the repository, so the
+# first signing step, the first Package.appxmanifest or a changed packaging property would leave the
+# document describing the old state while every gate stayed green. Build output (obj/bin/artifacts) is
+# not the repository: the MSIX tooling writes .msix files into obj on every Debug build.
 function Resolve-ClaimPath {
     param([string] $Path, [string] $Default)
     $value = if ($Path) { $Path } else { $Default }
@@ -983,9 +993,9 @@ else {
         @{ line = 'signing-status: blocked-no-certificate'; what = 'signing status' },
         @{ line = 'packaging-form: portable-zip-self-contained'; what = 'packaging form' },
         @{ line = 'msix: not-implemented'; what = 'MSIX state' },
-        @{ line = 'installer: not-implemented'; what = 'installer state' },
+        @{ line = 'installer: per-user-powershell-implemented'; what = 'installer state' },
         @{ line = 'clean-machine-install: not-run'; what = 'clean-machine install state' },
-        @{ line = 'release-status: blocked-gpl-obligation'; what = 'release status' },
+        @{ line = 'release-status: gpl-obligation-resolved-signing-still-blocked'; what = 'release status' },
         @{ line = 'licence-files-in-package: staged-by-ci'; what = 'in-package licence file state' }
     )
     foreach ($fact in $packagingFacts) {
@@ -1027,6 +1037,23 @@ else {
     }
     if (@($msixArtefacts).Count -gt 0) { $packagingProblems += ('the document says MSIX is not implemented, but ' + (@($msixArtefacts).Count).ToString() + ' appxmanifest file(s) exist [' + (Format-NameList @($msixArtefacts)) + ']') }
     if (@($installerArtefacts).Count -gt 0) { $packagingProblems += ('the document says no installer exists, but ' + (@($installerArtefacts).Count).ToString() + ' installer project file(s) exist [' + (Format-NameList @($installerArtefacts)) + ']') }
+    # The installer claim has to be backed by real files. Declaring it implemented while the scripts
+    # are gone (or shipping the scripts while the document still says not-implemented) is exactly the
+    # drift this check exists for.
+    $installerScripts = @(
+        (Join-Path $packagingWindowsRoot 'installer\install.ps1'),
+        (Join-Path $packagingWindowsRoot 'installer\uninstall.ps1'),
+        (Join-Path $packagingWindowsRoot 'installer\install.cmd'),
+        (Join-Path $packagingWindowsRoot 'tools\make-install-kit.ps1')
+    )
+    $installerDeclared = $packagingDoc.Contains('installer: per-user-powershell-implemented')
+    $installerMissing = @($installerScripts | Where-Object { -not (Test-Path -LiteralPath $_) })
+    if ($installerDeclared -and $installerMissing.Count -gt 0) {
+        $packagingProblems += ('the document says the per-user installer is implemented, but ' + (Format-NameList $installerMissing) + ' is absent')
+    }
+    elseif ((-not $installerDeclared) -and ($installerMissing.Count -lt $installerScripts.Count)) {
+        $packagingProblems += 'the per-user installer scripts exist but the machine-readable installer line does not say per-user-powershell-implemented'
+    }
     $packagingCi = Join-Path $packagingWorkflows 'windows-ci.yml'
     if (-not (Test-Path -LiteralPath $packagingCi)) {
         $packagingProblems += ('windows-ci.yml is absent under ' + $packagingWorkflows + ', so the documented publish step cannot be verified')
@@ -1039,7 +1066,7 @@ else {
         }
     }
     if (@($packagingProblems).Count -eq 0) {
-        Add-Check 'packaging-claims' 'PASS' 'the shipping state in PACKAGING.md still matches the repository: portable self-contained publish, no signing step, no MSIX manifest, no installer project outside build output (7 machine-readable lines)'
+        Add-Check 'packaging-claims' 'PASS' 'the shipping state in PACKAGING.md still matches the repository: portable self-contained publish plus the per-user installer scripts, no signing step, no MSIX manifest, no MSI/EXE installer project outside build output (7 machine-readable lines)'
     }
     else {
         Add-Check 'packaging-claims' 'FAIL' ((@($packagingProblems) -join '; ') + ' - update PACKAGING.md section 0 and section 1 with the change')
@@ -1299,6 +1326,7 @@ $declaredCheckIds = @(
     'resume-source-pointer-claims',
     'resume-record-count-claims',
     'resume-record-constant-claims',
+    'licence-record-section-claims',
     'check-inventory'
 )
 if (-not (Test-Path -LiteralPath $licenceDocFile) -or -not (Test-Path -LiteralPath $readmeFile)) {
@@ -1363,9 +1391,9 @@ else {
     else {
         $flavourProjectText = Get-Content -LiteralPath $flavourProjectFile -Raw
         $quoteChar = [string][char]39
-        $defaultPattern = '<LibMpvFlavour\s+Condition="' + $quoteChar + '\$\(LibMpvFlavour\)' + $quoteChar + '\s*==\s*' + $quoteChar + $quoteChar + '">\s*gpl\s*</LibMpvFlavour>'
+        $defaultPattern = '<LibMpvFlavour\s+Condition="' + $quoteChar + '\$\(LibMpvFlavour\)' + $quoteChar + '\s*==\s*' + $quoteChar + $quoteChar + '">\s*lgpl\s*</LibMpvFlavour>'
         if (-not [regex]::IsMatch($flavourProjectText, $defaultPattern)) {
-            $flavourProblems += 'the player project no longer defaults LibMpvFlavour to gpl'
+            $flavourProblems += 'the player project no longer ships the LGPL engine by default'
         }
         foreach ($directoryClaim in @('native\libmpv', 'engine\lgpl\dist')) {
             if ($flavourProjectText.IndexOf($directoryClaim, [System.StringComparison]::Ordinal) -lt 0) {
@@ -1377,7 +1405,7 @@ else {
         }
     }
 
-    $switchPattern = 'LibMpvFlavour\s*[=:]\s*[^\r\n]{0,2}lgpl'
+    $switchPattern = 'LibMpvFlavour\s*[=:]\s*[^\r\n]{0,2}gpl'
     $candidateSwitchers = @()
     foreach ($project in @($projectFiles)) {
         if ($project.Name -ne 'MediaHub.Player.Mpv.csproj' -and $project.FullName -ne $flavourProjectFile -and (Test-Path -LiteralPath $project.FullName)) {
@@ -1392,7 +1420,7 @@ else {
         }
     }
     if ($candidateSwitchers.Count -gt 0) {
-        $flavourProblems += ('something else already builds the LGPL candidate: ' + (Format-NameList (Sort-Object -InputObject $candidateSwitchers -Unique)))
+        $flavourProblems += ('something still builds the GPL comparison baseline: ' + (Format-NameList (Sort-Object -InputObject $candidateSwitchers -Unique)))
     }
 
     $flavourDocText = Get-Content -LiteralPath $flavourDocFile -Raw
@@ -1403,7 +1431,7 @@ else {
     }
     else {
         $blockText = $flavourDocText.Substring($blockStart, $blockEnd - $blockStart)
-        foreach ($expected in @('default-flavour: gpl-baseline', 'candidate-flavour: lgpl-candidate-not-default', 'switch-flag: -p:LibMpvFlavour=lgpl')) {
+        foreach ($expected in @('default-flavour: lgpl-shipped', 'comparison-flavour: gpl-baseline-fixture', 'switch-flag: -p:LibMpvFlavour=gpl')) {
             if ($blockText.IndexOf($expected, [System.StringComparison]::Ordinal) -lt 0) {
                 $flavourProblems += ('the status block does not say ' + $expected)
             }
@@ -1416,7 +1444,7 @@ else {
     }
 
     if ($flavourProblems.Count -eq 0) {
-        Add-Check 'engine-flavour-default' 'PASS' 'the default flavour is still gpl-baseline in the player project, nothing else builds the LGPL candidate, and LGPL-ENGINE-SWITCH.md still declares it (3 machine-readable lines)'
+        Add-Check 'engine-flavour-default' 'PASS' 'the player project ships the LGPL engine by default, nothing else builds the GPL comparison baseline, and LGPL-ENGINE-SWITCH.md still declares it (3 machine-readable lines)'
     }
     else {
         Add-Check 'engine-flavour-default' 'FAIL' (($flavourProblems -join '; ') + ' - update windows/docs/LGPL-ENGINE-SWITCH.md and the player project together')
@@ -1437,7 +1465,7 @@ else {
     }
     else {
         $decisionBlock = $decisionText.Substring($decisionStart, $decisionEnd - $decisionStart)
-        foreach ($expected in @('status: open-release-blocker', 'shipped-engine-licence: GPL-3.0-or-later', 'repo-label-mismatch: resolved-2026-10-31')) {
+        foreach ($expected in @('status: resolved-lgpl-engine', 'shipped-engine-licence: LGPL-2.1-or-later', 'repo-label-mismatch: resolved-2026-10-31')) {
             if ($decisionBlock.IndexOf($expected, [System.StringComparison]::Ordinal) -lt 0) {
                 $decisionProblems += ('the status block does not say ' + $expected)
             }
@@ -1458,12 +1486,12 @@ else {
         if ($engineRows.Count -eq 0) {
             $decisionProblems += ('no libmpv (mpv) row in ' + [System.IO.Path]::GetFileName($noticesCandidate))
         }
-        elseif (($engineRows -join ' ').IndexOf('GPL-3.0-or-later', [System.StringComparison]::Ordinal) -lt 0) {
-            $decisionProblems += ('the libmpv row in ' + [System.IO.Path]::GetFileName($noticesCandidate) + ' no longer says GPL-3.0-or-later')
+        elseif (($engineRows -join ' ').IndexOf('LGPL-2.1-or-later', [System.StringComparison]::Ordinal) -lt 0) {
+            $decisionProblems += ('the libmpv row in ' + [System.IO.Path]::GetFileName($noticesCandidate) + ' no longer says LGPL-2.1-or-later')
         }
     }
     if ($decisionProblems.Count -eq 0) {
-        Add-Check 'licence-decision-claims' 'PASS' 'LICENCE-DECISION.md still declares the open release blocker and the GPL-3.0-or-later engine label, and both notice files still label libmpv GPL-3.0-or-later (3 machine-readable lines)'
+        Add-Check 'licence-decision-claims' 'PASS' 'LICENCE-DECISION.md declares the resolved LGPL engine and its LGPL-2.1-or-later label, and both notice files label the shipped libmpv LGPL-2.1-or-later (3 machine-readable lines)'
     }
     else {
         Add-Check 'licence-decision-claims' 'FAIL' (($decisionProblems -join '; ') + ' - update windows/docs/licensing/LICENCE-DECISION.md, windows/THIRD-PARTY-NOTICES.md and windows/docs/THIRD-PARTY-NOTICES.md together')
@@ -1493,7 +1521,7 @@ else {
     }
     else {
         $adrBlock = $adrText.Substring($adrStart, $adrEnd - $adrStart)
-        foreach ($expected in @('packaging-form: unpackaged-self-contained-portable', 'msix: optional-not-implemented', 'signing: blocked-no-certificate', 'licence-files-in-package: staged-by-ci-since-w40', 'native-libmpv: gitignored-and-fetched-by-tool')) {
+        foreach ($expected in @('packaging-form: unpackaged-self-contained-portable', 'msix: optional-not-implemented', 'installer: per-user-powershell-implemented', 'signing: blocked-no-certificate', 'licence-files-in-package: staged-by-ci-since-w40', 'native-libmpv: gitignored-and-fetched-by-tool')) {
             if ($adrBlock.IndexOf($expected, [System.StringComparison]::Ordinal) -lt 0) {
                 $adrProblems += ('the status block does not say ' + $expected)
             }
@@ -1532,7 +1560,7 @@ else {
         $adrProblems += ('the fetch script named by the ADR is absent at ' + $fetchScriptFile)
     }
     if ($adrProblems.Count -eq 0) {
-        Add-Check 'adr-packaging-claims' 'PASS' 'ADR-W004 still describes the repository: the status block matches, the four packaging properties are quoted exactly as the app project sets them, the licence-file claim is current, and the native libmpv tree stays ignored and fetched (5 machine-readable lines)'
+        Add-Check 'adr-packaging-claims' 'PASS' 'ADR-W004 still describes the repository: the status block matches, the four packaging properties are quoted exactly as the app project sets them, the licence-file claim is current, the per-user installer is declared, and the native libmpv tree stays ignored and fetched (6 machine-readable lines)'
     }
     else {
         Add-Check 'adr-packaging-claims' 'FAIL' (($adrProblems -join '; ') + ' - update windows/docs/adr/ADR-W004-packaging-and-distribution.md and the app project together')
@@ -1615,10 +1643,10 @@ else {
         'msix: not-implemented',
         'signing: blocked-no-certificate',
         'clean-machine-install: not-run',
-        'engine-flavour-default: gpl',
-        'engine-lgpl-candidate: built-not-switched',
+        'engine-flavour-default: lgpl',
+        'engine-lgpl-candidate: shipped-default',
         'licence-files-in-package: staged-by-ci',
-        'release-blocker: gpl-obligation'
+        'release-blocker: none'
     )) {
         if ($capabilityText.IndexOf($line, [System.StringComparison]::Ordinal) -lt 0) {
             $capabilityProblems += ('the status block does not say ' + $line)
@@ -1640,15 +1668,15 @@ else {
     }
     if (Test-Path -LiteralPath $flavourProjectFile) {
         $capabilityFlavourText = [string](Get-Content -LiteralPath $flavourProjectFile -Raw)
-        if (-not [regex]::IsMatch($capabilityFlavourText, 'native[\\/]libmpv')) {
-            $capabilityProblems += 'the player project no longer defaults to the GPL baseline tree, so engine-flavour-default: gpl is wrong'
+        if (-not [regex]::IsMatch($capabilityFlavourText, 'engine[\\/]lgpl[\\/]dist')) {
+            $capabilityProblems += 'the player project no longer defaults to the LGPL engine tree, so engine-flavour-default: lgpl is wrong'
         }
     }
     if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot 'windows/engine/lgpl/dist/libmpv-2.dll'))) {
         $capabilityProblems += 'the LGPL candidate binary is gone, so engine-lgpl-candidate: built-not-switched is unsupported'
     }
     if ($capabilityProblems.Count -eq 0) {
-        Add-Check 'capability-map-claims' 'PASS' 'the capability map still describes the repository: its machine-readable status lines are present, the shipping claims agree with PACKAGING.md, the player project still defaults to the GPL baseline and the LGPL candidate is still built'
+        Add-Check 'capability-map-claims' 'PASS' 'the capability map still describes the repository: its machine-readable status lines are present, the shipping claims agree with PACKAGING.md, the player project still ships the LGPL engine by default and the LGPL binaries are still present'
     }
     else {
         Add-Check 'capability-map-claims' 'FAIL' (($capabilityProblems -join '; ') + ' - update windows/docs/CAPABILITY-MAP.md section 0 and the row it summarises')
@@ -1724,21 +1752,27 @@ else {
     else {
         $quietBlock = $quietRunbookText.Substring($beginAt, $endAt - $beginAt)
         foreach ($quietLine in @(
-            'default-min-idle-seconds: 180',
+            'default-min-idle-seconds: 1800',
             'wait-for-idle-minutes-default: 0',
             'idle-source: GetLastInputInfo',
             'quns-allowed-states: 5,6',
-            'watchdog-poll-milliseconds: 700',
+            'watchdog-poll-milliseconds: 1000',
             'abort-marker: watch-*.abort',
             'suite-reentry-env: MH_ALLOW_ACTIVE',
             'abort-flag-env: MH_QUIET_ABORT_FILE',
-            'gate-precedence: abort-marker-then-allow-active-then-idle-and-quns'
+            'gate-precedence: abort-marker-then-allow-active-then-idle-and-quns',
+            'pause-log: 用户回来了，已暂停',
+            'resume-source: checkpoint.json',
+            'session-blockers: locked,disconnected,switched-user,sleep'
         )) {
             if (-not $quietBlock.Contains($quietLine)) { $quietProblems.Add('the status block does not say ' + $quietLine) }
         }
     }
-    if (-not $quietRunbookText.Contains('| `-MinIdleSeconds` | 180 |')) { $quietProblems.Add('the parameter table no longer documents -MinIdleSeconds as 180') }
+    if (-not $quietRunbookText.Contains('| `-MinIdleSeconds` | 1800 |')) { $quietProblems.Add('the parameter table no longer documents -MinIdleSeconds as 1800') }
     if (-not $quietRunbookText.Contains('| `-WaitForIdleMinutes` | 0 |')) { $quietProblems.Add('the parameter table no longer documents -WaitForIdleMinutes as 0') }
+    foreach ($quietTableNeedle in @('| `-DevOverrideIdleGate` |', '| `-Checkpoint` |')) {
+        if (-not $quietRunbookText.Contains($quietTableNeedle)) { $quietProblems.Add('the parameter table no longer documents ' + $quietTableNeedle) }
+    }
 
     if (-not (Test-Path -LiteralPath $quietRunnerFile)) {
         $quietProblems.Add('the quiet runner is absent (windows/tools/acceptance/run-quiet.ps1)')
@@ -1746,11 +1780,14 @@ else {
     else {
         $quietRunnerText = Get-Content -LiteralPath $quietRunnerFile -Raw
         foreach ($quietNeedle in @(
-            '[int]$MinIdleSeconds = 180',
+            '[int]$MinIdleSeconds = 1800',
             '[int]$WaitForIdleMinutes = 0',
-            'Start-MhQuietWatch',
+            'Start-MhQuietUiWatch',
             '$env:MH_ALLOW_ACTIVE = ''1''',
-            '$env:MH_QUIET_ABORT_FILE'
+            '$env:MH_QUIET_ABORT_FILE',
+            '用户回来了，已暂停',
+            'Read-MhQuietCheckpoint',
+            'function Save-Checkpoint'
         )) {
             if (-not $quietRunnerText.Contains($quietNeedle)) { $quietProblems.Add('the runner no longer contains ' + $quietNeedle) }
         }
@@ -1764,10 +1801,30 @@ else {
         foreach ($quietNeedle in @(
             'SHQueryUserNotificationState',
             '$state -eq 5 -or $state -eq 6',
-            '[int]$PollMilliseconds = 700',
             'Test-MhQuietAborted'
         )) {
             if (-not $quietModuleText.Contains($quietNeedle)) { $quietProblems.Add('the quiet-gate module no longer contains ' + $quietNeedle) }
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $quietUiModuleFile)) {
+        $quietProblems.Add('the quiet UI module is absent (windows/tools/acceptance/lib/MhQuietUi.psm1)')
+    }
+    else {
+        $quietUiModuleText = Get-Content -LiteralPath $quietUiModuleFile -Raw
+        foreach ($quietNeedle in @(
+            '[int]$MinIdleSeconds = 1800',
+            '[int]$PollMilliseconds = 1000',
+            'function Wait-MhQuietGate',
+            'function Start-MhQuietUiWatch',
+            'Test-MhQuietUiAborted',
+            'OpenInputDesktop',
+            'WTSQuerySessionInformationW',
+            'GetTickCount',
+            'PrintWindow',
+            'function Save-MhQuietWindowCapture'
+        )) {
+            if (-not $quietUiModuleText.Contains($quietNeedle)) { $quietProblems.Add('the quiet UI module no longer contains ' + $quietNeedle) }
         }
     }
 
@@ -1787,7 +1844,7 @@ else {
     }
 
     if ($quietProblems.Count -eq 0) {
-        Add-Check 'quiet-run-claims' 'PASS' 'the quiet-run safety contract still holds: the runbook block names 9 gate facts, the runner still defaults to 180 s idle and 700 ms polling, the QUNS allow-list is still 5/6, and Start-MhApp still refuses on an abort marker before MH_ALLOW_ACTIVE'
+        Add-Check 'quiet-run-claims' 'PASS' 'the quiet-run safety contract still holds: the runbook block names 12 gate facts (30-minute idle, pause log, checkpoint resume, session blockers), the runner still defaults to 1800 s idle and waits indefinitely, the UI module still polls every 1000 ms with the non-activating launch and PrintWindow capture, the QUNS allow-list is still 5/6, and Start-MhApp still refuses on an abort marker before MH_ALLOW_ACTIVE'
     }
     else {
         Add-Check 'quiet-run-claims' 'FAIL' (($quietProblems -join '; ') + ' - update windows/docs/ACCEPTANCE-QUIET-RUNBOOK.md section 0 and the file it describes')
@@ -3240,6 +3297,116 @@ else {
         else {
             Add-Check 'resume-record-constant-claims' 'FAIL' ($resumeConstantProblems.Count.ToString() + ' problem(s): ' + (Format-NameList $resumeConstantProblems) + ' - a constant that is not recomputed is a number nobody can trust')
         }
+    }
+}
+# --- 34. the licensing records must agree on the sections they cite (W66) ---------------------
+if (-not (Test-Path -LiteralPath $licenceSectionFile -PathType Leaf)) {
+    Add-Check 'licence-record-section-claims' 'SKIP' 'the SBOM record is absent (windows/docs/licensing/SBOM.md)'
+}
+else {
+    $lsText = [string](Get-Content -LiteralPath $licenceSectionFile -Raw)
+    $lsDir = Split-Path -Parent $licenceSectionFile
+    $lsProblems = [System.Collections.Generic.List[string]]::new()
+    $lsBegin = '<!-- BEGIN licence-record-section-claims -->'
+    $lsEnd = '<!-- END licence-record-section-claims -->'
+    $lsBeginAt = $lsText.IndexOf($lsBegin, [System.StringComparison]::Ordinal)
+    $lsEndAt = $lsText.IndexOf($lsEnd, [System.StringComparison]::Ordinal)
+    $declaredCites = [System.Collections.Generic.HashSet[string]]::new()
+    $lsEntryCount = 0
+    $lsTargetCount = 0
+    if ($lsBeginAt -lt 0 -or $lsEndAt -lt $lsBeginAt) {
+        $lsProblems.Add('the SBOM record no longer carries the licence-record-section-claims block')
+    }
+    else {
+        $lsBlock = $lsText.Substring($lsBeginAt, $lsEndAt - $lsBeginAt + $lsEnd.Length)
+        if (-not [regex]::IsMatch($lsBlock, 'licence-section-owner:\s*check-licence-surface\.ps1:licence-record-section-claims')) {
+            $lsProblems.Add('the licence-section-owner line no longer names this check')
+        }
+        $lsSeenTargets = [System.Collections.Generic.HashSet[string]]::new()
+        foreach ($lsLine in $lsBlock.Split([char]10)) {
+            $lsTrimmed = $lsLine.Trim()
+            if (-not $lsTrimmed.StartsWith('- citer=')) { continue }
+            $lsEntryCount++
+            $lsFields = @{}
+            foreach ($lsKv in [regex]::Matches($lsTrimmed, '(?<k>[a-z-]+)=(?<v>[^;]+)')) { $lsFields[$lsKv.Groups['k'].Value] = $lsKv.Groups['v'].Value.Trim() }
+            if (-not $lsFields.ContainsKey('citer') -or -not $lsFields.ContainsKey('cite') -or -not $lsFields.ContainsKey('anchor')) {
+                $lsProblems.Add('an entry line is missing citer=, cite= or anchor=')
+                continue
+            }
+            $lsCiter = $lsFields['citer']
+            $lsAnchor = $lsFields['anchor']
+            $lsCiteMatch = [regex]::Match($lsFields['cite'], '^(?<target>[A-Za-z0-9_.\-]+\.md)§(?<sec>\d+(?:\.\d+)*)$')
+            if (-not $lsCiteMatch.Success) {
+                $lsProblems.Add('the entry for ' + $lsCiter + ' has a cite= value this check cannot parse: ' + $lsFields['cite'])
+                continue
+            }
+            $lsTarget = $lsCiteMatch.Groups['target'].Value
+            $lsSec = $lsCiteMatch.Groups['sec'].Value
+            $lsKey = $lsCiter + '|' + $lsTarget + '§' + $lsSec
+            if (-not $declaredCites.Add($lsKey)) { $lsProblems.Add('the citation ' + $lsCiter + ' -> ' + $lsTarget + ' §' + $lsSec + ' is declared twice') }
+            if ($lsSeenTargets.Add($lsTarget)) { $lsTargetCount++ }
+            $lsCiterPath = Join-Path $lsDir $lsCiter
+            if (-not (Test-Path -LiteralPath $lsCiterPath -PathType Leaf)) { $lsProblems.Add('the citing record ' + $lsCiter + ' does not exist'); continue }
+            $lsCiterText = [string](Get-Content -LiteralPath $lsCiterPath -Raw)
+            $lsCitationPattern = [regex]::Escape($lsTarget) + '[^\r\n]{0,6}?§' + [regex]::Escape($lsSec) + '(?![0-9])(?!\.[0-9])'
+            if (-not [regex]::IsMatch($lsCiterText, $lsCitationPattern)) {
+                $lsProblems.Add('the record ' + $lsCiter + ' no longer writes the citation ' + $lsTarget + ' §' + $lsSec + ' that this block declares')
+            }
+            $lsTargetPath = Join-Path $lsDir $lsTarget
+            if (-not (Test-Path -LiteralPath $lsTargetPath -PathType Leaf)) { $lsProblems.Add('the cited record ' + $lsTarget + ' does not exist'); continue }
+            $lsTargetLines = [System.IO.File]::ReadAllLines($lsTargetPath)
+            $lsHeads = @()
+            for ($lsH = 0; $lsH -lt $lsTargetLines.Length; $lsH++) {
+                $lsHm = [regex]::Match($lsTargetLines[$lsH], '^#{1,6}\s+(\d+(?:\.\d+)*)\.?\s')
+                if ($lsHm.Success) { $lsHeads += ,@($lsHm.Groups[1].Value, $lsH) }
+            }
+            $lsStart = -1
+            $lsBodyEnd = $lsTargetLines.Length
+            for ($lsI = 0; $lsI -lt $lsHeads.Count; $lsI++) {
+                if ($lsHeads[$lsI][0] -eq $lsSec) {
+                    $lsStart = [int]$lsHeads[$lsI][1]
+                    if ($lsI + 1 -lt $lsHeads.Count) { $lsBodyEnd = [int]$lsHeads[$lsI + 1][1] }
+                    break
+                }
+            }
+            if ($lsStart -lt 0) {
+                $lsProblems.Add('the record ' + $lsTarget + ' no longer has a section §' + $lsSec + ' that this block declares')
+                continue
+            }
+            $lsBody = @($lsTargetLines[($lsStart + 1)..($lsBodyEnd - 1)]) -join [char]10
+            if (-not $lsBody.Contains($lsAnchor)) {
+                $lsProblems.Add('section §' + $lsSec + ' of ' + $lsTarget + ' no longer contains the anchor phrase this block declares')
+            }
+        }
+        $lsDeclaredCount = [regex]::Match($lsBlock, 'licence-section-count:[ \t]*(\d+)')
+        if (-not $lsDeclaredCount.Success) {
+            $lsProblems.Add('the block no longer declares a licence-section-count')
+        }
+        elseif ([int]$lsDeclaredCount.Groups[1].Value -ne $lsEntryCount) {
+            $lsProblems.Add('the block declares ' + $lsDeclaredCount.Groups[1].Value + ' citation(s) but lists ' + $lsEntryCount)
+        }
+        if ($lsEntryCount -lt 10) { $lsProblems.Add('the block now declares only ' + $lsEntryCount + ' citation(s); it is a map of the records, not a shrinking list') }
+        $lsScrubbed = $lsText.Substring(0, $lsBeginAt) + $lsText.Substring($lsEndAt + $lsEnd.Length)
+        $lsFiles = @(Get-ChildItem -LiteralPath $lsDir -Filter *.md -File | Sort-Object Name)
+        foreach ($lsFile in $lsFiles) {
+            $lsName = $lsFile.Name
+            $lsBodyText = if ($lsName -eq 'SBOM.md') { $lsScrubbed } else { [string](Get-Content -LiteralPath $lsFile.FullName -Raw) }
+            foreach ($lsFound in [regex]::Matches($lsBodyText, '(?<f>[A-Za-z0-9_.\-]+\.md)[^\r\n]{0,6}?§(?<s>\d+(?:\.\d+)*)')) {
+                $lsFoundTarget = $lsFound.Groups['f'].Value
+                if ($lsFoundTarget -eq $lsName) { continue }
+                if (-not ($lsFiles.Name -contains $lsFoundTarget)) { continue }
+                $lsFoundKey = $lsName + '|' + $lsFoundTarget + '§' + $lsFound.Groups['s'].Value
+                if (-not $declaredCites.Contains($lsFoundKey)) {
+                    $lsProblems.Add('the record ' + $lsName + ' still cites ' + $lsFoundTarget + ' §' + $lsFound.Groups['s'].Value + ' but the block does not declare it')
+                }
+            }
+        }
+    }
+    if ($lsProblems.Count -gt 0) {
+        Add-Check 'licence-record-section-claims' 'FAIL' (($lsProblems.ToArray()) -join '; ') '- a section number that nobody re-reads is a citation that quietly points at a different paragraph'
+    }
+    else {
+        Add-Check 'licence-record-section-claims' 'PASS' ('every cross-record section number still resolves: ' + $lsEntryCount + ' declared citation(s) over ' + $lsTargetCount + ' record(s), each cited section still contains its anchor phrase, and no licensing record cites a section the block does not declare')
     }
 }
 $failed = @($checks | Where-Object { $_.outcome -eq 'FAIL' })

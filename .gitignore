@@ -53,3 +53,14 @@ windows/tools/acceptance/evidence/
 windows/tools/acceptance/webdav/fault-requests-*.jsonl
 # DSH progress CLI 运行产物（不是仓库内容）
 .dsh-progress/
+
+# ---- 2026-11-16 快照清理：实验与评审产物（不是产品输入） ----
+/.local/
+/.screenshots/
+/glass-shots/
+/button-shots/
+/.dsh-pilot/
+/.trae-html-share-packages/
+/glass-comparison.html
+/button-comparison.html
+/提示词/

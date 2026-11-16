@@ -64,6 +64,12 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
     private const int MaxAdmittedRequests = 12;
     private const int MaxRecordedDenials = 20;
 
+    /// <summary>Playlist ceiling. HLS playlists are kilobytes; a multi-megabyte one is not a playlist.</summary>
+    private const int MaxPlaylistBytes = 4 * 1024 * 1024;
+
+    /// <summary>Bound on remembered segment/child URLs for one playback.</summary>
+    private const int MaxHlsTargets = 20_000;
+
     private readonly HttpListener _listener;
     private readonly BridgeTarget _target;
     private readonly MediaSourceHttpClientFactory _httpFactory;
@@ -82,6 +88,19 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
     private long _bytesServed;
     private int _requestCount;
     private int _deniedCount;
+
+    /// <summary>
+    /// Upstream URLs discovered inside playlists, keyed by an opaque id.
+    /// </summary>
+    /// <remarks>
+    /// The id is a hash, not an encoding, of the URL: an HLS URL typically carries an <c>ApiKey</c> or
+    /// a signature in its query string, and encoding it into the address handed to the engine would
+    /// put that secret in the engine's logs, its OSD and any crash dump. The two maps are per-session
+    /// and die with the bridge, so an id is worthless after playback ends.
+    /// </remarks>
+    private readonly Dictionary<string, Uri> _hlsById = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _hlsIdByUrl = new(StringComparer.Ordinal);
+    private readonly object _hlsGate = new();
 
     /// <summary>True only when every address the name resolves to is a loopback address.</summary>
     private static bool ResolvesOnlyToLoopback(string host)
@@ -113,6 +132,7 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
         // The engine is always handed the literal loopback address, even when the listener was bound
         // to the name, so the URL it holds can never depend on name resolution.
         BridgeUri = new Uri("http://127.0.0.1:" + port + "/" + token + "/stream");
+        _hlsBase = "http://127.0.0.1:" + port + "/" + token + "/hls/";
 
         var hosts = new List<string> { "127.0.0.1:" + port, "[::1]:" + port };
         if (!boundHost.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)) hosts.Add(boundHost + ":" + port);
@@ -120,6 +140,9 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
     }
 
     private readonly string[] _acceptableHosts;
+
+    /// <summary>Prefix of every URL emitted into a rewritten playlist.</summary>
+    private readonly string _hlsBase;
 
     public int Port { get; }
 
@@ -220,6 +243,7 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
 
     private async Task HandleAsync(HttpListenerContext context, CancellationToken ct)
     {
+        Uri? attempted = null;
         try
         {
             if (!await _concurrency.WaitAsync(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false))
@@ -245,7 +269,26 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
                 }
 
                 Interlocked.Increment(ref _requestCount);
-                await ProxyAsync(context, ct).ConfigureAwait(false);
+
+                // The path selects between the configured target and one URL that a playlist this
+                // bridge served has already named. It can never name an arbitrary address.
+                string[] segments = (context.Request.Url?.AbsolutePath ?? "")
+                    .Split('/', StringSplitOptions.RemoveEmptyEntries);
+                bool isHlsChild = segments.Length == 3
+                                  && segments[1].Equals("hls", StringComparison.OrdinalIgnoreCase);
+                Uri target = _target.Url;
+                if (isHlsChild && !TryGetHlsTarget(segments[2], out target))
+                {
+                    await FailAsync(context, 404, "unknown hls resource").ConfigureAwait(false);
+                    return;
+                }
+
+                // A child playlist or segment on another origin (object storage, CDN) is not entitled
+                // to this server's session. The root stream always is, which is how the first request
+                // has always been made.
+                bool attachCredentials = !isHlsChild || IsEntitledOrigin(target);
+                attempted = target;
+                await ProxyAsync(context, target, attachCredentials, ct).ConfigureAwait(false);
             }
             finally
             {
@@ -260,18 +303,26 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
         {
             // Recorded because a silent 502/socket abort here is indistinguishable from a network
             // problem at the caller, and this relay is the only hop the caller cannot observe.
-            RecordError(ex);
+            RecordError(ex, attempted);
             try { await FailAsync(context, 502, "bridge upstream failure").ConfigureAwait(false); }
             catch { try { context.Response.Abort(); } catch { } }
         }
     }
 
-    private void RecordError(Exception ex)
+    private void RecordError(Exception ex, Uri? attempted = null)
     {
         lock (_gate)
         {
             if (_errors.Count >= 20) return;
-            _errors.Add(ex.GetType().Name + ": " + Redact(ex.Message));
+            string message = Redact(ex.Message);
+            // HLS URLs carry the server's own signature or ApiKey in the query. Quoting the failed URI
+            // in a diagnostic would copy it out of the bridge, which is the exact leakage the opaque
+            // ids above exist to prevent.
+            if (attempted is { Query.Length: > 1 } && message.Contains(attempted.Query, StringComparison.Ordinal))
+            {
+                message = message.Replace(attempted.Query, "?<redacted>", StringComparison.Ordinal);
+            }
+            _errors.Add(ex.GetType().Name + ": " + message);
         }
     }
 
@@ -346,31 +397,48 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
     private string Redact(string? text)
         => string.IsNullOrEmpty(text) ? "" : text.Replace(Token, "<session-token>", StringComparison.OrdinalIgnoreCase);
 
-    private async Task ProxyAsync(HttpListenerContext context, CancellationToken ct)
+    private async Task ProxyAsync(HttpListenerContext context, Uri target, bool attachCredentials, CancellationToken ct)
     {
         HttpListenerRequest incoming = context.Request;
+        bool isHead = string.Equals(incoming.HttpMethod, "HEAD", StringComparison.OrdinalIgnoreCase);
 
-        using var upstreamRequest = new HttpRequestMessage(
-            string.Equals(incoming.HttpMethod, "HEAD", StringComparison.OrdinalIgnoreCase) ? HttpMethod.Head : HttpMethod.Get,
-            _target.Url);
+        using var upstreamRequest = new HttpRequestMessage(isHead ? HttpMethod.Head : HttpMethod.Get, target);
 
-        foreach (var kv in _target.Headers)
+        if (attachCredentials)
         {
-            if (string.IsNullOrWhiteSpace(kv.Key)) continue;
-            upstreamRequest.Headers.TryAddWithoutValidation(kv.Key, kv.Value);
+            foreach (var kv in _target.Headers)
+            {
+                if (string.IsNullOrWhiteSpace(kv.Key)) continue;
+                upstreamRequest.Headers.TryAddWithoutValidation(kv.Key, kv.Value);
+            }
         }
 
         // Range is forwarded verbatim so a seek stays one round trip; the upstream decides between
-        // 200, 206 and 416 and we relay whichever it produced.
-        string? range = incoming.Headers["Range"];
-        if (!string.IsNullOrEmpty(range)) upstreamRequest.Headers.TryAddWithoutValidation("Range", range);
-        string? ifRange = incoming.Headers["If-Range"];
-        if (!string.IsNullOrEmpty(ifRange)) upstreamRequest.Headers.TryAddWithoutValidation("If-Range", ifRange);
+        // 200, 206 and 416 and we relay whichever it produced. A playlist is fetched whole: a Range
+        // against it would return a partial playlist, and rewriting a fragment cannot produce a
+        // coherent one.
+        bool looksLikePlaylist = target.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase);
+        if (!looksLikePlaylist)
+        {
+            string? range = incoming.Headers["Range"];
+            if (!string.IsNullOrEmpty(range)) upstreamRequest.Headers.TryAddWithoutValidation("Range", range);
+            string? ifRange = incoming.Headers["If-Range"];
+            if (!string.IsNullOrEmpty(ifRange)) upstreamRequest.Headers.TryAddWithoutValidation("If-Range", ifRange);
+        }
 
         using var client = _httpFactory.CreateMediaClient();
         using HttpResponseMessage upstream = await client
             .SendAsync(upstreamRequest, HttpCompletionOption.ResponseHeadersRead, ct)
             .ConfigureAwait(false);
+
+        // Relative URIs resolve against the address that actually served the playlist; after a redirect
+        // that is not the configured target.
+        Uri effective = upstream.RequestMessage?.RequestUri ?? target;
+        if (!isHead && IsPlaylistResponse(upstream, effective))
+        {
+            await RelayPlaylistAsync(context, upstream, effective, ct).ConfigureAwait(false);
+            return;
+        }
 
         HttpListenerResponse response = context.Response;
         response.StatusCode = (int)upstream.StatusCode;
@@ -432,6 +500,197 @@ public sealed class LoopbackMediaBridge : IAsyncDisposable
         }
         Interlocked.Add(ref _bytesServed, served);
         response.Close();
+    }
+
+    // ---------------------------------------------------------------- hls playlists
+
+    private static bool IsPlaylistResponse(HttpResponseMessage response, Uri effective)
+    {
+        string? mediaType = response.Content.Headers.ContentType?.MediaType;
+        if (mediaType is not null && mediaType.Contains("mpegurl", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return effective.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsEntitledOrigin(Uri target)
+        => string.Equals(UrlRedactor.OriginOf(target), UrlRedactor.OriginOf(_target.Url), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Serves a playlist with every child URI pointing back at this bridge.
+    /// </summary>
+    /// <remarks>
+    /// HLS is a tree: a master playlist names child playlists, and those name segments and keys. The
+    /// engine resolves each of those relative to the playlist it just read, which is a loopback URL, so
+    /// the tree has to be rewritten here. Nested playlists are rewritten by this same method when the
+    /// engine fetches them, which is what makes arbitrary depth work without a second code path.
+    /// </remarks>
+    private async Task RelayPlaylistAsync(
+        HttpListenerContext context, HttpResponseMessage upstream, Uri effective, CancellationToken ct)
+    {
+        byte[] raw = await ReadBoundedAsync(upstream.Content, MaxPlaylistBytes, ct).ConfigureAwait(false);
+        string text = Encoding.UTF8.GetString(raw).TrimStart('\uFEFF');
+        byte[] body = Encoding.UTF8.GetBytes(RewritePlaylist(text, effective));
+
+        HttpListenerResponse response = context.Response;
+        // A playlist is always served whole and successfully here; a partial or failed fetch never
+        // reaches this method because the relay passes those statuses through unchanged.
+        response.StatusCode = 200;
+        response.ContentType = upstream.Content.Headers.ContentType?.ToString() ?? "application/vnd.apple.mpegurl";
+        response.ContentLength64 = body.Length;
+        response.AddHeader("Cache-Control", "no-store");
+        await response.OutputStream.WriteAsync(body, ct).ConfigureAwait(false);
+        response.Close();
+        Interlocked.Add(ref _bytesServed, body.Length);
+    }
+
+    private static async Task<byte[]> ReadBoundedAsync(HttpContent content, int limit, CancellationToken ct)
+    {
+        await using Stream source = await content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+        byte[] chunk = new byte[CopyBufferSize];
+        int read;
+        while ((read = await source.ReadAsync(chunk, ct).ConfigureAwait(false)) > 0)
+        {
+            if (buffer.Length + read > limit)
+                throw new InvalidOperationException("HLS 播放列表超过大小上限");
+            buffer.Write(chunk, 0, read);
+        }
+        return buffer.ToArray();
+    }
+
+    private string RewritePlaylist(string text, Uri baseUri)
+    {
+        var rewritten = new StringBuilder(text.Length + 1024);
+        int start = 0;
+        while (start <= text.Length)
+        {
+            int newline = text.IndexOf('\n', start);
+            int end = newline < 0 ? text.Length : newline;
+            string line = text.Substring(start, end - start).TrimEnd('\r');
+            if (line.Length > 0)
+            {
+                rewritten.Append(line[0] == '#'
+                    ? RewriteUriAttributes(line, baseUri)
+                    : RewriteUri(line.Trim(), baseUri));
+            }
+            if (newline < 0) break;
+            rewritten.Append('\n');
+            start = newline + 1;
+        }
+        return rewritten.ToString();
+    }
+
+    /// <summary>Rewrites every <c>URI="..."</c> attribute (keys, media renditions, init segments).</summary>
+    private string RewriteUriAttributes(string line, Uri baseUri)
+    {
+        const string marker = "URI=\"";
+        int search = 0;
+        StringBuilder? result = null;
+        while (true)
+        {
+            int at = line.IndexOf(marker, search, StringComparison.Ordinal);
+            if (at < 0) break;
+            int valueStart = at + marker.Length;
+            int close = line.IndexOf('"', valueStart);
+            if (close < 0) break;
+
+            result ??= new StringBuilder(line.Length + 64);
+            result.Append(line, search, valueStart - search);
+            result.Append(RewriteUri(line.Substring(valueStart, close - valueStart), baseUri));
+            // The closing quote is kept for the next append; resuming after it would need the index.
+            search = close;
+        }
+        if (result is null) return line;
+        result.Append(line, search, line.Length - search);
+        return result.ToString();
+    }
+
+    private string RewriteUri(string value, Uri baseUri)
+    {
+        if (value.Length == 0) return value;
+        if (!Uri.TryCreate(baseUri, value, out Uri? absolute)) return value;
+
+        // Only HTTP(S) can be fetched by the relay. data: URIs, skd: keys and anything else the playlist
+        // uses locally are left exactly as the server wrote them.
+        if (!absolute.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            && !absolute.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            return value;
+        }
+
+        return _hlsBase + RegisterHlsTarget(absolute) + SafeExtension(absolute);
+    }
+
+    private string RegisterHlsTarget(Uri uri)
+    {
+        string key = uri.AbsoluteUri;
+        lock (_hlsGate)
+        {
+            if (_hlsIdByUrl.TryGetValue(key, out string? existing)) return existing;
+            if (_hlsIdByUrl.Count >= MaxHlsTargets)
+                throw new InvalidOperationException("HLS 播放列表条目超过上限");
+
+            string id = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..32].ToLowerInvariant();
+            if (_hlsById.TryGetValue(id, out Uri? other)
+                && !string.Equals(other.AbsoluteUri, key, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("HLS 资源标识冲突");
+            }
+
+            _hlsById[id] = uri;
+            _hlsIdByUrl[key] = id;
+            return id;
+        }
+    }
+
+    private bool TryGetHlsTarget(string id, out Uri target)
+    {
+        // The id in the URL may carry the extension that was appended as a hint to the engine.
+        string key = id;
+        foreach (string extension in HlsExtensions)
+        {
+            if (key.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+            {
+                key = key[..^extension.Length];
+                break;
+            }
+        }
+
+        lock (_hlsGate)
+        {
+            if (_hlsById.TryGetValue(key, out Uri? found))
+            {
+                target = found;
+                return true;
+            }
+        }
+        target = _target.Url;
+        return false;
+    }
+
+    private static readonly string[] HlsExtensions =
+    {
+        ".m3u8", ".ts", ".m4s", ".mp4", ".aac", ".mp3", ".vtt", ".key", ".cmfv", ".cmfa",
+    };
+
+    /// <summary>
+    /// Keeps the extension only when it is one HLS actually uses.
+    /// </summary>
+    /// <remarks>
+    /// mpv identifies a playlist by its extension in some paths, so dropping <c>.m3u8</c> makes the
+    /// first request ambiguous. The allow-list is deliberate: a server-supplied extension is
+    /// untrusted input and must not become an arbitrary path fragment.
+    /// </remarks>
+    private static string SafeExtension(Uri uri)
+    {
+        string extension = Path.GetExtension(uri.AbsolutePath);
+        if (extension.Length is <= 1 or > 8) return "";
+        foreach (string candidate in HlsExtensions)
+        {
+            if (extension.Equals(candidate, StringComparison.OrdinalIgnoreCase)) return candidate;
+        }
+        return "";
     }
 
     private static Task FailAsync(HttpListenerContext context, int status, string message)

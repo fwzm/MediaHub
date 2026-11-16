@@ -8,15 +8,42 @@
     mc:Ignorable="d"
     Title="MediaHub">
 
-  <Grid x:Name="RootGrid" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+  <!-- Dark is a product decision here, not a system preference: the shell is a media surface and
+       the artwork supplies the colour. It is fixed at the root so every page, flyout and dialog
+       inherits one palette. -->
+  <Grid x:Name="RootGrid" Background="{StaticResource MediaHubBgBrush}" RequestedTheme="Dark">
+    <VisualStateManager.VisualStateGroups>
+      <VisualStateGroup x:Name="ShellWidthStates">
+        <VisualState x:Name="ShellWide">
+          <VisualState.StateTriggers>
+            <AdaptiveTrigger MinWindowWidth="760" />
+          </VisualState.StateTriggers>
+        </VisualState>
+        <VisualState x:Name="ShellNarrow">
+          <VisualState.StateTriggers>
+            <AdaptiveTrigger MinWindowWidth="0" />
+          </VisualState.StateTriggers>
+          <VisualState.Setters>
+            <!-- Below 760px NavigationView switches to its minimal pane and floats the hamburger
+                 over the content. Reserving its height here keeps it off every page's title, instead
+                 of teaching each page about a shell-owned control. -->
+            <Setter Target="ShellFrame.Margin" Value="0,44,0,0" />
+          </VisualState.Setters>
+        </VisualState>
+      </VisualStateGroup>
+    </VisualStateManager.VisualStateGroups>
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
     <!-- A real menu bar, because "open a file" is a shell-level action rather than a library one:
-         the user should not have to be inside a particular page for it to be reachable. -->
-    <MenuBar Grid.Row="0" x:Name="MainMenu">
+         the user should not have to be inside a particular page for it to be reachable.
+         The hairline under it is what makes the menu read as a separate glass plane from the page
+         below it; without the edge the two translucent layers merge into one flat rectangle. -->
+    <Border Grid.Row="0" Background="{StaticResource MediaHubGlassPaneBrush}"
+            BorderBrush="{StaticResource MediaHubGlassStrokeBrush}" BorderThickness="0,0,0,1">
+    <MenuBar x:Name="MainMenu" Background="Transparent">
       <!-- Menu commands carry ids so a test can address them by identity. Without one, the only way
            to reach "打开视频…" from automation is to open the menu and match on its label, which is
            exactly the fragile step that made earlier file-entry checks unrepeatable. -->
@@ -44,6 +71,7 @@
         <MenuFlyoutItem Text="关于 MediaHub" Click="OnAboutClick" />
       </MenuBarItem>
     </MenuBar>
+    </Border>
 
     <!-- Shell layer: navigation chrome for browsing surfaces. -->
     <NavigationView
@@ -52,9 +80,25 @@
         IsBackButtonVisible="Collapsed"
         IsSettingsVisible="False"
         IsTitleBarAutoPaddingEnabled="True"
-        PaneDisplayMode="Left"
-        OpenPaneLength="228"
+        PaneDisplayMode="Auto"
+        CompactModeThresholdWidth="760"
+        ExpandedModeThresholdWidth="1024"
+        OpenPaneLength="236"
+        Background="Transparent"
         SelectionChanged="OnNavSelectionChanged">
+      <NavigationView.PaneHeader>
+        <StackPanel Orientation="Horizontal" Spacing="10" Margin="2,0,0,14">
+          <Border Width="28" Height="28" CornerRadius="10"
+                  Background="{StaticResource MediaHubAccentSoftBrush}"
+                  BorderBrush="{StaticResource MediaHubAccentBrush}" BorderThickness="1">
+            <FontIcon Glyph="&#xE768;" FontSize="12" Foreground="{StaticResource MediaHubAccentBrush}"
+                      HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <TextBlock Text="MediaHub" VerticalAlignment="Center"
+                     FontSize="15" FontWeight="SemiBold"
+                     Foreground="{StaticResource MediaHubTextPrimaryBrush}" />
+        </StackPanel>
+      </NavigationView.PaneHeader>
       <NavigationView.MenuItems>
         <NavigationViewItem Content="首页" Tag="home">
           <NavigationViewItem.Icon><FontIcon Glyph="&#xE80F;" /></NavigationViewItem.Icon>

@@ -59,6 +59,37 @@ public sealed record NetworkPolicy
     /// <summary>Maximum number of redirect hops; bounds redirect loops and hostile chains.</summary>
     public int MaxRedirects { get; init; } = 10;
 
+    /// <summary>
+    /// SHA-256 of the leaf certificate this source is allowed to present, as hex, or null for
+    /// "platform trust only".
+    /// </summary>
+    /// <remarks>
+    /// This is the only supported way to reach a server with a self-signed certificate. It is scoped to
+    /// one source's handlers: there is deliberately no process-wide "ignore certificate errors" switch,
+    /// because that would weaken every other source, including the ones that do not need it. See
+    /// <see cref="CertificateTrust"/> for what a pin match does and does not check.
+    /// </remarks>
+    public string? TrustedCertificateSha256 { get; init; }
+
+    /// <summary>
+    /// Skips certificate validation for this source only, when the user explicitly chose that per
+    /// server.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The weaker of the two per-server options, and the one that carries a real risk: with no
+    /// validation, anything that can intercept the connection can present its own certificate and read
+    /// the token this client sends. It exists because some servers rotate self-signed certificates in
+    /// ways that make pinning impractical, and refusing them outright contradicts "supports everything".
+    /// </para>
+    /// <para>
+    /// Like the pin, it is scoped to one source's handlers and is never a process-wide switch. A pin
+    /// takes precedence when both are set; <see cref="Validate"/> refuses that combination so the
+    /// behaviour is never ambiguous.
+    /// </para>
+    /// </remarks>
+    public bool AllowUntrustedCertificate { get; init; }
+
     /// <summary>Validates the policy before it is used to build a handler.</summary>
     public void Validate()
     {
@@ -69,6 +100,15 @@ public sealed record NetworkPolicy
             if (!Uri.TryCreate(ProxyUrl, UriKind.Absolute, out _))
                 throw new ArgumentException("Proxy URL must be absolute, e.g. http://127.0.0.1:7890");
         }
+
+        if (!string.IsNullOrWhiteSpace(TrustedCertificateSha256)
+            && CertificateTrust.NormalizeFingerprint(TrustedCertificateSha256) is null)
+        {
+            throw new ArgumentException("TrustedCertificateSha256 must be a 64-digit hex SHA-256 fingerprint.");
+        }
+
+        if (AllowUntrustedCertificate && CertificateTrust.NormalizeFingerprint(TrustedCertificateSha256) is not null)
+            throw new ArgumentException("Choose either a certificate fingerprint or 'do not validate', not both.");
     }
 
     /// <summary>
@@ -130,12 +170,20 @@ public sealed record NetworkPolicy
     }
 
     /// <summary>Human-readable description for the connection diagnostics panel.</summary>
-    public string Describe() => Mode switch
+    public string Describe()
     {
-        ProxyMode.Direct => "直连（忽略系统代理）",
-        ProxyMode.Explicit => "指定代理：" + (ProxyUrl ?? "(未设置)"),
-        _ => "跟随系统代理",
-    };
+        string route = Mode switch
+        {
+            ProxyMode.Direct => "直连（忽略系统代理）",
+            ProxyMode.Explicit => "指定代理：" + (ProxyUrl ?? "(未设置)"),
+            _ => "跟随系统代理",
+        };
+
+        string? pin = CertificateTrust.NormalizeFingerprint(TrustedCertificateSha256);
+        if (pin is not null) route += "；已信任该服务器证书 " + pin[..16] + "…";
+        else if (AllowUntrustedCertificate) route += "；该服务器不校验证书（令牌可被中间人截获）";
+        return route;
+    }
 }
 
 /// <summary>Builds the HTTP handler chain for a policy.</summary>
@@ -180,6 +228,15 @@ public static class NetworkPolicyHandlerFactory
                 handler.UseProxy = true;
                 break;
         }
+
+        // Only a source that was explicitly configured touches SslOptions. Every other source keeps the
+        // platform validator untouched, so "supports self-signed servers" never becomes "trusts
+        // everything".
+        string? pin = CertificateTrust.NormalizeFingerprint(policy.TrustedCertificateSha256);
+        if (pin is not null)
+            handler.SslOptions.RemoteCertificateValidationCallback = CertificateTrust.CreateValidationCallback(pin);
+        else if (policy.AllowUntrustedCertificate)
+            handler.SslOptions.RemoteCertificateValidationCallback = static (_, _, _, _) => true;
 
         return handler;
     }

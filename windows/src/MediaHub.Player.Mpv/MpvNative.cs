@@ -23,6 +23,8 @@ internal static class MpvNative
     internal const int MPV_FORMAT_INT64 = 4;
     internal const int MPV_FORMAT_DOUBLE = 5;
     internal const int MPV_FORMAT_NODE = 6;
+    internal const int MPV_FORMAT_NODE_ARRAY = 7;
+    internal const int MPV_FORMAT_NODE_MAP = 8;
 
     // ---- mpv_event_id ----
     internal const int MPV_EVENT_NONE = 0;
@@ -42,6 +44,11 @@ internal static class MpvNative
     internal const int MPV_EVENT_PROPERTY_CHANGE = 22;
     internal const int MPV_EVENT_QUEUE_OVERFLOW = 24;
     internal const int MPV_EVENT_HOOK = 25;
+
+    // ---- mpv_error ----
+    // The option does not exist in this build (for example an mpv option provided by a Lua script
+    // when mpv was configured with -Dlua=disabled). Any other negative value is a real rejection.
+    internal const int MPV_ERROR_OPTION_NOT_FOUND = -5;
 
     // ---- mpv_end_file_reason ----
     internal const int MPV_END_FILE_REASON_EOF = 0;
@@ -85,6 +92,27 @@ internal static class MpvNative
         public int LogLevel;
     }
 
+    /// <summary>
+    /// <c>mpv_node</c>: an 8-byte union followed by the format tag. The union is kept as a pointer
+    /// because every shape this client reads (arrays and maps) is pointer-backed; scalars are only
+    /// inspected inside map entries, where the same field holds the string pointer.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MpvNode
+    {
+        public IntPtr Data;
+        public int Format;
+    }
+
+    /// <summary><c>mpv_node_list</c>: parallel arrays of values and (for maps) UTF-8 keys.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MpvNodeList
+    {
+        public int Count;
+        public IntPtr Values;
+        public IntPtr Keys;
+    }
+
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern IntPtr mpv_create();
 
@@ -115,6 +143,12 @@ internal static class MpvNative
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern int mpv_get_property(IntPtr ctx, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, int format, out double data);
 
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "mpv_get_property", ExactSpelling = true)]
+    internal static extern int mpv_get_property_node(IntPtr ctx, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, int format, out MpvNode node);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern void mpv_free_node_contents(ref MpvNode node);
+
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern int mpv_command(IntPtr ctx, IntPtr args);
 
@@ -129,6 +163,9 @@ internal static class MpvNative
 
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern int mpv_observe_property(IntPtr ctx, ulong replyUserData, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, int format);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern int mpv_request_log_messages(IntPtr ctx, [MarshalAs(UnmanagedType.LPUTF8Str)] string minLevel);
 
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern int mpv_unobserve_property(IntPtr ctx, ulong replyUserData);
@@ -170,6 +207,46 @@ internal static class MpvNative
     {
         int rc = mpv_get_property(ctx, name, MPV_FORMAT_FLAG, out long v);
         return rc >= 0 ? v != 0 : null;
+    }
+
+    /// <summary>
+    /// Reads a property that is a list of maps (mpv's <c>audio-device-list</c>) and returns the
+    /// string-valued entries of each map. Non-string values are skipped: nothing this client needs
+    /// from that property is numeric.
+    /// </summary>
+    internal static List<Dictionary<string, string>> GetNodeMapList(IntPtr ctx, string name)
+    {
+        var result = new List<Dictionary<string, string>>();
+        if (mpv_get_property_node(ctx, name, MPV_FORMAT_NODE, out MpvNode node) < 0) return result;
+        try
+        {
+            if (node.Format != MPV_FORMAT_NODE_ARRAY || node.Data == IntPtr.Zero) return result;
+            MpvNodeList list = Marshal.PtrToStructure<MpvNodeList>(node.Data);
+            int stride = Marshal.SizeOf<MpvNode>();
+            for (int i = 0; i < list.Count; i++)
+            {
+                MpvNode item = Marshal.PtrToStructure<MpvNode>(list.Values + i * stride);
+                if (item.Format != MPV_FORMAT_NODE_MAP || item.Data == IntPtr.Zero) continue;
+                MpvNodeList map = Marshal.PtrToStructure<MpvNodeList>(item.Data);
+                var entry = new Dictionary<string, string>(StringComparer.Ordinal);
+                for (int j = 0; j < map.Count; j++)
+                {
+                    IntPtr keyPtr = Marshal.ReadIntPtr(map.Keys, j * IntPtr.Size);
+                    if (keyPtr == IntPtr.Zero) continue;
+                    string? key = Marshal.PtrToStringUTF8(keyPtr);
+                    if (key is null) continue;
+                    MpvNode value = Marshal.PtrToStructure<MpvNode>(map.Values + j * stride);
+                    if (value.Format != MPV_FORMAT_STRING || value.Data == IntPtr.Zero) continue;
+                    entry[key] = Marshal.PtrToStringUTF8(value.Data) ?? "";
+                }
+                result.Add(entry);
+            }
+        }
+        finally
+        {
+            mpv_free_node_contents(ref node);
+        }
+        return result;
     }
 
     /// <summary>

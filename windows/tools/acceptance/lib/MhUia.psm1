@@ -376,8 +376,21 @@ function Set-MhForeground {
     Synthetic input lands on whatever window is on top, so the target must be raised first.
     SW_SHOW (5) is used instead of SW_RESTORE (9) on purpose: restoring would un-minimise a window
     whose minimised state is itself under test.
+
+    In quiet mode nothing is injected, so raising the window is both unnecessary and forbidden:
+    the call becomes a read-only state report so callers can still log where the foreground is.
   #>
   param([IntPtr]$Hwnd, [int]$SettleMs = 600, [int]$Attempts = 3)
+  if ($env:MH_QUIET_UI -eq '1') {
+    $fgQuiet = [Mh.Native]::GetForegroundWindow()
+    return [pscustomobject]@{
+      setForegroundReturned = $false
+      isForeground          = ($fgQuiet -eq $Hwnd)
+      foregroundHwnd        = $fgQuiet.ToInt64()
+      attempts              = 0
+      skipped               = 'quiet-ui: window is never activated'
+    }
+  }
   # No ShowWindow here. Hide/show is the app's business (AppWindow), and calling SW_SHOW on a WinUI 3
   # window was observed to leave it non-visible while the process kept running - which then looked
   # like "the app died" to every later step. Raising is enough for synthetic input to land.
@@ -396,8 +409,19 @@ function Set-MhForeground {
 function Get-MhElementAll {
   param([System.Windows.Automation.AutomationElement]$Root)
   if (-not $Root) { return @() }
-  $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,
-                [System.Windows.Automation.Condition]::TrueCondition)
+  # UIA can raise "unrecognized error" from FindAll in the millisecond a flyout or dialog root is
+  # torn down. That is a transient broker condition rather than an empty subtree, so it is retried
+  # instead of being reported as a product failure by whichever check happened to be running.
+  for ($i = 0; $i -lt 4; $i++) {
+    try {
+      return $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                           [System.Windows.Automation.Condition]::TrueCondition)
+    }
+    catch {
+      if ($i -eq 3) { throw }
+      Start-Sleep -Milliseconds 300
+    }
+  }
 }
 
 function Get-MhAppRoots {
@@ -809,6 +833,37 @@ function Save-MhScreenshot {
     [switch]$FullScreen
   )
   if (-not $script:MhDpiAware) { [void](Initialize-MhUia) }
+  if ($env:MH_QUIET_UI -eq '1') {
+    # Quiet mode: the window lives outside the virtual desktop, so CopyFromScreen would capture
+    # whatever happens to be on screen instead. PrintWindow asks the window itself to render, which
+    # also covers an off-screen / covered window. The engine's video surface is a child HWND, so it
+    # is captured separately when it has real pixels (a 1x1 hidden surface is ignored).
+    Initialize-MhQuietUiModule
+    $hwnd = Get-MhWindowHandle
+    if (-not $hwnd) { throw 'quiet screenshot: the app has no top-level window' }
+    $cap = Save-MhQuietWindowCapture -Hwnd $hwnd -Path $Path
+    $videoPath = $null
+    try {
+      $children = @(Get-MhQuietChildWindows -Parent $hwnd)
+      $video = $children | Where-Object {
+        $_.visible -and $_.area -gt 10000 -and $_.className -match 'MpvVideoSurface|mpv'
+      } | Sort-Object area -Descending | Select-Object -First 1
+      if ($video) {
+        $videoPath = Join-Path (Split-Path $Path -Parent) (([IO.Path]::GetFileNameWithoutExtension($Path)) + '.video.png')
+        $null = Save-MhQuietWindowCapture -Hwnd $video.hwnd -Path $videoPath
+      }
+    }
+    catch { }
+    return [pscustomobject]@{
+      path          = $Path
+      size          = "$($cap.width)x$($cap.height)"
+      virtualScreen = 'n/a (printwindow)'
+      dpiAware      = $script:MhDpiAware
+      mode          = 'printwindow'
+      nonBlackRatio = $cap.nonBlackRatio
+      videoPath     = $videoPath
+    }
+  }
   $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
   $bmp = New-Object System.Drawing.Bitmap($vs.Width, $vs.Height)
   $g = [System.Drawing.Graphics]::FromImage($bmp)
@@ -882,7 +937,7 @@ function Get-MhPlayerState {
   $state = [ordered]@{}
   $pos = Find-MhAppElement -AutomationId 'PositionText'
   $dur = Find-MhAppElement -AutomationId 'DurationText'
-  $state.playerVisible = ($null -ne (Find-MhAppElement -AutomationId 'SeekSlider'))
+  $state.playerVisible = ($null -ne (Find-MhAppElement -AutomationId 'player.seekslider'))
   $state.position = if ($pos) { $pos.Current.Name } else { $null }
   $state.positionSeconds = if ($pos) { ConvertFrom-MhTime $pos.Current.Name } else { $null }
   $state.duration = if ($dur) { $dur.Current.Name } else { $null }
@@ -891,7 +946,7 @@ function Get-MhPlayerState {
   $state.title = if ($title) { $title.Current.Name } else { $null }
   $tech = Find-MhAppElement -AutomationId 'TechnicalSummary'
   $state.technical = if ($tech) { $tech.Current.Name } else { $null }
-  $seek = Find-MhAppElement -AutomationId 'SeekSlider'
+  $seek = Find-MhAppElement -AutomationId 'player.seekslider'
   if ($seek) { $rv = Get-MhRangeValue -Element $seek; $state.seekValue = $rv.value; $state.seekMin = $rv.min; $state.seekMax = $rv.max }
   $vol = Find-MhAppElement -AutomationId 'VolumeSlider'
   if ($vol) { $rv = Get-MhRangeValue -Element $vol; $state.volume = $rv.value; $state.volumeMax = $rv.max }
@@ -1180,6 +1235,47 @@ function Save-MhRun {
 
 # ---------------------------------------------------------------- app lifecycle and resources
 
+function Initialize-MhQuietUiModule {
+  <#
+    Loads lib\MhQuietUi.psm1 (and its MhQuiet.psm1 dependency) on demand. Only quiet runs need it:
+    a normal acceptance run keeps using Win32_Process.Create + screen captures.
+  #>
+  if (Get-Command Start-MhQuietApp -ErrorAction SilentlyContinue) { return }
+  $quiet = Join-Path $PSScriptRoot 'MhQuiet.psm1'
+  if ((Test-Path $quiet) -and -not (Get-Command Get-MhUserIdleSeconds -ErrorAction SilentlyContinue)) {
+    # -Global on purpose: MhQuietUi.psm1 calls Get-MhUserIdleSeconds from its own module scope, and a
+    # module import performed inside MhUia's scope would not be visible there.
+    Import-Module $quiet -Global -Force -WarningAction SilentlyContinue
+  }
+  Import-Module (Join-Path $PSScriptRoot 'MhQuietUi.psm1') -Global -Force -WarningAction SilentlyContinue
+}
+
+function Write-MhStepRecord {
+  <#
+    One JSON line per assertion. A run that dies halfway keeps every step it already decided,
+    so a failed combo can be reported step by step instead of being discarded as a whole.
+  #>
+  param(
+    [Parameter(Mandatory)][string]$Combo,
+    [Parameter(Mandatory)][string]$Name,
+    [Parameter(Mandatory)][string]$Status,
+    [string]$Detail = '',
+    [string]$StepFile
+  )
+  if (-not $StepFile) { return }
+  $dir = Split-Path $StepFile -Parent
+  if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+  $step = ($Name -split ' ')[0]
+  [pscustomobject]@{
+    ts     = (Get-Date).ToString('o')
+    combo  = $Combo
+    step   = $step
+    name   = $Name
+    status = $Status
+    detail = $Detail
+  } | ConvertTo-Json -Compress | Add-Content -Path $StepFile -Encoding UTF8
+}
+
 function Start-MhApp {
   <#
     Launches the built client. The trace file is cleared first when -ResetTrace is given so a run
@@ -1192,6 +1288,7 @@ function Start-MhApp {
     [int]$TimeoutSec = 40
   )
   if (-not (Test-Path $Exe)) { throw "app not found: $Exe" }
+  $quietMode = ($env:MH_QUIET_UI -eq '1')
   # Refuse to put a window on screen while the person who owns this machine is using it. GUI
   # automation cannot run invisibly (UIA needs an unlocked desktop and the window must be visible),
   # so the only honest protection is to not start at all. run-quiet.ps1 relies on this guard and
@@ -1200,27 +1297,31 @@ function Start-MhApp {
   # A quiet run (run-quiet.ps1) owns the desktop: it sets MH_ALLOW_ACTIVE so mid-run restarts are
   # allowed, and exports the abort marker so a restart can never put the window back on screen after
   # the user has returned. The marker check runs first and applies to every caller.
-  if ($env:MH_QUIET_ABORT_FILE -and (Test-Path $env:MH_QUIET_ABORT_FILE)) {
-    $why = (Get-Content -Path $env:MH_QUIET_ABORT_FILE -TotalCount 1 -ErrorAction SilentlyContinue)
-    throw ('refusing to start MediaHub: the quiet run was aborted by user input (' + $why + ').')
-  }
-  if ($env:MH_ALLOW_ACTIVE -ne '1') {
-    $minIdle = 120
-    if ($env:MH_MIN_IDLE_SECONDS) { $minIdle = [int]$env:MH_MIN_IDLE_SECONDS }
-    $quietModule = Join-Path $PSScriptRoot 'MhQuiet.psm1'
-    if (Test-Path $quietModule) {
-      if (-not (Get-Command Get-MhUserIdleSeconds -ErrorAction SilentlyContinue)) { Import-Module $quietModule -Force }
-      $idleNow = Get-MhUserIdleSeconds
-      if ($null -ne $idleNow -and $idleNow -lt $minIdle) {
-        throw ('refusing to start MediaHub: the user is active (idle=' + $idleNow + 's, need ' + $minIdle + 's). ' +
-               'Run windows/tools/acceptance/run-quiet.ps1 instead (it waits for an idle window and stops the app when you come back), ' +
-               'or set MH_ALLOW_ACTIVE=1 if you really are watching and want the window now.')
-      }
-      # Idle time cannot see someone watching a video full screen or giving a presentation; ask the
-      # shell instead, and stay out of the way when it says the screen is busy.
-      if ((Get-Command Test-MhQuietScreenSafe -ErrorAction SilentlyContinue) -and -not (Test-MhQuietScreenSafe)) {
-        throw ('refusing to start MediaHub: something is full screen or busy (QUNS state=' + (Get-MhNotificationState) + '). ' +
-               'Close it, or set MH_ALLOW_ACTIVE=1 to override.')
+  # A headless quiet run (MH_QUIET_UI=1) is different by construction: the window is parked outside
+  # the desktop and never activated, so neither the idle gate nor the abort marker applies.
+  if (-not $quietMode) {
+    if ($env:MH_QUIET_ABORT_FILE -and (Test-Path $env:MH_QUIET_ABORT_FILE)) {
+      $why = (Get-Content -Path $env:MH_QUIET_ABORT_FILE -TotalCount 1 -ErrorAction SilentlyContinue)
+      throw ('refusing to start MediaHub: the quiet run was aborted by user input (' + $why + ').')
+    }
+    if ($env:MH_ALLOW_ACTIVE -ne '1') {
+      $minIdle = 120
+      if ($env:MH_MIN_IDLE_SECONDS) { $minIdle = [int]$env:MH_MIN_IDLE_SECONDS }
+      $quietModule = Join-Path $PSScriptRoot 'MhQuiet.psm1'
+      if (Test-Path $quietModule) {
+        if (-not (Get-Command Get-MhUserIdleSeconds -ErrorAction SilentlyContinue)) { Import-Module $quietModule -Force }
+        $idleNow = Get-MhUserIdleSeconds
+        if ($null -ne $idleNow -and $idleNow -lt $minIdle) {
+          throw ('refusing to start MediaHub: the user is active (idle=' + $idleNow + 's, need ' + $minIdle + 's). ' +
+                 'Run windows/tools/acceptance/run-quiet.ps1 instead (it waits for an idle window and stops the app when you come back), ' +
+                 'or set MH_ALLOW_ACTIVE=1 if you really are watching and want the window now.')
+        }
+        # Idle time cannot see someone watching a video full screen or giving a presentation; ask the
+        # shell instead, and stay out of the way when it says the screen is busy.
+        if ((Get-Command Test-MhQuietScreenSafe -ErrorAction SilentlyContinue) -and -not (Test-MhQuietScreenSafe)) {
+          throw ('refusing to start MediaHub: something is full screen or busy (QUNS state=' + (Get-MhNotificationState) + '). ' +
+                 'Close it, or set MH_ALLOW_ACTIVE=1 to override.')
+        }
       }
     }
   }
@@ -1229,6 +1330,24 @@ function Start-MhApp {
     $dir = Split-Path $log -Parent
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
     Set-Content -Path $log -Value '' -Encoding UTF8
+  }
+  if ($quietMode) {
+    # CreateProcessW via Start-MhQuietApp: the MEDIAHUB_QUIET_* variables must reach the child, and
+    # Win32_Process.Create runs under WmiPrvSE with that provider's environment, not ours.
+    Initialize-MhQuietUiModule
+    $rect = if ($env:MEDIAHUB_QUIET_RECT) { $env:MEDIAHUB_QUIET_RECT } else { '3200,200,1280,800' }
+    $qa = Start-MhQuietApp -Exe $Exe -Rect $rect -TimeoutSeconds $TimeoutSec -Arguments $ArgumentList
+    return [pscustomobject]@{
+      pid                 = $qa.pid
+      cmdLine             = ('"' + $Exe + '"')
+      window              = (Get-MhWindowInfo)
+      started             = (Get-Date).ToString('s')
+      quiet               = $true
+      hwnd                = $qa.hwnd.ToInt64()
+      visible             = $qa.visible
+      foregroundPreserved = $qa.foregroundPreserved
+      rect                = $qa.rect
+    }
   }
   # Win32_Process.Create, not Start-Process. A Start-Process child belongs to the harness process
   # tree and is torn down with it, which made "launch in one step, drive it in the next" impossible:
@@ -1275,6 +1394,11 @@ function Stop-MhAppGracefully {
 
 function Stop-MhAppForced {
   param([string]$Reason = 'harness cleanup')
+  # A quiet start installs a focus keeper thread; stopping the app must stop the keeper too, or the
+  # harness keeps "restoring" a foreground for a process that no longer exists.
+  if ('MhQuietUi.Native' -as [type]) {
+    try { [MhQuietUi.Native]::StopFocusKeeper() } catch { }
+  }
   $procs = @(Get-MhProcess)
   foreach ($p in $procs) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
   Start-Sleep -Seconds 2

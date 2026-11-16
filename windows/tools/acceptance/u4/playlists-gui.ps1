@@ -27,7 +27,9 @@
 #       pwsh -File windows\tools\acceptance\u4\playlists-gui.ps1 -Server jellyfin
 param(
   [ValidateSet('emby','jellyfin')][string]$Server = 'emby',
-  [string]$Exe = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.exe'
+  [string]$Exe = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.exe',
+  # 只跑 P0 前置（复位 + 来源播种）并回读 settings，用于验证 P0.6 的“只保留一条”修复。
+  [switch]$PreflightOnly
 )
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Continue'
@@ -65,9 +67,22 @@ $newListText = '新建播放列表…'
 $navNames = @('首页','媒体库','搜索','继续观看','我的收藏','播放列表','媒体源','设置')
 
 $checks = New-Object System.Collections.Generic.List[object]
+function Get-StepFile {
+  if (-not $script:stepFile) {
+    $dir = if ($env:MH_STEP_DIR) { $env:MH_STEP_DIR } else { $ev }
+    $script:stepFile = Join-Path $dir ('steps-' + $Server + '-u4.jsonl')
+  }
+  return $script:stepFile
+}
 function Check([string]$name, [bool]$pass, [string]$detail) {
   $checks.Add([pscustomobject]@{ name = $name; pass = $pass; detail = $detail })
+  Write-MhStepRecord -Combo ($Server + '/u4') -Name $name -Status $(if ($pass) { 'PASS' } else { 'FAIL' }) -Detail $detail -StepFile (Get-StepFile)
   Write-Host (('[{0}] {1} :: {2}' -f $(if ($pass) { 'PASS' } else { 'FAIL' }), $name, $detail))
+}
+# 需要真实前台（坐标点击 / 系统文件选择器 / 注入键鼠）的步骤：静默跑法下不执行、不判 FAIL。
+function Check-NeedsForeground([string]$name, [string]$detail) {
+  Write-MhStepRecord -Combo ($Server + '/u4') -Name $name -Status 'NEEDS-FOREGROUND' -Detail $detail -StepFile (Get-StepFile)
+  Write-Host (('[NEEDS-FOREGROUND] {0} :: {1}' -f $name, $detail))
 }
 function Note([string]$text) { Write-Host ('  · ' + $text) }
 function Print-Evidence {
@@ -596,7 +611,7 @@ try {
   $plAfterDel = Read-Playlists
   Check 'P0.6 playlists.json 已清空（先记录删除前状态）' ((-not $plAfterDel.exists) -or ($plAfterDel.playlists.Count -eq 0)) ('before=' + $beforeDetail + ' existed=' + $existedBefore + ' after=' + (Format-Playlists $plAfterDel))
 
-  $kept = Keep-OnlyServer ($Server + ':*')
+  $kept = Keep-OnlyServer ($Server + ':' + $serverId)
   $seedArgs = @($Server, $base, $user, $pass, $serverId)
   if ($script:token) { $seedArgs += $script:token; $seedArgs += $script:uid }
   $seedCode = -1
@@ -619,18 +634,23 @@ try {
   $scriptHash = (Get-FileHash $PSCommandPath -Algorithm SHA256).Hash
   Check 'P0.8 被测产物与脚本指纹已钉住（报告可追溯）' (($dllHash.Length -eq 64) -and ($scriptHash.Length -eq 64)) ('dll=' + $dllHash + ' script=' + $scriptHash)
 
+  if ($PreflightOnly) {
+    $pf = Get-Content $settings -Raw | ConvertFrom-Json
+    $pfServers = @($pf.Servers)
+    Write-Host ('PREFLIGHT settings=' + $settings + ' servers=' + $pfServers.Count + ' ids=' + (($pfServers | ForEach-Object { $_.ServerId }) -join ','))
+    $pfFail = @($checks | Where-Object { -not $_.pass }).Count
+    exit $(if ($pfFail -gt 0) { 1 } else { 0 })
+  }
+
   # ------------------------------------------------------------ P1 加入
   Write-Host ''
   Write-Host '=== P1 加入播放列表（详情页 → 新建）==='
   $app = Start-MhApp -Exe $exe -ResetTrace -TimeoutSec 90
   Start-Sleep -Seconds 2
   $hwnd = Get-MhWindowHandle
-  $fgOk = $false
-  if ($hwnd) {
-    $fg = Set-MhForeground -Hwnd $hwnd
-    $fgOk = [bool]$fg.isForeground
-  }
-  Check 'P1.0 客户端启动且窗口在前台' (($null -ne $app.pid) -and ($null -ne $hwnd) -and $fgOk) ('pid=' + $app.pid + ' hwnd=' + $hwnd + ' fg=' + $fgOk)
+  $uiaRoot = if ($hwnd) { Get-MhWindow } else { $null }
+  $winInfo = if ($hwnd) { Get-MhWindowInfo } else { $null }
+  Check 'P1.0 客户端启动且窗口可被 UIA 访问（静默运行：不抢前台、可后台驱动）' ([bool](($null -ne $app.pid) -and ($null -ne $hwnd) -and ($null -ne $uiaRoot))) ('pid=' + $app.pid + ' hwnd=' + $hwnd + ' visible=' + $(if ($winInfo) { $winInfo.visible } else { 'n/a' }) + ' foreground=' + $(if ($winInfo) { $winInfo.isForeground } else { 'n/a' }) + ' quiet=' + $env:MH_QUIET_UI)
 
   $nav = Open-ItemDetail $libName $itemTitle
   Check ('P1.1 媒体库 → ' + $libName + ' → ' + $itemTitle + ' 详情页可达') ($nav -eq 'OK') ('nav=' + $nav)

@@ -226,6 +226,117 @@ public sealed class EpisodeAutoAdvanceTests
 }
 
 /// <summary>
+/// The other direction: which episode precedes the current one. The previous-episode button is only
+/// correct if this agrees with auto-advance, so the two share one ordering and are tested against the
+/// same jumbled responses.
+/// </summary>
+public sealed class EpisodePreviousTests
+{
+    private const string User = "tester";
+    private const string Password = "secret";
+    private const string SeriesId = "series-1";
+
+    private static NetworkPolicy DirectPolicy() => new() { Mode = ProxyMode.Direct };
+
+    private static async Task<ProviderHandle> ConnectAsync(MockMediaServer mock, IMediaProviderFactory factory)
+    {
+        var server = new MediaServer("mock-server", factory.Descriptor.Type, "Mock source",
+            new[] { new ServerEndpoint(mock.BaseUri.GetLeftPart(UriPartial.Authority)) });
+        ProviderHandle handle = factory.Create(server, DirectPolicy());
+        await handle.Auth!.AuthenticateAsync(new Credentials(User, Password));
+        return handle;
+    }
+
+    private static MockEpisode Episode(string id, int? season, int? number)
+        => new(id, SeriesId, "Episode " + id, season, number);
+
+    private static Task<MockMediaServer> StartAsync(params MockEpisode[] episodes)
+        => MockMediaServer.StartAsync(ServerType.Emby, new MockServerOptions { Episodes = episodes });
+
+    [Fact]
+    public async Task The_first_episode_of_a_series_has_no_predecessor()
+    {
+        await using var mock = await StartAsync(Episode("ep-s1e1", 1, 1), Episode("ep-s1e2", 1, 2));
+        using ProviderHandle handle = await ConnectAsync(mock, new EmbyProviderFactory());
+
+        Assert.Null(await handle.Library!.GetPreviousEpisodeAsync(SeriesId, "ep-s1e1"));
+
+        // The empty answer came from a real question, so a server that listed nothing cannot pass this.
+        Assert.Single(mock.RequestsFor("/emby/Shows/" + SeriesId + "/Episodes"));
+    }
+
+    [Fact]
+    public async Task The_previous_episode_inside_a_season_is_the_one_before_the_current_episode()
+    {
+        await using var mock = await StartAsync(
+            Episode("ep-s1e1", 1, 1), Episode("ep-s1e2", 1, 2), Episode("ep-s1e3", 1, 3));
+        using ProviderHandle handle = await ConnectAsync(mock, new EmbyProviderFactory());
+
+        Episode? previous = await handle.Library!.GetPreviousEpisodeAsync(SeriesId, "ep-s1e2");
+
+        Assert.NotNull(previous);
+        Assert.Equal("ep-s1e1", previous!.Id);
+        Assert.Equal(1, previous.SeasonNumber);
+        Assert.Equal(1, previous.EpisodeNumber);
+    }
+
+    [Fact]
+    public async Task The_episode_before_a_season_opener_is_the_last_episode_of_the_previous_season()
+    {
+        await using var mock = await StartAsync(
+            Episode("ep-s1e1", 1, 1), Episode("ep-s1e2", 1, 2), Episode("ep-s2e1", 2, 1), Episode("ep-s2e2", 2, 2));
+        using ProviderHandle handle = await ConnectAsync(mock, new EmbyProviderFactory());
+
+        Episode? previous = await handle.Library!.GetPreviousEpisodeAsync(SeriesId, "ep-s2e1");
+
+        Assert.Equal("ep-s1e2", previous?.Id);
+        Assert.Equal(1, previous?.SeasonNumber);
+    }
+
+    [Fact]
+    public async Task Response_order_does_not_decide_which_episode_comes_previous()
+    {
+        // Same jumbled index as the forward test: trusting it would put S2E2 before S1E1.
+        await using var mock = await StartAsync(
+            Episode("ep-s2e2", 2, 2),
+            Episode("ep-s1e2", 1, 2),
+            Episode("ep-s2e1", 2, 1),
+            Episode("ep-s1e1", 1, 1));
+        using ProviderHandle handle = await ConnectAsync(mock, new EmbyProviderFactory());
+
+        Assert.Equal("ep-s1e1", (await handle.Library!.GetPreviousEpisodeAsync(SeriesId, "ep-s1e2"))?.Id);
+        Assert.Equal("ep-s1e2", (await handle.Library!.GetPreviousEpisodeAsync(SeriesId, "ep-s2e1"))?.Id);
+        Assert.Null(await handle.Library!.GetPreviousEpisodeAsync(SeriesId, "ep-s1e1"));
+        Assert.Equal("ep-s2e1", (await handle.Library!.GetPreviousEpisodeAsync(SeriesId, "ep-s2e2"))?.Id);
+    }
+
+    [Fact]
+    public async Task Forward_and_backward_agree_about_the_same_pair()
+    {
+        // The pair has to be symmetric, otherwise the two buttons disagree about where "adjacent" is.
+        await using var mock = await StartAsync(
+            Episode("ep-s1e1", 1, 1), Episode("ep-s1e2", 1, 2), Episode("ep-s2e1", 2, 1));
+        using ProviderHandle handle = await ConnectAsync(mock, new EmbyProviderFactory());
+
+        foreach (string id in new[] { "ep-s1e1", "ep-s1e2", "ep-s2e1" })
+        {
+            Episode? next = await handle.Library!.GetNextEpisodeAsync(SeriesId, id);
+            if (next is null) continue;
+            Assert.Equal(id, (await handle.Library!.GetPreviousEpisodeAsync(SeriesId, next.Id))?.Id);
+        }
+    }
+
+    [Fact]
+    public async Task An_episode_that_is_not_in_the_series_has_no_predecessor()
+    {
+        await using var mock = await StartAsync(Episode("ep-s1e1", 1, 1), Episode("ep-s1e2", 1, 2));
+        using ProviderHandle handle = await ConnectAsync(mock, new EmbyProviderFactory());
+
+        Assert.Null(await handle.Library!.GetPreviousEpisodeAsync(SeriesId, "ep-from-another-series"));
+    }
+}
+
+/// <summary>
 /// The mock's own episode route, asserted directly rather than through the provider: a mock that served
 /// every series or sorted by itself would make the provider tests above pass for the wrong reason.
 /// </summary>

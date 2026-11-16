@@ -225,7 +225,7 @@ measured on this machine; evidence file `windows/engine/lgpl/dist/flavour-builds
 | --- | --- | --- |
 | Files | 526 | 559 (+33) |
 | Bytes on disk | 348,275,148 (332.14 MiB) | 289,439,302 (276.03 MiB) |
-| Engine `libmpv-2.dll` | 120,989,696 B, SHA-256 `6a48faec…63d9` | 3,327,274 B, SHA-256 `20035902…3c0a` |
+| Engine `libmpv-2.dll` | 120,989,696 B, SHA-256 `6a48faec…63d9` | 3,327,274 B, SHA-256 `a3f901d6…2a68` |
 | Engine directory | `windows/native/libmpv/` | `windows/engine/lgpl/dist/` |
 | Sibling DLLs | none | 33 (see §7.2) |
 
@@ -365,7 +365,7 @@ sibling-bytes: 58826576
 gpl-engine-bytes: 120989696
 gpl-engine-sha256: 6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9
 lgpl-engine-bytes: 3327274
-lgpl-engine-sha256: 20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a
+lgpl-engine-sha256: a3f901d6b5bae54a4b5b87cd9d9d973fd3af079aa70a61851560c30e74722a68
 sibling-manifest: dist/runtime-dependencies-collected.txt
 family-files: 33
 family-bytes: 58826576
@@ -390,3 +390,39 @@ How each line is checked:
 
 The section is appended at the end on purpose: several documents quote §7.1 and §7.3 by line number, and
 inserting anything above them would move every one of those pointers.
+## 10. Cross-record section pointers (checked by CI)
+
+The licensing records cite each other **by section number** — the flavour tables in §7.1 of this file, the build record in §8 of the LGPL build record, the component table in §5.1 of the compliance note. A section number is a promise: rename, merge or reorder the sections and every citation that pointed at them silently aims at a different paragraph, while every existing check still passes (each of them pins content, not position).
+
+第 58 项 `licence-record-section-claims` 把这条承诺钉成下面的契约块，判据四条：A 块自指（owner 点名本项、条数等于条目数）；B 目标文件存在、且仍有该编号的小节标题；C 该小节正文里仍含声明的锚点短语；D 引用方文件仍在写「目标文件 §编号」。文件缺失或目录缺失 ⇒ SKIP。
+
+约定：往任何一份 licensing 记录里新增以「`文件名.md` §编号」形式写出的跨记录引用，必须同时在下面的块里登记一条，否则第 58 项会红——「引用了但没声明」与「声明了但引用被删」都要失败。
+
+<!-- BEGIN licence-record-section-claims -->
+licence-section-owner: check-licence-surface.ps1:licence-record-section-claims
+licence-section-count: 22
+licence-section-convention: one entry per distinct (citer, target, section); the guard re-reads the target heading and the anchor phrase inside that section, and re-scans every licensing record for citations the block does not declare
+- citer=LICENSE-SURFACE-CHECK.md; cite=PACKAGING.md§0; anchor=The block below is read
+- citer=LICENSE-SURFACE-CHECK.md; cite=W5-LGPL-BUILD.md§8; anchor=The block below is read
+- citer=LICENSE-SURFACE-CHECK.md; cite=SBOM.md§9; anchor=The numbers in §7 are a measurement, not a
+- citer=LICENSE-SURFACE-CHECK.md; cite=REPRODUCIBLE-BUILD.md§0; anchor=windows/tools/check-licence-surface.ps1
+- citer=LICENSE-SURFACE-CHECK.md; cite=W5-LGPL-BUILD.md§9; anchor=Other records cite this file by **line
+- citer=LICENSE-SURFACE-CHECK.md; cite=PACKAGING.md§1; anchor=**unpackaged, self-contained portable
+- citer=LICENSE-SURFACE-CHECK.md; cite=SBOM.md§4.1; anchor=Until W40 this section read that zero of the
+- citer=LICENSE-SURFACE-CHECK.md; cite=LICENCE-DECISION.md§6; anchor=windows/THIRD-PARTY-NOTICES.md
+- citer=LICENSE-SURFACE-CHECK.md; cite=SBOM.md§7.2; anchor=All 33 come from the same two build roots the
+- citer=PACKAGING.md; cite=SBOM.md§4.1; anchor=Until W40 this section read that zero of the
+- citer=PACKAGING.md; cite=SBOM.md§4.2; anchor=Microsoft.WindowsAppSDK
+- citer=PACKAGING.md; cite=REPRODUCIBLE-BUILD.md§3.3; anchor=(Get-Item MediaHub.dll).VersionInfo.ProductVer
+- citer=REPRODUCIBLE-BUILD.md; cite=SBOM.md§9; anchor=The numbers in §7 are a measurement, not a
+- citer=REPRODUCIBLE-BUILD.md; cite=PACKAGING.md§0; anchor=The block below is read
+- citer=REPRODUCIBLE-BUILD.md; cite=SBOM.md§4.1; anchor=Until W40 this section read that zero of the
+- citer=SBOM.md; cite=LICENCE-DECISION.md§1.5; anchor=means, per FFmpeg's own configure
+- citer=SBOM.md; cite=LICENCE-DECISION.md§2.3; anchor=meson setup … -Dgpl=false
+- citer=SBOM.md; cite=REPRODUCIBLE-BUILD.md§3; anchor=dotnet publish src/MediaHub.App/MediaHub.App.c
+- citer=SBOM.md; cite=LICENSE-SURFACE-CHECK.md§3.1; anchor=前三组只证明 SBOM「形状是对的」：它仍是 CycloneDX 1.5、仍记录
+- citer=W5-LGPL-BUILD.md; cite=LICENCE-DECISION.md§2.3; anchor=meson setup … -Dgpl=false
+- citer=W5-LGPL-BUILD.md; cite=LICENCE-DECISION.md§9; anchor=Resolved 2026-11-12
+- citer=PACKAGING.md; cite=LICENCE-DECISION.md§9; anchor=Resolved 2026-11-12
+<!-- END licence-record-section-claims -->
+

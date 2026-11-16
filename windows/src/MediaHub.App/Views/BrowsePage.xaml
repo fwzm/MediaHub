@@ -2,34 +2,55 @@
 <Page
     x:Class="MediaHub.App.Views.BrowsePage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="{StaticResource MediaHubGlassPageBrush}">
 
-  <Grid Padding="28,20,28,20" RowSpacing="12">
+  <Grid x:Name="RootGrid" Padding="36,24,36,24" RowSpacing="14">
+    <VisualStateManager.VisualStateGroups>
+      <VisualStateGroup x:Name="WindowWidthStates">
+        <VisualState x:Name="Wide">
+          <VisualState.StateTriggers>
+            <AdaptiveTrigger MinWindowWidth="900" />
+          </VisualState.StateTriggers>
+        </VisualState>
+        <VisualState x:Name="Narrow">
+          <VisualState.StateTriggers>
+            <AdaptiveTrigger MinWindowWidth="0" />
+          </VisualState.StateTriggers>
+          <VisualState.Setters>
+            <Setter Target="RootGrid.Padding" Value="20,16,20,16" />
+            <Setter Target="TitleText.FontSize" Value="20" />
+          </VisualState.Setters>
+        </VisualState>
+      </VisualStateGroup>
+    </VisualStateManager.VisualStateGroups>
+
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
-    <StackPanel Grid.Row="0" Spacing="6">
-      <StackPanel Orientation="Horizontal" Spacing="10">
-        <Button x:Name="UpButton" Click="OnUpClick" Background="Transparent"
+    <StackPanel Grid.Row="0" Spacing="2">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button x:Name="UpButton" Click="OnUpClick" Style="{StaticResource MediaHubIconButton}"
                 AutomationProperties.Name="返回上级" AutomationProperties.AutomationId="browse.up">
-          <FontIcon Glyph="&#xE72B;" />
+          <FontIcon Glyph="&#xE72B;" FontSize="15" />
         </Button>
         <!-- A stable way back to the shell. Walking up with the arrow only reaches the source root,
              so without this the only exit from a root listing is the navigation pane. -->
-        <Button x:Name="RootsButton" Click="OnRootsClick" Background="Transparent"
+        <Button x:Name="RootsButton" Click="OnRootsClick" Style="{StaticResource MediaHubIconButton}"
                 AutomationProperties.Name="返回媒体库" AutomationProperties.AutomationId="browse.roots">
-          <FontIcon Glyph="&#xE8B7;" />
+          <FontIcon Glyph="&#xE8B7;" FontSize="15" />
         </Button>
-        <TextBlock x:Name="TitleText" Style="{StaticResource MediaHubSectionHeader}" VerticalAlignment="Center" />
+        <TextBlock x:Name="TitleText" Style="{StaticResource MediaHubPageTitle}" VerticalAlignment="Center"
+                   Margin="4,0,0,0" />
       </StackPanel>
       <!-- Breadcrumb. Shows where in the tree the user is, which matters because a WebDAV root can be
            any sub-path of the host and "which folder am I in" is otherwise invisible. -->
-      <TextBlock x:Name="BreadcrumbText" Style="{StaticResource MediaHubCaption}"
+      <TextBlock x:Name="BreadcrumbText" Style="{StaticResource MediaHubCaption}" Margin="44,0,0,0"
                  TextTrimming="CharacterEllipsis" />
-      <TextBlock x:Name="SourceText" Style="{StaticResource MediaHubCaption}" />
+      <TextBlock x:Name="SourceText" Style="{StaticResource MediaHubCaption}" Margin="44,0,0,0" />
     </StackPanel>
 
     <InfoBar x:Name="StatusBar" Grid.Row="1" IsOpen="False" IsClosable="True" />
@@ -37,37 +58,69 @@
     <Grid Grid.Row="2">
       <ListView x:Name="ItemList" SelectionMode="None" IsItemClickEnabled="True"
                 ItemClick="OnItemClick"
-                AutomationProperties.AutomationId="browse.list">
+                AutomationProperties.AutomationId="browse.list"
+                ItemContainerStyle="{StaticResource MediaHubListViewItem}">
+        <ListView.ItemContainerTransitions>
+          <TransitionCollection>
+            <AddDeleteThemeTransition />
+            <RepositionThemeTransition />
+          </TransitionCollection>
+        </ListView.ItemContainerTransitions>
         <ListView.ItemTemplate>
           <DataTemplate>
-            <Grid Padding="6" ColumnSpacing="12" AutomationProperties.Name="{Binding Name}"
+            <Grid Padding="12,10" ColumnSpacing="12" AutomationProperties.Name="{Binding Name}"
                   AutomationProperties.AutomationId="{Binding AutomationId}">
+              <Grid.ContextFlyout>
+                <MenuFlyout>
+                  <MenuFlyoutItem Text="打开" Tag="{Binding}" Click="OnOpenMenuClick">
+                    <MenuFlyoutItem.Icon>
+                      <FontIcon Glyph="&#xE8A7;" />
+                    </MenuFlyoutItem.Icon>
+                  </MenuFlyoutItem>
+                  <MenuFlyoutItem Text="复制名称" Tag="{Binding}" Click="OnCopyNameClick">
+                    <MenuFlyoutItem.Icon>
+                      <FontIcon Glyph="&#xE8C8;" />
+                    </MenuFlyoutItem.Icon>
+                  </MenuFlyoutItem>
+                </MenuFlyout>
+              </Grid.ContextFlyout>
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
               </Grid.ColumnDefinitions>
-              <FontIcon Grid.Column="0" Glyph="{Binding Glyph}" FontSize="16" VerticalAlignment="Center" />
+              <FontIcon Grid.Column="0" Glyph="{Binding Glyph}" FontSize="16" VerticalAlignment="Center"
+                        Foreground="{StaticResource MediaHubTextSecondaryBrush}" />
               <StackPanel Grid.Column="1" Spacing="2">
                 <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
                 <TextBlock Text="{Binding Detail}" Style="{StaticResource MediaHubCaption}"
                            TextTrimming="CharacterEllipsis" />
               </StackPanel>
               <FontIcon Grid.Column="2" Glyph="{Binding TrailingGlyph}" FontSize="12"
-                        VerticalAlignment="Center" Opacity="0.6" />
+                        VerticalAlignment="Center" Opacity="0.5" />
             </Grid>
           </DataTemplate>
         </ListView.ItemTemplate>
       </ListView>
 
+      <ItemsControl x:Name="SkeletonPanel" Visibility="Collapsed" IsHitTestVisible="False"
+                    ItemTemplate="{StaticResource MediaHubRowSkeleton}" />
+
       <StackPanel x:Name="EmptyPanel" HorizontalAlignment="Center" VerticalAlignment="Center"
-                  Spacing="10" Visibility="Collapsed">
-        <ProgressRing x:Name="LoadingRing" IsActive="False" Width="36" Height="36" />
-        <TextBlock x:Name="EmptyText" HorizontalAlignment="Center" TextWrapping="Wrap" MaxWidth="460" />
+                  Spacing="14" Visibility="Collapsed" MaxWidth="460">
+        <Border x:Name="StateIcon" Style="{StaticResource MediaHubStateIcon}">
+          <FontIcon x:Name="StateGlyph" Style="{StaticResource MediaHubStateGlyph}" Glyph="&#xE8B7;" />
+        </Border>
+        <StackPanel Spacing="6">
+          <TextBlock x:Name="StateTitle" Style="{StaticResource MediaHubStateTitle}" Text="这个目录是空的" />
+          <TextBlock x:Name="EmptyText" Style="{StaticResource MediaHubStateDescription}"
+                     TextWrapping="Wrap" Text="没有找到子文件夹或可播放的文件。" />
+        </StackPanel>
         <!-- Only a failed read shows this. Without it the page's only exit from a server error was to
              navigate away and come back, which is not something a user should have to discover. -->
         <Button x:Name="RetryButton" Content="重试" Click="OnRetryClick" Visibility="Collapsed"
-                HorizontalAlignment="Center" AutomationProperties.AutomationId="browse.retry" />
+                HorizontalAlignment="Center" Style="{StaticResource MediaHubGhostButton}"
+                AutomationProperties.AutomationId="browse.retry" />
       </StackPanel>
     </Grid>
   </Grid>

@@ -847,7 +847,7 @@ public sealed class MediaBrowserTokenPlacementTests
         Uri[] urls =
         {
             api.ImageUrl("item-000", "Primary", "tag-1", 320),
-            api.SubtitleUrl("item-000", 2, "srt"),
+            api.SubtitleUrl("item-000", "media-source-1", 2, "srt"),
             api.DirectStreamUrl("item-000", "mp4", "media-source-1", "play-session-1"),
         };
 
@@ -861,7 +861,7 @@ public sealed class MediaBrowserTokenPlacementTests
         }
 
         Assert.Contains("/Items/item-000/Images/Primary", urls[0].AbsolutePath);
-        Assert.Contains("/Videos/item-000/2/Subtitles/srt", urls[1].AbsolutePath);
+        Assert.Contains("/Videos/item-000/media-source-1/Subtitles/2/Stream.srt", urls[1].AbsolutePath);
         Assert.Contains("/Videos/item-000/stream.mp4", urls[2].AbsolutePath);
     }
 }

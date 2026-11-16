@@ -51,6 +51,19 @@ public sealed record MediaItem
     public bool? UserDataFavorite { get; init; }
     public bool IsFolder { get; init; }
 
+    /// <summary>
+    /// Technical facts of the primary source, when the list response carried them. Used by the
+    /// optional poster badges; every field stays null when the provider did not report it.
+    /// </summary>
+    public int? Width { get; init; }
+    public int? Height { get; init; }
+    public string? VideoCodec { get; init; }
+    public string? AudioCodec { get; init; }
+    public int? AudioChannels { get; init; }
+    public string? VideoRange { get; init; }
+    public string? Container { get; init; }
+    public long? BitRate { get; init; }
+
     public TimeSpan? RunTime => RunTimeTicks is { } t ? TimeSpan.FromTicks(t) : null;
 }
 
@@ -75,6 +88,40 @@ public sealed record MediaDetail
     public IReadOnlyList<string> Directors { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> Cast { get; init; } = Array.Empty<string>();
     public IReadOnlyList<MediaStreamInfo> Streams { get; init; } = Array.Empty<MediaStreamInfo>();
+
+    /// <summary>Every playable version the source holds for this item, in the server's order.</summary>
+    public IReadOnlyList<MediaVersion> Versions { get; init; } = Array.Empty<MediaVersion>();
+}
+
+/// <summary>
+/// One playable version ("media source") of a title.
+/// </summary>
+/// <remarks>
+/// A server can hold several files for one item — a 4K remux, a 1080p copy, a phone-sized encode.
+/// Without this list the client could only say "the server picked a version"; the user could neither
+/// see which one is playing nor ask for another. The supports flags are the server's answer for this
+/// client, so <see cref="TranscodeOnly"/> is a fact reported by the source, not a guess about codecs.
+/// </remarks>
+public sealed record MediaVersion
+{
+    public required string MediaSourceId { get; init; }
+
+    /// <summary>Short, human-readable line such as "1920×1080 · h264 · mp4 · 直连".</summary>
+    public required string Label { get; init; }
+
+    public string? Name { get; init; }
+    public string? Container { get; init; }
+    public int? Width { get; init; }
+    public int? Height { get; init; }
+    public string? VideoCodec { get; init; }
+    public long? BitRate { get; init; }
+    public long? SizeBytes { get; init; }
+    public bool SupportsDirectPlay { get; init; }
+    public bool SupportsDirectStream { get; init; }
+    public bool IsDefault { get; init; }
+
+    /// <summary>True when the server offers no direct path for this version, only a transcode.</summary>
+    public bool TranscodeOnly => !SupportsDirectPlay && !SupportsDirectStream;
 }
 
 /// <summary>

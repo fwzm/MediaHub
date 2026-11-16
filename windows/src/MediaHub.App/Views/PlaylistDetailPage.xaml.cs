@@ -93,14 +93,37 @@ public sealed partial class PlaylistDetailPage : Page
 
     private void OnPlayItemClick(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.Tag is not PlaylistItemRow row) return;
+        if ((sender as FrameworkElement)?.Tag is PlaylistItemRow row) Play(row);
+    }
 
+    private static void Play(PlaylistItemRow row)
+    {
         App.MainWindow?.EnterPlayer(new PlaybackRequest
         {
             ServerId = row.ServerId,
             ItemId = row.ItemId,
             Title = row.Title,
         });
+    }
+
+    private void OnPlayMenuClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is PlaylistItemRow row) Play(row);
+    }
+
+    private void OnCopyTitleClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not PlaylistItemRow row) return;
+        try
+        {
+            var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            package.SetText(row.Title);
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
+        }
+        catch (Exception ex)
+        {
+            StartupTrace.Write("playlist.detail:clipboard FAILED " + ex.GetType().Name);
+        }
     }
 
     private void OnRemoveItemClick(object sender, RoutedEventArgs e)

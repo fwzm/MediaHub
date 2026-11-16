@@ -1,38 +1,39 @@
 # LGPL 引擎切换说明（W13b）
 
-> 状态：**默认仍未切换**。本仓库默认构建、默认分发的是 `windows/native/libmpv` 下的
-> **GPL-3.0-or-later** 基线（默认值见 `windows/src/MediaHub.Player.Mpv/MediaHub.Player.Mpv.csproj:23`）；
-> `-p:LibMpvFlavour=lgpl` 只是给维护者验证 LGPL 候选的旁路开关。
-> `windows/THIRD-PARTY-NOTICES.md:61-63` 记录的 RELEASE BLOCKER **未解除**，`README.md:173-174` 的口径不变。
+> 状态：**已于 2026-11-12 切换**。默认构建、默认分发的是 `windows/engine/lgpl/dist` 下的
+> **LGPL-2.1-or-later** 引擎（缺省值见 `windows/src/MediaHub.Player.Mpv/MediaHub.Player.Mpv.csproj`）；
+> `-p:LibMpvFlavour=gpl` 现在只是把 GPL 基线拉回来做对比回归的旁路开关。
+> `windows/THIRD-PARTY-NOTICES.md:61-63` 记录的 RELEASE BLOCKER 已解除，结论与证据见
+> `windows/docs/licensing/LICENCE-DECISION.md` §9。
 >
-> 本文只回答四件事：怎么切、切完怎么验、依赖清单长什么样、什么时候必须重跑收集。
+> 本文只回答四件事：怎么切（两个方向）、切完怎么验、依赖清单长什么样、什么时候必须重跑收集。
 
 <!-- BEGIN engine-flavour-status (checked by check-licence-surface.ps1) -->
-default-flavour: gpl-baseline
-candidate-flavour: lgpl-candidate-not-default
-switch-flag: -p:LibMpvFlavour=lgpl
+default-flavour: lgpl-shipped
+comparison-flavour: gpl-baseline-fixture
+switch-flag: -p:LibMpvFlavour=gpl
 <!-- END engine-flavour-status -->
 
-上面四行里的三行由 `windows/tools/check-licence-surface.ps1` 的 `engine-flavour-default`（W43）逐项核对：缺省 flavour 仍必须是 `gpl`、其它工程与 workflow 不得构建候选、本块三行不得丢；任一处漂移即红。
+上面三行由 `windows/tools/check-licence-surface.ps1` 的 `engine-flavour-default`（W43）逐项核对：缺省 flavour 必须是 `lgpl`、其它工程与 workflow 不得构建 GPL 基线、本块三行不得丢；任一处漂移即红。
 
 ## 1. 边界（这份文档不改变什么）
 
 | 事项 | 现状 | 位置 |
 | --- | --- | --- |
-| 默认 flavour | `gpl`，未改 | `MediaHub.Player.Mpv.csproj:23` |
-| 随包分发的引擎 | `windows/native/libmpv/libmpv-2.dll`，GPL-3.0-or-later | `windows/tools/fetch-libmpv.ps1:15-17` |
-| 许可结论 | RELEASE BLOCKER 仍在（GPL DLL 与仓库自称 MIT 冲突） | `windows/THIRD-PARTY-NOTICES.md:61-63` |
-| 仓库自身许可 | 根目录没有 `LICENSE`，声明与实际不一致 | `windows/docs/licensing/LICENCE-DECISION.md:180-190`、`windows/docs/LGPL-COMPLIANCE.md` §6 |
-| LGPL 候选状态 | 已构建、已自包含、已验证可加载，**未切产品** | `README.md:128`、`windows/docs/licensing/W5-LGPL-BUILD.md` |
+| 默认 flavour | `lgpl`（2026-11-12 切换） | `MediaHub.Player.Mpv.csproj` |
+| 随包分发的引擎 | `windows/engine/lgpl/dist/libmpv-2.dll` + 33 个依赖 DLL，LGPL-2.1-or-later | `windows/src/MediaHub.Player.Mpv/MediaHub.Player.Mpv.csproj`、`windows/tools/collect-lgpl-runtime.ps1` |
+| 许可结论 | RELEASE BLOCKER 已解除；证据与残余问题见 LICENCE-DECISION §9 | `windows/docs/licensing/LICENCE-DECISION.md` §0/§9 |
+| 仓库自身许可 | 根目录没有 `LICENSE`，声明与实际不一致（与本切换无关，仍需人工决定） | `windows/docs/licensing/LICENCE-DECISION.md`、`windows/docs/LGPL-COMPLIANCE.md` §6 |
+| GPL 基线 | 保留为**对比夹具**，不再随包分发；由 `fetch-libmpv.ps1` 按需拉取 | `README.md`、`windows/docs/licensing/W5-LGPL-BUILD.md` |
 
-切不切、什么时候切，是维护者决定（见第 7 节）。本文与脚本只是把切换路径做成可复现、可回滚。
+切换已由维护者执行（第 7 节记录决定与回归证据）。本文与脚本保留双向切换路径，可复现、可回滚。
 
 ## 2. 两套引擎
 
 | flavour | 目录 | libmpv-2.dll | 许可 | 同行依赖 | Debug x64 输出文件数 |
 | --- | --- | --- | --- | --- | --- |
-| `gpl`（默认） | `windows/native/libmpv` | 120,989,696 B / `6a48faec…63d9` | GPL-3.0-or-later | 无（静态自带 + 系统 DLL） | 352 |
-| `lgpl` | `windows/engine/lgpl/dist` | 3,327,274 B / `20035902…3c0a` | LGPL-2.1-or-later（判定见 W5-LGPL-BUILD.md，残余待核实项见第 7 节） | **33 个**，必须与 core 同目录 | 385（352 + 33） |
+| `lgpl`（默认） | `windows/engine/lgpl/dist` | 3,327,274 B / `a3f901d6…2a68` | LGPL-2.1-or-later（判定见 W5-LGPL-BUILD.md，残余待核实项见第 7 节） | **33 个**，必须与 core 同目录 | 385（352 + 33） |
+| `gpl`（对比夹具） | `windows/native/libmpv` | 120,989,696 B / `6a48faec…63d9` | GPL-3.0-or-later | 无（静态自带 + 系统 DLL） | 352 |
 
 两个目录都**不在**任何发行包里「随仓库分发」：GPL 那份 115 MB，靠 `fetch-libmpv.ps1` 拉取（`.gitignore:35-36`）；
 LGPL 那份的 33 个依赖靠 `collect-lgpl-runtime.ps1` 从本机工具链收集（第 5 节）。
@@ -203,7 +204,7 @@ dotnet test windows/tests/MediaHub.Tests/MediaHub.Tests.csproj -c Debug --nologo
 | `vulkan-1.dll` | 724,189 | `31862137c4179dcdbba782760f3e401f9fb526477947079d7f63987864f9b0eb` | MSYS2 ucrt64 |
 | `zlib1.dll` | 100,279 | `1dc85208162ee57fe97e892bb5160fe9588903992995f90adc3a3a358dac6fc6` | MSYS2 ucrt64 |
 
-核心件：`libmpv-2.dll` 3,327,274 B `20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a`。
+核心件：`libmpv-2.dll` 3,327,274 B `a3f901d6b5bae54a4b5b87cd9d9d973fd3af079aa70a61851560c30e74722a68`。
 
 ### 5.3 44 个留给操作系统的 DLL
 
@@ -231,19 +232,23 @@ Secur32、SHCORE、SHELL32、SHLWAPI、USER32、USERENV、USP10、UxTheme、VERS
 散落提醒：脚本对 dist 里「同名但哈希不同」的文件默认**保留并告警**（避免悄悄替换用户手工放入的构建），
 要用工具链版本覆盖时加 `-Force`。
 
-## 7. 发布仍需维护者拍板
+## 7. 切换决定与仍未闭环的事项
 
-即使第 4 节全部通过，以下决定不属于工程侧：
+**决定（2026-11-12，维护者）**：默认引擎切到 LGPL-2.1-or-later 构建并随包分发。触发原因是
+`windows/THIRD-PARTY-NOTICES.md` 记录的 RELEASE BLOCKER（GPL DLL 与仓库自称 MIT 冲突）；
+许可结论、链接方式与证据见 `windows/docs/licensing/LICENCE-DECISION.md` §9。
 
-1. **许可判定**：LGPL-2.1-or-later 的结论依据、以及 `W5-LGPL-BUILD.md:222-252` 列出的残余待核实项
-   （libiconv / lcms2 等组件、`-Dgpl=false` 非授权、MSYS2 非固定 feed、版本串 `v0.41.0-UNKNOWN`）；
-2. **仓库自身许可**：根目录没有 `LICENSE`，切换引擎前必须先补齐，否则无法对外声称任何许可
-   （`LICENCE-DECISION.md:180-190`、`LGPL-COMPLIANCE.md` §6）；
-3. **发布口径**：一旦切换，`README.md:173-174`、`windows/THIRD-PARTY-NOTICES.md` §3、
-   `windows/docs/sbom-windows.cdx.json` 里的 libmpv 组件许可必须同步改写；
-4. **用户可替换性**：安装目录布局、升级/卸载时是否会覆盖用户替换的 DLL（`LGPL-COMPLIANCE.md` §3 的四条硬约束）。
+切换后仍**不属于工程侧、或仍未闭环**的事项：
 
-**在维护者拍板前，本仓库默认仍分发 GPL 构建，RELEASE_BLOCKED 不变。**
+1. **许可判定的残余项**：`W5-LGPL-BUILD.md:222-252` 列出的待核实组件（libiconv / lcms2 等）；
+   `-Dgpl=false` 本身不构成授权，必须连同 FFmpeg 的动态链接方式一并看（§9 已记录）；
+2. **仓库自身许可**：根目录没有 `LICENSE`，声明与实际不一致。这不影响本次引擎切换的合规性，
+   但对外声称任何许可前仍需人工补齐（`LICENCE-DECISION.md` §3.3、`LGPL-COMPLIANCE.md` §6）；
+3. **用户可替换性**：安装目录布局、升级/卸载时是否覆盖用户替换的 DLL（`LGPL-COMPLIANCE.md` §3 的四条硬约束）；
+4. **ARM64 / MSIX / 代码签名**：与引擎无关，见 `windows/docs/licensing/PACKAGING.md`。
+
+**自 2026-11-12 起，本仓库默认分发 LGPL 构建，`release-status` 不再因 GPL 义务而阻塞。**
+GPL 基线保留为对比夹具，可用 `-p:LibMpvFlavour=gpl` 复跑。
 
 ## 8. 复现证据（原始行）
 
@@ -262,9 +267,11 @@ Secur32、SHCORE、SHELL32、SHLWAPI、USER32、USERENV、USP10、UxTheme、VERS
 ## 9. 已知边界与未覆盖
 
 - 构建层验到 **x64 的 Debug build 与 Release publish**（后者见第 10 节）；ARM64、MSIX 打包、签名与安装包形态均未验；
-- 探针设 `vo=null / ao=null / hwdec=no`，**GPU 解码、HDR、音频输出设备**均未验；
+- 探针本身设 `vo=null / ao=null / hwdec=no`（那是为了隔离加载与解码路径）；**硬解与 HDR 另行实测**：
+  2026-11-12 在 RTX 4070 上对 4K HEVC Main10 片源取到 `hwdec-current=d3d11va`、`vo=gpu-next`、
+  `gpu-context=d3d11`，引擎侧与产品侧（MediaHub 技术信息浮层 + 状态行）双向取证，见 `LICENCE-DECISION.md` §9.3；
 - 依赖集合是本机 MSYS2/FFmpeg 的一次快照，换机器或换工具链后哈希会变（参见 `windows/docs/licensing/REPRODUCIBLE-BUILD.md`）；
-- `v0.41.0-UNKNOWN` 版本串（LGPL 构建拿不到 git describe）仍是既知瑕疵；
+- 版本串：2026-11-12 重建后 `mpv --version` 输出 `mpv v0.41.0`，不再有 `-UNKNOWN`（修法：把源码树 `MPV_VERSION` 写成 `0.41.0` 再重建）；
 - 44 个系统 DLL 的可获得性依赖受支持的 Windows 版本，未在更老系统上验证；
 - `collect-lgpl-runtime.ps1` 解析的是导入表（含延迟导入），不覆盖运行时 `LoadLibrary` 动态拉取的模块
   （例如用户自带的字体或显卡驱动侧的 DLL），这类缺失只会在真机播放时暴露；
@@ -302,7 +309,7 @@ LGPL 那次还打印了 `MediaHub.Player.Mpv -> …\MediaHub.Player.Mpv.dll`，�
 | 目录 | 文件数 | 总字节 | 折合 | libmpv-2.dll 字节 | libmpv-2.dll sha256 |
 | --- | --- | --- | --- | --- | --- |
 | `D:\mh-out-pub-gpl` | 526 | 348,275,148 | 332.14 MiB | 120,989,696 | `6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9` |
-| `D:\mh-out-pub-lgpl` | 559 | 289,439,302 | 276.03 MiB | 3,327,274 | `20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a` |
+| `D:\mh-out-pub-lgpl` | 559 | 289,439,302 | 276.03 MiB | 3,327,274 | `a3f901d6b5bae54a4b5b87cd9d9d973fd3af079aa70a61851560c30e74722a68` |
 
 LGPL 目录**总字节更小**，因为 core 从 120.99 MB 降到 3.33 MB（−117.6 MB），而新增的 33 个依赖只有 58.8 MB。
 两棵树根目录 `*.dll` 计数：GPL 280 → LGPL 313（+33）。
@@ -325,7 +332,7 @@ MSYS2 侧（26 个）：`libass-9` `libbrotlicommon` `libbrotlidec` `libbz2-1` `
 `libharfbuzz-0` `libiconv-2` `libintl-8` `liblcms2-2` `libpcre2-8-0` `libplacebo-360` `libpng16-16`
 `libshaderc_shared`(10,657,197) `libspirv-cross-c-shared`(3,433,687) `libstdc++-6` `libunibreak-7`
 `libwinpthread-1` `vulkan-1` `zlib1`（逐文件 sha256 见第 5.2 节，本次实测与之一致）。
-LGPL 目录里的 core 与 `dist\libmpv-2.dll` 哈希相同：`20035902…3c0a`。
+LGPL 目录里的 core 与 `dist\libmpv-2.dll` 哈希相同：`a3f901d6…2a68`。
 
 ### 10.5 自包含探针（把构建机路径从 PATH 里剔掉）
 

@@ -66,6 +66,14 @@ public interface IProviderLibrary
     /// </remarks>
     Task<Episode?> GetNextEpisodeAsync(string seriesId, string currentEpisodeId, CancellationToken ct = default)
         => Task.FromResult<Episode?>(null);
+
+    /// <summary>
+    /// The episode that precedes the given one, across season boundaries, or null at the start of the
+    /// series. Same contract as <see cref="GetNextEpisodeAsync"/>: null means "cannot tell", which
+    /// leaves the previous-episode button disabled instead of guessing.
+    /// </summary>
+    Task<Episode?> GetPreviousEpisodeAsync(string seriesId, string currentEpisodeId, CancellationToken ct = default)
+        => Task.FromResult<Episode?>(null);
 }
 
 public interface IProviderDetail
@@ -172,6 +180,24 @@ public interface IProviderSubtitle
 }
 
 /// <summary>
+/// Subtitle text the source owns itself (a server-side sidecar track).
+/// </summary>
+/// <remarks>
+/// Bytes rather than a URL for the same reason as <see cref="IProviderImageFetcher"/>: a URL would
+/// have to carry the token, and a loader outside the provider would lose the source's credential,
+/// redirect and proxy rules. Only providers that really serve subtitle files implement this;
+/// sources whose subtitles are embedded in the media expose them through the engine instead.
+/// </remarks>
+public interface IProviderSubtitleContent
+{
+    /// <param name="mediaSourceId">
+    /// The version the track belongs to, when the caller knows it. MediaBrowser servers address a
+    /// subtitle through its media source, so omitting it is only safe for providers that do not need one.
+    /// </param>
+    Task<byte[]> FetchSubtitleAsync(string itemId, SubtitleTrack track, string? mediaSourceId = null, CancellationToken ct = default);
+}
+
+/// <summary>
 /// Artwork retrieval.
 /// </summary>
 /// <remarks>
@@ -220,6 +246,7 @@ public sealed class ProviderHandle : IDisposable
     public IProviderProgress? Progress { get; init; }
     public IProviderFavorites? Favorites { get; init; }
     public IProviderSubtitle? Subtitle { get; init; }
+    public IProviderSubtitleContent? SubtitleContent { get; init; }
     public IProviderImageFetcher? Images { get; init; }
 
     /// <summary>
@@ -227,6 +254,17 @@ public sealed class ProviderHandle : IDisposable
     /// </summary>
     /// <remarks>Settable rather than init-only: the owner attaches it after the handle is built.</remarks>
     public Action? OnSessionExpired { get; set; }
+
+    /// <summary>
+    /// Invoked with a session secret the provider has just rotated and cannot persist itself.
+    /// </summary>
+    /// <remarks>
+    /// A protocol that rotates its refresh token on every use (OneDrive does) invalidates the stored
+    /// copy the first time it is used. The provider owns the secret in memory, the owner owns the
+    /// vault, so the new value is handed back through this callback instead of being written to disk
+    /// by the provider. The argument is a secret: it must be saved, never logged.
+    /// </remarks>
+    public Action<string>? OnSessionRenewed { get; set; }
 
     private readonly List<IDisposable> _owned = new();
 

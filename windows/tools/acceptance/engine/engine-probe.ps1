@@ -44,7 +44,7 @@ if ([string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
 # Identity is pinned: a probe of "whatever DLL happens to be there" would prove nothing.
 $ExpectedGplSha256 = '6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9'
 $ExpectedGplBytes = 120989696
-$ExpectedLgplSha256 = '20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a'
+$ExpectedLgplSha256 = 'a3f901d6b5bae54a4b5b87cd9d9d973fd3af079aa70a61851560c30e74722a68'
 $ExpectedLgplBytes = 3327274
 
 New-Item -ItemType Directory -Force -Path $EvidenceDirectory | Out-Null

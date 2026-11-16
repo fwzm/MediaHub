@@ -2,6 +2,7 @@ using MediaHub.Domain;
 using MediaHub.App.Services;
 using MediaHub.Net;
 using MediaHub.Net.Security;
+using MediaHub.Player;
 using MediaHub.Storage;
 
 namespace MediaHub.App;
@@ -25,15 +26,20 @@ public sealed class AppServices : IDisposable
         // Saved playlists are local user data: no credentials, no network, no UI thread needed.
         Playlists = new PlaylistStore();
         LocalLibrary = new LocalLibraryService(Settings);
-        PlayerHost = new PlayerHostService(Settings, Log);
+        // The engine writes its own cache files; this owns the directory so settings can show and
+        // clear it without reaching into mpv.
+        DiskCache = new PlayerCacheStore();
+        PlayerHost = new PlayerHostService(Settings, Log, DiskCache);
+        ApplyDiskCacheCapacity();
 
         // The vault is the only component that can decrypt stored passwords and session tokens. It is
         // created here so nothing else has a reason to reach for DPAPI directly.
         Vault = new DpapiCredentialStore();
         Servers = new ServerManager(Settings, Log, Vault);
         Search = new SearchService(Servers, Log);
-        Playback = new PlaybackCoordinator(Servers, Log, PlaybackHistory);
+        Playback = new PlaybackCoordinator(Servers, Log, PlaybackHistory, Settings);
         Queue = new PlaybackQueue();
+        Update = new UpdateService(Settings, Log);
     }
 
     public LogService Log { get; }
@@ -41,10 +47,14 @@ public sealed class AppServices : IDisposable
     public PlaybackHistoryStore PlaybackHistory { get; }
     public LocalLibraryService LocalLibrary { get; }
     public PlayerHostService PlayerHost { get; }
+    public PlayerCacheStore DiskCache { get; }
     public ICredentialStore Vault { get; }
     public ServerManager Servers { get; }
     public SearchService Search { get; }
     public PlaybackCoordinator Playback { get; }
+
+    /// <summary>Checks the configured source, verifies the package, and hands the swap to update.ps1.</summary>
+    public UpdateService Update { get; }
 
     /// <summary>Temporary queue produced by opening or dropping several files at once.</summary>
     public PlaybackQueue Queue { get; }
@@ -62,6 +72,32 @@ public sealed class AppServices : IDisposable
     public void InitializeArtwork(Microsoft.UI.Dispatching.DispatcherQueue dispatcher)
         => Images ??= new ImageCache(Log, dispatcher);
 
+    /// <summary>Trims the engine cache directory to the configured budget (called at startup).</summary>
+    public void ApplyDiskCacheCapacity()
+    {
+        var s = Settings.Current;
+        if (!s.DiskCacheEnabled)
+        {
+            DiskCache.Clear();
+            return;
+        }
+        DiskCache.EnforceCapacity(s.DiskCacheCapacityMB * 1024L * 1024L);
+    }
+
+    /// <summary>
+    /// Applies the end-of-playback policy: either empty the directory or keep it within the budget.
+    /// </summary>
+    public void ApplyDiskCachePolicy()
+    {
+        var s = Settings.Current;
+        if (!s.DiskCacheEnabled || s.ClearDiskCacheOnPlaybackEnd)
+        {
+            DiskCache.Clear();
+            return;
+        }
+        DiskCache.EnforceCapacity(s.DiskCacheCapacityMB * 1024L * 1024L);
+    }
+
     /// <summary>
     /// Releases everything owned by the process, in dependency order.
     /// </summary>
@@ -74,6 +110,7 @@ public sealed class AppServices : IDisposable
     {
         try { await Playback.DisposeAsync(); } catch { }
         try { PlayerHost.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { }
+        try { ApplyDiskCachePolicy(); } catch { }
         try { Servers.Dispose(); } catch { }
     }
 
@@ -85,5 +122,6 @@ public sealed class AppServices : IDisposable
         PlayerHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
         LocalLibrary.Dispose();
         PlaybackHistory.Dispose();
+        Update.Dispose();
     }
 }

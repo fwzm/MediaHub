@@ -13,8 +13,21 @@ OUT=/d/deepseek_test/MediaHub_Win/windows/engine/lgpl
 BK=/d/mh-servers/lgpl-build/backup-ucrt64
 mkdir -p "$BK" "$OUT"
 
-echo "=== package hashes (SBOM input) ==="
-( cd "$CACHE" && sha256sum *.pkg.tar.zst ) | tee "$OUT/msys2-package-hashes.txt"
+echo "=== package hashes (SBOM input / version lock) ==="
+# The cache is the version lock: every archive below is pinned by name (which carries the exact
+# package version) and by sha256. The first run records it; every later run verifies it and refuses
+# to continue if the feed has moved a package, so a build can never silently follow MSYS2's rolling
+# repository. Regenerating the lock is a deliberate act - delete the file, re-download, re-run.
+if [ -f "$OUT/msys2-package-hashes.txt" ]; then
+  echo "verifying $CACHE against the pinned hashes in msys2-package-hashes.txt"
+  ( cd "$CACHE" && sha256sum -c "$OUT/msys2-package-hashes.txt" ) || {
+    echo "FATAL: cached MSYS2 packages no longer match the pinned versions/hashes." >&2
+    echo "       Refusing to build from a different feed. Delete $OUT/msys2-package-hashes.txt to re-pin deliberately." >&2
+    exit 4
+  }
+else
+  ( cd "$CACHE" && sha256sum *.pkg.tar.zst ) | tee "$OUT/msys2-package-hashes.txt"
+fi
 
 echo "=== back up gcc-14 runtime DLLs that newer packages would overwrite ==="
 for f in libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll; do

@@ -2,72 +2,137 @@
 <Page
     x:Class="MediaHub.App.Views.LocalLibraryPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="{StaticResource MediaHubGlassPageBrush}">
 
-  <Grid Padding="28,20,28,20" RowSpacing="14">
+  <Grid x:Name="RootGrid" Padding="36,28,36,24" RowSpacing="16">
+    <VisualStateManager.VisualStateGroups>
+      <VisualStateGroup x:Name="WindowWidthStates">
+        <VisualState x:Name="Wide">
+          <VisualState.StateTriggers>
+            <AdaptiveTrigger MinWindowWidth="900" />
+          </VisualState.StateTriggers>
+        </VisualState>
+        <VisualState x:Name="Narrow">
+          <VisualState.StateTriggers>
+            <AdaptiveTrigger MinWindowWidth="0" />
+          </VisualState.StateTriggers>
+          <VisualState.Setters>
+            <Setter Target="RootGrid.Padding" Value="20,16,20,16" />
+            <Setter Target="HeaderActions.(Grid.Row)" Value="1" />
+            <Setter Target="HeaderActions.(Grid.Column)" Value="0" />
+            <Setter Target="HeaderActions.(Grid.ColumnSpan)" Value="2" />
+            <Setter Target="HeaderActions.HorizontalAlignment" Value="Left" />
+          </VisualState.Setters>
+        </VisualState>
+      </VisualStateGroup>
+    </VisualStateManager.VisualStateGroups>
+
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
-    <StackPanel Grid.Row="0" Spacing="10">
-      <TextBlock Text="本地媒体" Style="{StaticResource MediaHubSectionHeader}" />
-      <StackPanel Orientation="Horizontal" Spacing="8">
-        <Button x:Name="AddFolderButton" Click="OnAddFolderClick">
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <FontIcon Glyph="&#xE8F4;" FontSize="14" />
-            <TextBlock Text="添加文件夹" />
-          </StackPanel>
-        </Button>
-        <Button x:Name="RescanButton" Click="OnRescanClick">
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <FontIcon Glyph="&#xE72C;" FontSize="14" />
-            <TextBlock Text="重新扫描" />
-          </StackPanel>
-        </Button>
-        <Button x:Name="OpenFileButton" Click="OnOpenFileClick">
+    <Grid Grid.Row="0" ColumnSpacing="16" RowSpacing="10">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+      <StackPanel Grid.Row="0" Grid.Column="0" Spacing="4" MaxWidth="720">
+        <TextBlock Text="本地媒体" Style="{StaticResource MediaHubPageTitle}" />
+        <TextBlock Text="扫描本机文件夹，或直接打开单个视频。播放进度会记录在“本地最近播放”。"
+                   Style="{StaticResource MediaHubCaption}" TextWrapping="Wrap" />
+      </StackPanel>
+      <StackPanel x:Name="HeaderActions" Grid.Row="0" Grid.Column="1"
+                  Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+        <ProgressRing x:Name="ScanRing" IsActive="False" Width="18" Height="18" />
+        <Button x:Name="OpenFileButton" Click="OnOpenFileClick" Style="{StaticResource MediaHubGhostButton}">
           <StackPanel Orientation="Horizontal" Spacing="8">
             <FontIcon Glyph="&#xE8E5;" FontSize="14" />
             <TextBlock Text="打开文件…" />
           </StackPanel>
         </Button>
-        <ProgressRing x:Name="ScanRing" IsActive="False" Width="20" Height="20" />
+        <Button x:Name="RescanButton" Click="OnRescanClick" Style="{StaticResource MediaHubGhostButton}">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <FontIcon Glyph="&#xE72C;" FontSize="14" />
+            <TextBlock Text="重新扫描" />
+          </StackPanel>
+        </Button>
+        <Button x:Name="AddFolderButton" Click="OnAddFolderClick" Style="{StaticResource MediaHubPrimaryButton}">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <FontIcon Glyph="&#xE8F4;" FontSize="13" />
+            <TextBlock Text="添加文件夹" />
+          </StackPanel>
+        </Button>
       </StackPanel>
+    </Grid>
 
-      <ItemsControl x:Name="FolderList">
-        <ItemsControl.ItemTemplate>
-          <DataTemplate>
-            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,1">
-              <FontIcon Glyph="&#xE8B7;" FontSize="12" />
-              <TextBlock Text="{Binding Path}" FontSize="12" TextTrimming="CharacterEllipsis" />
-              <TextBlock Text="{Binding Status}" FontSize="12" Foreground="{ThemeResource SystemFillColorCautionBrush}" />
-            </StackPanel>
-          </DataTemplate>
-        </ItemsControl.ItemTemplate>
-      </ItemsControl>
-    </StackPanel>
-
-    <InfoBar x:Name="EmptyHint" Grid.Row="1" Severity="Informational" IsOpen="False"
-             Title="尚未添加媒体文件夹"
-             Message="点击“添加文件夹”选择包含视频的目录，或直接“打开文件…”播放单个视频。" />
-
-    <GridView x:Name="MediaGrid" Grid.Row="2" SelectionMode="None" IsItemClickEnabled="True"
-              ItemClick="OnMediaItemClick">
-      <GridView.ItemTemplate>
+    <ItemsControl x:Name="FolderList" Grid.Row="1">
+      <ItemsControl.ItemTemplate>
         <DataTemplate>
-          <Border Width="240" Margin="0,0,12,12" CornerRadius="8" Padding="12"
-                  Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                  BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-            <StackPanel Spacing="6">
-              <FontIcon Glyph="&#xE714;" FontSize="26" HorizontalAlignment="Left" />
-              <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxLines="2" />
-              <TextBlock Text="{Binding SizeDisplay}" Style="{StaticResource MediaHubCaption}" />
-              <TextBlock Text="{Binding Path}" Style="{StaticResource MediaHubCaption}" TextTrimming="CharacterEllipsis" MaxLines="1" />
-            </StackPanel>
-          </Border>
+          <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,1">
+            <FontIcon Glyph="&#xE8B7;" FontSize="12" Foreground="{StaticResource MediaHubTextSecondaryBrush}" />
+            <TextBlock Text="{Binding Path}" FontSize="12" TextTrimming="CharacterEllipsis"
+                       Foreground="{StaticResource MediaHubTextSecondaryBrush}" />
+            <TextBlock Text="{Binding Status}" FontSize="12" Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+          </StackPanel>
         </DataTemplate>
-      </GridView.ItemTemplate>
-    </GridView>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+
+    <Grid Grid.Row="2">
+      <GridView x:Name="MediaGrid" SelectionMode="None" IsItemClickEnabled="True"
+                ItemClick="OnMediaItemClick"
+                ItemContainerStyle="{StaticResource MediaHubGridViewItem}">
+        <GridView.ItemContainerTransitions>
+          <TransitionCollection>
+            <AddDeleteThemeTransition />
+            <RepositionThemeTransition />
+          </TransitionCollection>
+        </GridView.ItemContainerTransitions>
+        <GridView.ItemTemplate>
+          <DataTemplate>
+            <Border Width="248" Margin="0,0,14,14" Padding="16" Style="{StaticResource MediaHubCard}">
+              <StackPanel Spacing="8">
+                <Border Width="30" Height="30" CornerRadius="10" HorizontalAlignment="Left"
+                        Background="{StaticResource MediaHubAccentSoftBrush}">
+                  <FontIcon Glyph="&#xE714;" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center"
+                            Foreground="{StaticResource MediaHubAccentBrush}" />
+                </Border>
+                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxLines="2" />
+                <TextBlock Text="{Binding SizeDisplay}" Style="{StaticResource MediaHubCaption}" />
+                <TextBlock Text="{Binding Path}" Style="{StaticResource MediaHubCaption}" TextTrimming="CharacterEllipsis" MaxLines="1" />
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </GridView.ItemTemplate>
+      </GridView>
+
+      <ItemsControl x:Name="SkeletonPanel" Visibility="Collapsed" IsHitTestVisible="False"
+                    ItemTemplate="{StaticResource MediaHubCardSkeleton}"
+                    ItemsPanel="{StaticResource MediaHubSkeletonCardPanel}" />
+
+      <StackPanel x:Name="EmptyPanel" HorizontalAlignment="Center" VerticalAlignment="Center"
+                  Spacing="14" Visibility="Collapsed" MaxWidth="470">
+        <Border Style="{StaticResource MediaHubStateIcon}">
+          <FontIcon Style="{StaticResource MediaHubStateGlyph}" Glyph="&#xE8B7;" />
+        </Border>
+        <StackPanel Spacing="6">
+          <TextBlock x:Name="StateTitle" Style="{StaticResource MediaHubStateTitle}"
+                     Text="还没有添加本地文件夹" />
+          <TextBlock x:Name="EmptyText" Style="{StaticResource MediaHubStateDescription}"
+                     Text="点击“添加文件夹”选择包含视频的目录，或直接“打开文件…”播放单个视频。" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+          <Button Content="添加文件夹" Click="OnAddFolderClick" Style="{StaticResource MediaHubPrimaryButton}" />
+          <Button Content="打开文件…" Click="OnOpenFileClick" Style="{StaticResource MediaHubGhostButton}" />
+        </StackPanel>
+      </StackPanel>
+    </Grid>
   </Grid>
 </Page>

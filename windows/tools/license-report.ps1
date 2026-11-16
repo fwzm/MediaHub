@@ -25,8 +25,17 @@
         the GPL rule.
 
     This is the statically verifiable part only. It does not build, does not publish, and says
-    nothing about the GPL-only native engine binary (see windows/docs/LGPL-COMPLIANCE.md and
+    nothing about the native engine binary (see windows/docs/LGPL-COMPLIANCE.md and
     windows/THIRD-PARTY-NOTICES.md).
+
+    ENGINE BASELINE (migrated 2026-11-12): $NativeEngine now describes the engine that actually
+    ships - the LGPL-2.1-or-later build in windows/engine/lgpl/dist (windows/docs/licensing/
+    LICENCE-DECISION.md §9) - and the GPL build in windows/native/libmpv is recorded as the
+    comparison fixture only. Until this migration `-Docs` was forbidden to re-run: the generator
+    still described the 2026-10-14 world in which the GPL baseline was shipped, so regenerating
+    would have written that superseded conclusion back over the hand-updated notices and SBOM.
+    Re-running is safe again as of this change; the gate
+    windows/tools/check-licence-surface.ps1 compares the generated text with the engine on disk.
 
 .PARAMETER RepoRoot
     Repository root. Default: two levels above this script (windows/tools -> windows -> repo).
@@ -94,30 +103,32 @@ $pathSeparator = [string][System.IO.Path]::DirectorySeparatorChar
 
 # ---------------------------------------------------------------------------------------------
 # Fixed facts about the native engine. These are not derived from NuGet: libmpv is a raw DLL that
-# ships next to the executable. The numbers are restated from windows/tools/fetch-libmpv.ps1
-# (lines 33-37 pin them) so the generated notices can never silently disagree with the script that
-# installs the binary, and are cross-checked against the DLL on disk on every run.
+# ships next to the executable. The identity below is the shipped LGPL build - 3,327,274 B, sha256
+# a3f901d6...74722a68 - restated from windows/engine/lgpl/dist/dist-hashes.txt (written by the
+# build) so the generated notices can never silently disagree with the binary that is installed, and
+# cross-checked against the DLL on disk on every run.
 # ---------------------------------------------------------------------------------------------
 $NativeEngine = [ordered]@{
     Component     = 'libmpv (mpv)'
-    Version       = 'v0.41.0-1154-gec38361c5'
-    License       = 'GPL-3.0-or-later'
-    Path          = 'windows/native/libmpv/libmpv-2.dll'
-    Bytes         = 120989696
-    Sha256        = '6a48faecb5ffe14a7be2f1fcf8b193bf3d51837cfb36e8d3527d82089de563d9'
-    PinScript     = 'windows/tools/fetch-libmpv.ps1:33-37'
-    Verdict       = 'windows/THIRD-PARTY-NOTICES.md:18 - GPL build; distributing it triggers GPL-3.0-or-later obligations'
-    LgplCandidate = 'windows/engine/lgpl/dist/libmpv-2.dll - 3,327,274 B, sha256 20035902597d...ee4a3c0a - built and verified, NOT shipped (windows/docs/licensing/W5-LGPL-BUILD.md:18-22)'
+    Version       = 'v0.41.0'
+    License       = 'LGPL-2.1-or-later'
+    Path          = 'windows/engine/lgpl/dist/libmpv-2.dll'
+    Bytes         = 3327274
+    Sha256        = 'a3f901d6b5bae54a4b5b87cd9d9d973fd3af079aa70a61851560c30e74722a68'
+    PinScript     = 'windows/engine/lgpl/dist/dist-hashes.txt'
+    Verdict       = 'windows/docs/licensing/LICENCE-DECISION.md §9 - LGPL-2.1-or-later build, shipped since 2026-11-12'
+    FfmpegVersion = '8.1.1 (LGPL build, --disable-gpl --enable-shared)'
+    GplBaseline   = 'windows/native/libmpv/libmpv-2.dll - 120,989,696 B, sha256 6a48faec...89de563d9, GPL-3.0-or-later - comparison fixture only (-p:LibMpvFlavour=gpl), NOT shipped'
     Compliance    = 'windows/docs/LGPL-COMPLIANCE.md'
 }
 
-# Fixed facts about the LGPL flavour's runtime dependency set. Those 33 DLLs are NOT shipped by the
-# default flavour (the GPL build above); they appear only when the app is built with
-# -p:LibMpvFlavour=lgpl. They are still real licence obligations of that flavour, so the generated
-# notices must enumerate them instead of leaving a blank page. The file list is read from the
-# artefact that windows/tools/collect-lgpl-runtime.ps1 writes; the licence of each file is the
-# packager's own declaration, transcribed verbatim from windows/engine/lgpl/component-licences.txt,
-# and the line it was read from is kept as evidence.
+# Fixed facts about the LGPL engine's runtime dependency set. Those 33 DLLs ARE shipped: since
+# 2026-11-12 the LGPL flavour is the default and the install package carries all of them next to the
+# core. They are licence obligations of the shipped product, so the generated notices enumerate them
+# instead of leaving a blank page. The file list is read from the artefact that
+# windows/tools/collect-lgpl-runtime.ps1 writes; the licence of each file is the packager's own
+# declaration, transcribed verbatim from windows/engine/lgpl/component-licences.txt, and the line it
+# was read from is kept as evidence.
 #
 # Every shipped file is mapped as of 2026-10-31 (W38). The 2026-10-14 table was short of five
 # packages: collect-licences.sh silently skipped a package whose "pacman -Si" returned nothing (so
@@ -561,13 +572,12 @@ if (Test-Path -LiteralPath $nativePath) {
     }
 }
 else {
-    $warnings.Add("$($NativeEngine.Path): not present on this machine (fetch it with windows/tools/fetch-libmpv.ps1)")
+    $warnings.Add("$($NativeEngine.Path): not present on this machine (build it with windows/engine/lgpl/build-mpv-lgpl.sh; see windows/docs/licensing/W5-LGPL-BUILD.md)")
 }
 
-# --- LGPL flavour runtime dependency set -----------------------------------------------------
-# Absent is not an error: the default flavour does not ship these DLLs. It only means the collector
-# has never run on this machine, which the notices state explicitly instead of pretending the
-# LGPL flavour carries no dependencies.
+# --- LGPL engine runtime dependency set ------------------------------------------------------
+# Since 2026-11-12 these DLLs are part of the shipped package, so an absent collection list is a real
+# gap rather than a property of an unused flavour. It is still reported as a fact, never guessed.
 $lgplRuntime = Resolve-LgplRuntimeDependencies -Root $RepoRoot
 
 # --- summary ---------------------------------------------------------------------------------
@@ -635,7 +645,7 @@ $jsonReport = [ordered]@{
         path         = $NativeEngine.Path
         pinnedSha256 = $NativeEngine.Sha256
         observed     = $nativeObserved
-        note         = 'GPL-only engine: NOT covered by this report policy; see windows/docs/LGPL-COMPLIANCE.md'
+        note         = 'Shipped engine (LGPL-2.1-or-later since 2026-11-12). Not a NuGet package, so the policy above does not arbitrate it; its obligations are recorded in windows/docs/LGPL-COMPLIANCE.md and enforced through the dynamic DLLs listed under lgplFlavour.'
     }
     lgplFlavour    = [ordered]@{
         present      = $lgplRuntime.Present
@@ -643,7 +653,7 @@ $jsonReport = [ordered]@{
         licenceTable = $LgplRuntimeInfo.LicenceTable
         count        = @($lgplRuntime.Rows).Count
         unrecorded   = @($lgplRuntime.Gaps)
-        note         = 'Runtime DLLs of the optional -p:LibMpvFlavour=lgpl build. The default flavour ships none of them; they are enumerated because switching flavour makes them part of the distributed package.'
+        note         = 'Runtime DLLs shipped next to the LGPL libmpv-2.dll since 2026-11-12. Enumerated because they are part of the distributed package and each carries its own licence.'
         dependencies = @($lgplRuntime.Rows | ForEach-Object {
             [ordered]@{
                 name      = $_.name
@@ -664,8 +674,8 @@ Write-Output "license-report  repo=$RepoRoot  branch=$gitBranch  head=$gitHead  
 Write-Output "license-report  dotnet=$dotnetVersion  pwsh=$pwshVersion  generated=$generatedAt"
 Write-Output "license-report  projects=$($summary.projects)  rows=$($summary.rows)  packages=$($summary.packages)"
 Write-Output "license-report  licence sources: expression=$($summary.expression) file=$($summary.licenseFile) licenseUrl=$($summary.licenseUrl) missing=$($summary.missing)"
-Write-Output "license-report  native-engine: $($NativeEngine.License) ($($NativeEngine.Path), observed=$($nativeObserved.bytes) B, matchesPin=$($nativeObserved.matchesPin)) - NOT covered by this check"
-Write-Output "license-report  lgpl-flavour dependencies: present=$($lgplRuntime.Present) count=$(@($lgplRuntime.Rows).Count) unrecorded=$(@($lgplRuntime.Gaps).Count) ($($LgplRuntimeInfo.CollectedList))"
+Write-Output "license-report  native-engine: $($NativeEngine.License) ($($NativeEngine.Path), observed=$($nativeObserved.bytes) B, matchesPin=$($nativeObserved.matchesPin)) - shipped engine, checked against its recorded digest"
+Write-Output "license-report  engine-runtime dependencies: present=$($lgplRuntime.Present) count=$(@($lgplRuntime.Rows).Count) unrecorded=$(@($lgplRuntime.Gaps).Count) ($($LgplRuntimeInfo.CollectedList))"
 foreach ($warning in $warnings) { Write-Output "license-report  WARN  $warning" }
 foreach ($violation in $violations) { Write-Output "license-report  DENY  $($violation.package)/$($violation.version): $($violation.reason) [$($violation.license)]" }
 Write-Output "license-report  violations=$($violations.Count)  warnings=$($warnings.Count)"
@@ -742,9 +752,9 @@ $markdown.Add('')
 $markdown.Add('## 5. Native engine (not a NuGet package, not covered above)')
 $markdown.Add('')
 $markdown.Add("$($NativeEngine.Component) $($NativeEngine.Version) ships as $($NativeEngine.Path) and is licensed **$($NativeEngine.License)**.")
-$markdown.Add("Pinned sha256 $($NativeEngine.Sha256) ($($NativeEngine.PinScript)); observed on this machine: $($nativeObserved.sha256) (match: $($nativeObserved.matchesPin)).")
-$markdown.Add("This is a release blocker, documented at $($NativeEngine.Verdict). LGPL candidate build (not shipped): $($NativeEngine.LgplCandidate).")
-$markdown.Add("Compliance checklist for the LGPL path: $($NativeEngine.Compliance).")
+$markdown.Add("Recorded sha256 $($NativeEngine.Sha256) ($($NativeEngine.PinScript)); observed on this machine: $($nativeObserved.sha256) (match: $($nativeObserved.matchesPin)).")
+$markdown.Add("Shipped since 2026-11-12, documented at $($NativeEngine.Verdict). The GPL build is now a comparison fixture only: $($NativeEngine.GplBaseline).")
+$markdown.Add("Distribution obligations for the LGPL engine: $($NativeEngine.Compliance).")
 $reportPath = Join-Path $OutDir 'license-report.md'
 Write-Utf8 -Path $reportPath -Text (($markdown -join [Environment]::NewLine) + [Environment]::NewLine)
 
@@ -770,7 +780,7 @@ if (-not $SkipDocs) {
     $notices.Add('')
     $notices.Add('- 覆盖：Windows 解决方案（`windows/MediaHub.Windows.sln`）**实际解析到的 NuGet 依赖图**，含传递依赖；每个包的许可取自包自身发布的 `.nuspec`（`<license type="expression">` / `<license type="file">` / 已弃用的 `<licenseUrl>`）。')
     $notices.Add('- 不覆盖：①发布产物中的完整文件清单（见 `windows/docs/licensing/SBOM.md`）；②随包分发的**非 NuGet 原生二进制**（见 §3）；③MSIX/安装器自带的运行库；④任何法律意见。')
-    $notices.Add('- 因此本文件只满足「可静态验证」的部分，**不构成发布就绪结论**，也不解除 §3 的 GPL 阻塞。')
+    $notices.Add('- 因此本文件只满足「可静态验证」的部分，**不构成发布就绪结论**；发布状态（签名、干净机安装等未完成项）见 `windows/docs/licensing/PACKAGING.md`。')
     $notices.Add('')
     $notices.Add('## 1. 运行时 / 随包分发的 NuGet 依赖')
     $notices.Add('')
@@ -796,31 +806,33 @@ if (-not $SkipDocs) {
     $notices.Add('')
     $notices.Add('| 组件 | 版本 | 许可 | 随包方式 | 事实来源 |')
     $notices.Add('| --- | --- | --- | --- | --- |')
-    $notices.Add("| $($NativeEngine.Component) | $($NativeEngine.Version) | **$($NativeEngine.License)** | $($NativeEngine.Path)（$('{0:N0}' -f $NativeEngine.Bytes) 字节，安装时强制校验 sha256） | $($NativeEngine.PinScript) |")
-    $notices.Add('| FFmpeg (libav*) | N-127521-g2ec8998c3 | **GPL-3.0-or-later**（随该 libmpv 构建） | 静态链接进 libmpv-2.dll | `windows/THIRD-PARTY-NOTICES.md:11` |')
-    $notices.Add('| rubberband / libdvdnav / libdvdread | 随 libmpv 构建 | **GPL-2.0** | 静态链接进 libmpv-2.dll | `windows/THIRD-PARTY-NOTICES.md:12` |')
-    $notices.Add('| libplacebo / libass / libcurl 等 | 随 libmpv 构建 | LGPL-2.1-or-later / ISC 等 | 静态链接进 libmpv-2.dll | `windows/THIRD-PARTY-NOTICES.md:13`；逐组件清单见 `windows/engine/lgpl/component-licences.txt` |')
+    $notices.Add("| $($NativeEngine.Component) | $($NativeEngine.Version)（LGPL 构建） | **$($NativeEngine.License)** | $($NativeEngine.Path)（$('{0:N0}' -f $NativeEngine.Bytes) 字节）+ 33 个依赖 DLL，随包分发，安装时强制校验 sha256 | $($NativeEngine.PinScript) |")
+    $notices.Add("| FFmpeg (libav*) | $($NativeEngine.FfmpegVersion) | **LGPL-2.1-or-later**（动态链接） | ``avcodec-62`` / ``avformat-62`` / ``avfilter-11`` 等 7 个 DLL 与 core 同目录 | ``windows/engine/lgpl/build-ffmpeg-lgpl.sh``（``--disable-gpl --enable-shared``） |")
+    $notices.Add('| libmpv (mpv) — GPL 基线（对比夹具） | v0.41.0-1154-gec38361c5 | **GPL-3.0-or-later** | windows/native/libmpv/libmpv-2.dll（120,989,696 字节），仅 `-p:LibMpvFlavour=gpl` 时使用，**不随包分发** | windows/tools/fetch-libmpv.ps1:33-37 |')
+    $notices.Add('| FFmpeg — GPL 基线（对比夹具） | N-127521-g2ec8998c3 | **GPL-3.0-or-later** | 静态链接进上面那份 GPL libmpv | `windows/THIRD-PARTY-NOTICES.md:11` |')
+    $notices.Add('| libplacebo / libass / 26 个 UCRT64 依赖 | 随 LGPL 引擎 | LGPL-2.1-or-later / ISC / Apache-2.0 等 | 与 core 同目录，逐组件清单见 §3.3 | `windows/engine/lgpl/component-licences.txt` |')
     $notices.Add('| .NET 10 运行时（自包含发布时） | 10.0 | MIT | 随发布产物 | `windows/THIRD-PARTY-NOTICES.md:7` |')
     $notices.Add('')
     $notices.Add('### 3.1 libmpv 的版本来源')
     $notices.Add('')
-    $notices.Add('- 具体版本：**v0.41.0-1154-gec38361c5**（内嵌 FFmpeg N-127521-g2ec8998c3），来自 shinchiro/mpv-winbuild-cmake 的 release `20261014`，资产 `mpv-dev-x86_64-20261014-git-ec38361c56.7z`。')
-    $notices.Add('- 获取方式：`windows/tools/fetch-libmpv.ps1` 下载并按两个固定 SHA-256（归档 + 解包后的 DLL）校验后才安装；DLL 不入库（`.gitignore:35-36`）。')
+    $notices.Add("- 随包分发的 core：**$($NativeEngine.Version)**（LGPL 构建，FFmpeg $($NativeEngine.FfmpegVersion) 动态链接），构建脚本 ``windows/engine/lgpl/build-mpv-lgpl.sh``（meson ``-Dgpl=false -Dlua=disabled``），构建记录 ``windows/docs/licensing/W5-LGPL-BUILD.md``。")
+    $notices.Add('- 构建工具链为 MSYS2 UCRT64，包版本锁在 `windows/engine/lgpl/msys2-package-hashes.txt`；33 个依赖 DLL 由 `windows/tools/collect-lgpl-runtime.ps1` 枚举。')
     $notices.Add("- 本次运行实测：文件存在=$($nativeObserved.present)，字节=$($nativeObserved.bytes)，sha256=$($nativeObserved.sha256)，与固定值一致=$($nativeObserved.matchesPin)。")
+    $notices.Add('- GPL 基线（对比夹具，不随包分发）：v0.41.0-1154-gec38361c5（内嵌 FFmpeg N-127521-g2ec8998c3），来自 shinchiro/mpv-winbuild-cmake 的 release `20261014`，由 `windows/tools/fetch-libmpv.ps1` 下载并校验；详见 `windows/THIRD-PARTY-NOTICES.md:16-63`。')
     $notices.Add('')
-    $notices.Add('### 3.2 许可结论（与既有记录一致，未改变）')
+    $notices.Add('### 3.2 许可结论')
     $notices.Add('')
-    $notices.Add('- 当前 `windows/native/libmpv/libmpv-2.dll` 是 **GPL 构建**（`gpl` 出现在引擎自报的 enabled-features 里），按 GPL-3.0-or-later 分发；以当前产物对外发布即触发 GPL 义务。详见 `windows/THIRD-PARTY-NOTICES.md:16-63`。')
-    $notices.Add("- LGPL 候选构建已存在但**尚未切换**：$($NativeEngine.LgplCandidate)。")
-    $notices.Add('- 切换到 LGPL 构建后必须履行的义务、可替换 DLL 的要求与分发前 checklist：`windows/docs/LGPL-COMPLIANCE.md`。')
+    $notices.Add("- **随包分发的是 LGPL 构建**：``$($NativeEngine.Path)``（$('{0:N0}' -f $NativeEngine.Bytes) B，sha256 $($NativeEngine.Sha256)，``$($NativeEngine.Version)``，enabled-features 不含 ``gpl``），FFmpeg 动态链接，33 个依赖 DLL 与 core 同目录。判定与证据见 $($NativeEngine.Verdict)；构建记录见 ``windows/docs/licensing/W5-LGPL-BUILD.md:18-22``。")
+    $notices.Add("- 旧的 GPL 构建现仅作对比夹具（``-p:LibMpvFlavour=gpl``），不随包分发：$($NativeEngine.GplBaseline)。")
+    $notices.Add("- LGPL 引擎需履行的义务、可替换 DLL 的要求与分发前 checklist：$($NativeEngine.Compliance)。")
     $notices.Add('')
-    $notices.Add('### 3.3 LGPL flavour 额外带入的运行时依赖（默认 flavour 不分发它们）')
+    $notices.Add('### 3.3 LGPL 引擎运行时依赖（自 2026-11-12 起随默认产物分发）')
     $notices.Add('')
     if (-not $lgplRuntime.Present) {
-        $notices.Add('- 本机没有 ' + [char]96 + $LgplRuntimeInfo.CollectedList + [char]96 + '：还没跑过 windows/tools/collect-lgpl-runtime.ps1，因此无法枚举 LGPL flavour 的依赖。以默认 flavour 分发时这不算缺口；一旦要发布 LGPL flavour，必须先跑一次收集脚本。')
+        $notices.Add('- 本机没有 ' + [char]96 + $LgplRuntimeInfo.CollectedList + [char]96 + '：还没跑过 windows/tools/collect-lgpl-runtime.ps1，因此无法枚举随包的依赖 DLL。这现在是**真实缺口**（默认产物就是 LGPL 引擎），发布前必须跑一次收集脚本。')
     }
     else {
-        $notices.Add('默认 flavour（-p:LibMpvFlavour=gpl）只带 ' + [char]96 + $NativeEngine.Path + [char]96 + '。下表是 **LGPL flavour 额外带入的**依赖，清单来自 ' + [char]96 + $LgplRuntimeInfo.CollectedList + [char]96 + '（由 windows/tools/collect-lgpl-runtime.ps1 生成），许可转录自 ' + [char]96 + $LgplRuntimeInfo.LicenceTable + [char]96 + '。它们不随当前默认产物分发，但切到 LGPL flavour 就随包。')
+        $notices.Add('默认产物带 ' + [char]96 + $NativeEngine.Path + [char]96 + ' + ' + [char]96 + 'mpv.exe' + [char]96 + ' + 33 个依赖 DLL。下表是这批依赖，清单来自 ' + [char]96 + $LgplRuntimeInfo.CollectedList + [char]96 + '（由 windows/tools/collect-lgpl-runtime.ps1 生成），许可转录自 ' + [char]96 + $LgplRuntimeInfo.LicenceTable + [char]96 + '。')
         $notices.Add('')
         $notices.Add('| 文件 | 组件 | 许可 | 证据 |')
         $notices.Add('| --- | --- | --- | --- |')
@@ -828,9 +840,9 @@ if (-not $SkipDocs) {
             $notices.Add('| ' + [char]96 + $row.name + [char]96 + ' | ' + $row.component + ' | ' + $row.license + ' | ' + $row.evidence + ' |')
         }
         $notices.Add('')
-        $notices.Add('- 合计 **' + @($lgplRuntime.Rows).Count + '** 个 DLL，总字节 ' + ('{0:N0}' -f (@($lgplRuntime.Rows | ForEach-Object { [int64]$_.bytes } | Measure-Object -Sum).Sum)) + '。其中 libiconv-2.dll（GPL-3.0-or-later）、liblcms2-2.dll（MIT AND GPL-3.0-or-later）、libfreetype-6.dll（GPL-2.0-or-later OR FTL）、libgcc_s_seh-1.dll 与 libstdc++-6.dll（GPL-3.0-or-later WITH GCC-exception-3.1）携带 GPL 家族条款 ⇒ **切到 LGPL flavour 并不等于零 GPL 义务**，与 ' + [char]96 + $LgplRuntimeInfo.BuildDoc + ':228-235' + [char]96 + ' 记录的残留义务一致。')
+        $notices.Add('- 合计 **' + @($lgplRuntime.Rows).Count + '** 个 DLL，总字节 ' + ('{0:N0}' -f (@($lgplRuntime.Rows | ForEach-Object { [int64]$_.bytes } | Measure-Object -Sum).Sum)) + '。其中 libiconv-2.dll（GPL-3.0-or-later）、liblcms2-2.dll（MIT AND GPL-3.0-or-later）、libfreetype-6.dll（GPL-2.0-or-later OR FTL）、libgcc_s_seh-1.dll 与 libstdc++-6.dll（GPL-3.0-or-later WITH GCC-exception-3.1）携带 GPL 家族条款 ⇒ **LGPL 引擎并不等于零 GPL 义务**，与 ' + [char]96 + $LgplRuntimeInfo.BuildDoc + ':228-235' + [char]96 + ' 记录的残留义务一致。')
         if (@($lgplRuntime.Gaps).Count -gt 0) {
-            $notices.Add('- 缺口：' + (@($lgplRuntime.Gaps) -join '、') + ' 在 ' + [char]96 + $LgplRuntimeInfo.LicenceTable + [char]96 + ' 里**没有声明行**，本表只能标「未记录」。发布 LGPL flavour 前必须补齐这些包的许可证据（pacman -Si 的 License 字段）。')
+            $notices.Add('- 缺口：' + (@($lgplRuntime.Gaps) -join '、') + ' 在 ' + [char]96 + $LgplRuntimeInfo.LicenceTable + [char]96 + ' 里**没有声明行**，本表只能标「未记录」。这些 DLL 随包分发，发布前必须补齐许可证据（pacman -Si 的 License 字段）。')
         }
         else {
             $notices.Add('- 本表 33 行都有 ' + [char]96 + $LgplRuntimeInfo.LicenceTable + [char]96 + ' 的声明行可引；没有任何一行靠猜测填写。')
@@ -871,7 +883,7 @@ if (-not $SkipDocs) {
     $notices.Add('')
     $notices.Add('脚本退出码：0 干净 / 1 未找到可检查的工程 / 2 缺 `project.assets.json`（先 restore）/ 3 策略违规。')
     $notices.Add('')
-    $notices.Add('相关文件：`windows/docs/sbom-windows.cdx.json`（CycloneDX 1.5）、`windows/docs/LGPL-COMPLIANCE.md`、`windows/THIRD-PARTY-NOTICES.md`（历史手工清单：引擎 GPL 判定与固定摘要）、`windows/tools/check-licence-surface.ps1`（核对本文件与 SBOM 是否跟得上仓库现状，退出码 0/1）、`windows/docs/licensing/`（W3/W5/W11b 记录）。')
+    $notices.Add('相关文件：`windows/docs/sbom-windows.cdx.json`（CycloneDX 1.5）、`windows/docs/LGPL-COMPLIANCE.md`、`windows/docs/licensing/LICENCE-DECISION.md` §9（LGPL 引擎判定与证据）、`windows/tools/check-licence-surface.ps1`（核对本文件与 SBOM 是否跟得上仓库现状，退出码 0/1）、`windows/docs/licensing/`（W3/W5/W11b 记录）。')
     Write-Utf8 -Path $NoticesPath -Text (($notices -join [Environment]::NewLine) + [Environment]::NewLine)
 }
 
@@ -891,14 +903,14 @@ if ($Sbom) {
         }
         $components.Add($component)
     }
-    $enginePurl = 'pkg:generic/libmpv@0.41.0-1154-gec38361c5'
+    $enginePurl = 'pkg:generic/libmpv@0.41.0'
     $engineComponent = [ordered]@{
         type      = 'library'
         'bom-ref' = $enginePurl
         name      = 'libmpv'
-        version   = '0.41.0-1154-gec38361c5'
+        version   = '0.41.0'
         purl      = $enginePurl
-        licenses  = @([ordered]@{ expression = 'GPL-3.0-or-later' })
+        licenses  = @([ordered]@{ expression = $NativeEngine.License })
     }
     if ($nativeObserved.sha256) {
         $engineComponent.hashes = @([ordered]@{ alg = 'SHA-256'; content = $nativeObserved.sha256 })
@@ -910,15 +922,15 @@ if ($Sbom) {
     $hex = -join ($hash[0..15] | ForEach-Object { $_.ToString('x2') })
     $serial = 'urn:uuid:' + $hex.Substring(0, 8) + '-' + $hex.Substring(8, 4) + '-' + $hex.Substring(12, 4) + '-' + $hex.Substring(16, 4) + '-' + $hex.Substring(20, 12)
 
-    # One line of SBOM metadata records whether the LGPL flavour's extra DLL set is
-    # present in this checkout. The LGPL candidate is a shipping *option*, not the
-    # default, so an absent dist/ is reported as a fact, never as a failure.
+    # One line of SBOM metadata records the shipped engine's runtime DLL set. Since 2026-11-12 the
+    # LGPL engine is the default and those DLLs ship with it, so an absent dist/ is reported as the
+    # packaging gap it now is.
     if ($lgplRuntime.Present) {
-        $lgplFlavourProperty = @($lgplRuntime.Rows).Count.ToString() + ' extra runtime DLLs under ' + $LgplRuntimeInfo.CollectedList +
-            ' (licences transcribed from ' + $LgplRuntimeInfo.LicenceTable + '; ' + @($lgplRuntime.Gaps).Count.ToString() + ' unrecorded); the default gpl flavour does not ship them'
+        $lgplFlavourProperty = @($lgplRuntime.Rows).Count.ToString() + ' runtime DLLs shipped next to ' + $LgplRuntimeInfo.CoreDll + ' under ' + $LgplRuntimeInfo.CollectedList +
+            ' (licences transcribed from ' + $LgplRuntimeInfo.LicenceTable + '; ' + @($lgplRuntime.Gaps).Count.ToString() + ' unrecorded)'
     }
     else {
-        $lgplFlavourProperty = 'not collected on this machine: ' + $LgplRuntimeInfo.CollectedList + ' is absent, so the lgpl flavour cannot be built from this checkout'
+        $lgplFlavourProperty = 'not collected on this machine: ' + $LgplRuntimeInfo.CollectedList + ' is absent, so the shipped engine''s runtime dependencies cannot be enumerated'
     }
 
     $bom = [ordered]@{
@@ -939,7 +951,7 @@ if ($Sbom) {
                 [ordered]@{ name = 'mediahub:source-revision'; value = "$gitBranch@$gitHead" },
                 [ordered]@{ name = 'mediahub:git-describe'; value = $gitDescribe },
                 [ordered]@{ name = 'mediahub:own-license'; value = 'undocumented - no LICENSE file in the repository (windows/docs/licensing/LICENCE-DECISION.md:180-190)' },
-                [ordered]@{ name = 'mediahub:engine-license-blocker'; value = 'libmpv-2.dll is a GPL-3.0-or-later build (windows/THIRD-PARTY-NOTICES.md:18); the LGPL candidate exists but is not shipped' },
+                [ordered]@{ name = 'mediahub:engine-licence'; value = 'libmpv-2.dll is an ' + $NativeEngine.License + ' build shipped since 2026-11-12 (windows/docs/licensing/LICENCE-DECISION.md §9); the GPL build is a comparison fixture only' },
                 [ordered]@{ name = 'mediahub:lgpl-flavour-dependencies'; value = $lgplFlavourProperty }
             )
         }

@@ -79,7 +79,7 @@ if ([string]::IsNullOrWhiteSpace($DistDirectory)) {
 
 # Identity of the artefact this script is allowed to complete. An LGPL build that silently became
 # something else (a relink, a different mpv tag) must not be blessed with a dependency bundle.
-$ExpectedCoreSha256 = '20035902597d6d04d044bada05f5ff9a0aec294f4847f4f39632cd08ee4a3c0a'
+$ExpectedCoreSha256 = 'a3f901d6b5bae54a4b5b87cd9d9d973fd3af079aa70a61851560c30e74722a68'
 $ExpectedCoreBytes = 3327274
 
 $systemRoot = $env:SystemRoot

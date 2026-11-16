@@ -12,7 +12,9 @@
 #   否则 queue: 行会落在 mark 之前，出现假 FAIL。
 param(
   [ValidateSet('emby', 'jellyfin')][string]$Server = 'emby',
-  [string]$Exe = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.exe'
+  [string]$Exe = 'D:\mh-out\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MediaHub.exe',
+  # 只跑 P0 前置（复位 + 来源播种）并回读 settings，用于验证 P0.6 的“只保留一条”修复。
+  [switch]$PreflightOnly
 )
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Continue'
@@ -39,9 +41,22 @@ if ($Server -eq 'emby') {
 $base = $cfg.base; $user = $cfg.user; $pass = $cfg.pass
 
 $checks = New-Object System.Collections.Generic.List[object]
+function Get-StepFile {
+  if (-not $script:stepFile) {
+    $dir = if ($env:MH_STEP_DIR) { $env:MH_STEP_DIR } else { $ev }
+    $script:stepFile = Join-Path $dir ('steps-' + $Server + '-u2.jsonl')
+  }
+  return $script:stepFile
+}
 function Check([string]$name, [bool]$pass, [string]$detail) {
   $checks.Add([pscustomobject]@{ name = $name; pass = $pass; detail = $detail })
+  Write-MhStepRecord -Combo ($Server + '/u2') -Name $name -Status $(if ($pass) { 'PASS' } else { 'FAIL' }) -Detail $detail -StepFile (Get-StepFile)
   Write-Host (('[{0}] {1} :: {2}' -f $(if ($pass) { 'PASS' } else { 'FAIL' }), $name, $detail))
+}
+# 需要真实前台（坐标点击 / 系统文件选择器 / 注入键鼠）的步骤：静默跑法下不执行、不判 FAIL。
+function Check-NeedsForeground([string]$name, [string]$detail) {
+  Write-MhStepRecord -Combo ($Server + '/u2') -Name $name -Status 'NEEDS-FOREGROUND' -Detail $detail -StepFile (Get-StepFile)
+  Write-Host (('[NEEDS-FOREGROUND] {0} :: {1}' -f $name, $detail))
 }
 
 # ---------------------------------------------------------------- 服务器 API
@@ -189,8 +204,11 @@ function Restart-App([switch]$ResetTrace) {
       $a = Start-MhApp -Exe $exe -ResetTrace:($ResetTrace -and $attempt -eq 1) -TimeoutSec 60
       if ($a) {
         Start-Sleep -Seconds 3
-        $h = Get-MhWindowHandle
-        if ($h) { Set-MhForeground -Hwnd $h | Out-Null }
+        # 静默跑法不需要激活窗口；UIA 直接对离屏窗口调用 pattern（见 MhUia.Set-MhForeground 的 quiet 分支）。
+        if ($env:MH_QUIET_UI -ne '1') {
+          $h = Get-MhWindowHandle
+          if ($h) { Set-MhForeground -Hwnd $h | Out-Null }
+        }
         return $a
       }
     } catch { Write-Host ('  restart attempt ' + $attempt + ' failed: ' + $_.Exception.Message) }
@@ -209,8 +227,11 @@ function Exit-Player([int]$timeoutSec = 12) {
     if (-not (Find-MhAppElement -AutomationId 'player.playpause' -IncludeOffscreen)) { return $true }
     Start-Sleep -Milliseconds 400
   }
-  [void](Send-MhKeys -Keys @('ESC'))
-  Start-Sleep -Milliseconds 900
+  # 静默跑法不注入键鼠：ESC 兜底若真的需要，只能标 NEEDS-FOREGROUND，不能把键发到别人窗口。
+  if ($env:MH_QUIET_UI -ne '1') {
+    [void](Send-MhKeys -Keys @('ESC'))
+    Start-Sleep -Milliseconds 900
+  }
   return (-not [bool](Find-MhAppElement -AutomationId 'player.playpause' -IncludeOffscreen))
 }
 # 从「媒体库」一级级点到剧集卡片，再进详情页点播放。任何一级找不到就退出去重来一次。
@@ -409,7 +430,7 @@ Check 'P0.5 AutoPlayNext 默认开启（前置条件）' (Get-AutoPlayNext) ('Au
 
 Stop-MhAppForced | Out-Null
 Start-Sleep -Milliseconds 800
-$kept = Keep-OnlyServer ($Server + ':*')
+$kept = Keep-OnlyServer ($Server + ':' + $serverId)
 & $seed $Server $base $user $pass $serverId $script:token $script:uid 2>&1 | ForEach-Object { Write-Host ('  seed: ' + $_) }
 $after = Get-Content $settings -Raw | ConvertFrom-Json
 $entry = @($after.Servers | Where-Object { $_.ServerId -eq ($Server + ':' + $serverId) })
@@ -417,12 +438,25 @@ Check 'P0.6 来源写入客户端配置（只保留被测服务器一条）' (($
 Stop-MhAppForced | Out-Null
 Start-Sleep -Milliseconds 800
 
+if ($PreflightOnly) {
+  $pf = Get-Content $settings -Raw | ConvertFrom-Json
+  $pfServers = @($pf.Servers)
+  Write-Host ('PREFLIGHT settings=' + $settings + ' servers=' + $pfServers.Count + ' ids=' + (($pfServers | ForEach-Object { $_.ServerId }) -join ','))
+  $pfPass = @($checks | Where-Object { $_.pass }).Count
+  $pfFail = @($checks | Where-Object { -not $_.pass }).Count
+  $checks | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $ev 'checks.json') -Encoding UTF8
+  Write-Host ('RESULT: ' + $pfPass + ' passed, ' + $pfFail + ' failed')
+  exit $(if ($pfFail -gt 0) { 1 } else { 0 })
+}
+
 # ---------------------------------------------------------------- P1 播放第一集
 Write-Host ''
 Write-Host ('=== P1 ' + $cfg.libName + ' → ' + $series.Name + ' → S01E01 播放 ===')
 $app = Restart-App -ResetTrace
 $hwnd = Get-MhWindowHandle
-Check 'P1.0 客户端启动且窗口在前台' (($null -ne $app) -and ($null -ne $hwnd)) ('pid=' + $app.pid)
+$uiaRoot = if ($hwnd) { Get-MhWindow } else { $null }
+$winInfo = if ($hwnd) { Get-MhWindowInfo } else { $null }
+Check 'P1.0 客户端启动且窗口可被 UIA 访问（静默运行：不抢前台、可后台驱动）' ([bool](($null -ne $app) -and ($null -ne $hwnd) -and ($null -ne $uiaRoot))) ('pid=' + $(if ($app) { $app.pid } else { 'n/a' }) + ' hwnd=' + $hwnd + ' visible=' + $(if ($winInfo) { $winInfo.visible } else { 'n/a' }) + ' foreground=' + $(if ($winInfo) { $winInfo.isForeground } else { 'n/a' }) + ' quiet=' + $env:MH_QUIET_UI)
 
 Set-LogMark
 $open1 = Open-EpisodePlay $epS01E01 $nameS01E01
