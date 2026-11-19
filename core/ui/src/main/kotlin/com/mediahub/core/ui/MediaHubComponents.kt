@@ -45,7 +45,7 @@ fun MediaHubSectionHeader(
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = menuSubtitleColor(MaterialTheme.colorScheme.background),
                 )
             }
         }
