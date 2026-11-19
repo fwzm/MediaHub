@@ -1580,3 +1580,43 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 
 ### exact-head CI 验收
 - 代码 head eb073088d7504924a37dcfaba1f028b6df87d5f3：windows-ci 44486463532（push）/ 44486549036（pull_request）= success；同 head Android CI 44486548899 = in_progress（CI_PENDING）（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+## 6.31 第二十六层口径：控制台输出必须命名自己的发现与运行阶段（W6-113ar）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| StdOut 中 Discovering、Discovered、Starting、Finished 四条阶段行各恰好 1 次，且每条都命名本套件 | ResultSummary/Output/StdOut | RED |
+| 四条阶段行按 Discovering < Discovered < Starting < Finished 的顺序出现 | ResultSummary/Output/StdOut | RED |
+| 缺失、重复、错套件、乱序任意一种都使整份报告 RED | ResultSummary/Output/StdOut | RED |
+| 台阶行记录 phaseLedger=<n>/4 ordered=<0|1> | ladder | 仅记录 |
+
+### 为什么前二十五层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 20 层 | 头部 name 的 user@machine 形状、runDeploymentRoot 派生 | StdOut 的阶段文本 |
+| 第 22/23 层 | 每行 ErrorInfo、RunInfos 与失败行的对应 | StdOut 的阶段文本 |
+| 第 24 层 | Output/StdOut 存在、非空、任意位置出现套件名 | 四条阶段行的存在、唯一、归属与顺序 |
+| 第 25 层 | TestRun/@name 与 Times/@creation 的秒级一致 | StdOut 的阶段文本 |
+| 全层 | — | Discovering / Discovered / Starting / Finished 阶段账本 |
+
+### 依据（EXECUTED）
+- 真实绿色语料 D:/mh-w6-r41/windows/artifacts/gate-corpus：新闸门 exit 0，两套件 phaseLedger=4/4 ordered=1，combined tests=2077，只有基线增长 warning。
+- 真实测试结果 D:/mh-w6-r41/windows/artifacts/test-results-r45：新闸门 exit 0，两套件 phaseLedger=4/4 ordered=1。
+- 五例矩阵：clean-green OLD=0 NEW=0；phase-missing / phase-duplicate / phase-out-of-order / phase-wrong-suite 均 OLD=0 NEW=1，且分别点名缺失阶段、重复阶段、顺序错误、错套件。
+
+### 数据源与规模
+- check-test-suite-baseline.ps1 126,138 → 129,275 B，2,202 → 2,250 行（+1,137 B，+48/-0 行），0 非 ASCII，sha256 c40b83b59c48e293ddca3cea9c40bb98abd7c6b1e767e99c3eb23d6791163c0a。
+- 台阶行：summaryOutput=<n> stdout=<n> nonBlank=<0|1> suiteNamed=<0|1>，随后 phaseLedger=<n>/4 ordered=<0|1>。
+
+### 负向对照
+- 五例矩阵全按预期；实现态 sha256 在对照前后一致，矩阵后 clean-green 复跑仍绿；旧层在四个变异上保持 PASS，证明新层不是旧层的重复。
+
+### 残留限制
+- 只读取四条 literal 阶段行；不要求 StdOut 的时间戳与 Times/@creation 精确对齐。
+- 依赖测试主机输出阶段的英文词；宿主版本改变阶段词表时，本层会 RED，需要同步更新阶段词表。
+- 不核对 Output/StdOut 与 RunInfos 的文本交叉引用；英文 UI 语料仍是前提，否则第 20 层列表词表判据先 RED。
+
+### exact-head CI 验收
+- 代码 head bad8b42a9210aa1d895f2ed84d86e1af3184639d：windows-ci 44491834447（push）success / 44491896251（pull_request）success；同 head Android CI 44491896189 = in_progress（CI_PENDING，17:07 取证）（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。

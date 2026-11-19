@@ -887,3 +887,46 @@
 
 ### 边界
 - 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。
+## Round 45（W6-113ar，2026-11-19）：控制台输出必须命名自己的发现与运行阶段
+
+### 切片动机
+- 第 24 层只要求 ResultSummary/Output/StdOut 的文本在任意位置出现本套件名；测试主机的 StdOut 同时是一份阶段账本：Discovering / Discovered / Starting / Finished 四行各出现一次，并各自带套件名。
+- 名字被复制、改写或拼接到别的输出时，阶段行仍可能缺失、重复、错套件或乱序，而计数、行 verdict、RunInfos 全部保持不变；前二十五层没有任何一层读这四条阶段行。
+- 本层只钉这四条阶段行的存在、唯一、归属与顺序；不改基线 JSON。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化）
+- 在既有 ResultSummary/Output/StdOut 检查之后，按 Discovering、Discovered、Starting、Finished 四个 literal marker 逐条匹配，marker 后允许横向空白，随后必须是本套件名。
+- 每条必须恰好匹配 1 次；四条位置必须严格递增；缺失、重复、错套件或乱序均 RED。
+- 读取沿用已有的 $summaryStdOutText；不新增 XML 读取路径。
+- 台阶行在 summaryOutput 行后追加 phaseLedger=<n>/4 ordered=<0|1>。
+- 头部文档与 SEMANTICS 各新增一条说明。
+
+### 负向对照（EXECUTED）
+- 同一套 1973+104 行英文语料，old=D:/mh-verify/r46/gate-prev.ps1（第 25 层，2,202 行，sha256 a075ac386e331f88c918c0c01824f49c56114ff5ca13b31d2203d0447ac18b20），new=本层。
+- clean-green OLD=0 NEW=0，new ladder 两套件均 phaseLedger=4/4 ordered=1。
+- phase-missing OLD=0 NEW=1，broken 点名 0 个 Finished 行。
+- phase-duplicate OLD=0 NEW=1，broken 点名 2 个 Starting 行。
+- phase-out-of-order OLD=0 NEW=1，broken 点名四条阶段行顺序错误。
+- phase-wrong-suite OLD=0 NEW=1，broken 点名 0 个 Starting 行命名本套件。
+- 实现态 sha256 在矩阵前后一致；对照结束后 clean-green 复跑仍 OLD=0 NEW=0。
+
+### 真实语料
+- gate-corpus（1973 windows + 104 webdav，英文 UI）：新闸门 exit 0；两套件台阶行均 phaseLedger=4/4 ordered=1；combined tests=2077；只有基线增长 warning（1973 > 1959）。
+- test-results-r45（本机 dotnet test 的真实 TRX）：新闸门 -ResultsDir ./artifacts/test-results-r45 exit 0；两套件均 phaseLedger=4/4 ordered=1；combined tests=2077。
+
+### 数据源与规模
+- windows/tools/check-test-suite-baseline.ps1 126,138 B / 2,202 行 → 129,275 B / 2,250 行（+1,137 B，+48/−0 行），0 个非 ASCII；sha256 c40b83b59c48e293ddca3cea9c40bb98abd7c6b1e767e99c3eb23d6791163c0a。
+- 双 shell 语法：pwsh 7.6.10 与 Windows PowerShell 5.1.26100.10003 均 errors=0。
+- git diff --stat：1 file changed / +48 insertions / 0 deletions；git diff --check 干净。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+- 提交 bad8b42a9210aa1d895f2ed84d86e1af3184639d（ci(windows): the console output must name its own phases (W6-113ar)），1 file changed / +48/-0，非 force push 到 feature/windows-w6-113ar-counter-arithmetic。
+- exact-head windows-ci：44491834447（push）success；44491896251（pull_request）success。
+- 同 head Android CI：44491896189（pull_request）in_progress（CI_PENDING，17:07 取证）（本提交只动 windows/tools，android/core/feature/app 子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+- Draft PR 140（base main，stacked 在 #139 第 25 层之上）；G7 恒 DO_NOT_MERGE。
+
+### 锁
+- run-id w6-113-round6-20261119，owner lead，8 把资源锁（3 remote-ref + 5 worktree），本轮结束 release-plan 释放。
+
+### 边界
+- 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。

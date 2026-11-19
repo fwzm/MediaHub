@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-19T16:33:00+08:00",
-  "updated_by": "lead-W6-113-r44",
+  "updated_at": "2026-11-19T17:10:00+08:00",
+  "updated_by": "lead-W6-113-r45",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -977,6 +977,28 @@
       "notes": "第 25 层收的是 header 的两个自述：TestRun/@name 的日期时间与 Times/@creation 必须描述同一个创建瞬间。前二十四层把 name 拆成 user/machine 并验证 deploymentRoot 派生、把 Times 拆成格式/顺序/窗口，但没有任何一层把这两个字段互相比较。基线 JSON 与 updater 未改，无迁移。",
       "next_action": "候选下一层：①ErrorInfo/StackTrace 文本与 RunInfo Text 的交叉引用；②RunInfos 多条/空块与 runDeploymentRoot 的边界；③Times/@creation|@queuing 与 ResultSummary 的窗口自洽；另列独立任务刷新基线（1973 vs 1959）。",
       "closed_at": "2026-11-19T16:33:00+08:00"
+    },
+    {
+      "id": "W6-113ar",
+      "title": "第二十六层：控制台输出必须命名自己的发现与运行阶段（ResultSummary/Output/StdOut phase ledger）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r45",
+      "branch": "feature/windows-w6-113ar-counter-arithmetic",
+      "evidence": [
+        "check-test-suite-baseline.ps1 126,138 -> 129,275 B (+48 lines, 2,250 lines, sha256 c40b83b59c48e293ddca3cea9c40bb98abd7c6b1e767e99c3eb23d6791163c0a, pure ASCII), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-26 invariant: ResultSummary/Output/StdOut carries exactly one Discovering, Discovered, Starting and Finished phase line, each naming this suite and in that order; missing, duplicate, wrong-suite and out-of-order are RED; the ladder records phaseLedger=<n>/4 ordered=<0|1>; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI): D:/mh-w6-r41/windows/artifacts/gate-corpus and artifacts/test-results-r45 both exit 0; both suites phaseLedger=4/4 ordered=1; combined tests=2077; growth warnings only (1973 > baseline 1959).",
+        "Negative controls: 5 cases at D:/mh-verify/r46; clean-green OLD=0 NEW=0 (phaseLedger=4/4 ordered=1); phase-missing, phase-duplicate, phase-out-of-order, phase-wrong-suite all OLD=0 NEW=1, each naming its own defect; implementation sha256 c40b83b5... unchanged across the matrix and clean-green re-run after the matrix still OLD=0 NEW=0.",
+        "Real test results: D:/mh-w6-r41/windows/artifacts/test-results-r45 gate -ResultsDir ./artifacts/test-results-r45 exit 0; MediaHub.Tests 1973 and MediaHub.WebDav.Tests 104 both phaseLedger=4/4 ordered=1; combined 2077.",
+        "Commit bad8b42a9210aa1d895f2ed84d86e1af3184639d (ci(windows): the console output must name its own phases (W6-113ar)), 1 file changed / +48 insertions / 0 deletions, non-force push to feature/windows-w6-113ar-counter-arithmetic; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44491834447 (push) = success and 44491896251 (pull_request) = success; the runs printed phaseLedger=4/4 ordered=1 for both suites.",
+        "Android CI 44491896189 = in_progress（CI_PENDING，17:07 取证） at the code head; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001.",
+        "Draft PR #140 (base main, stacked on #139) carries the layer text; G7 remains DO_NOT_MERGE. Baseline JSON and updater were not changed, so there is no migration."
+      ],
+      "notes": "第 26 层收的是 ResultSummary/Output/StdOut 的阶段账本：runner 的控制台记录必须分别出现 Discovering、Discovered、Starting、Finished 四行，每行命名本套件且严格按该顺序。前二十五层只检查 StdOut 存在、非空和任意位置出现套件名，这四条阶段行在脚本里引用计数为 0。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①ErrorInfo/StackTrace 文本与 RunInfo Text 的交叉引用；②RunInfos 多条/空块与 runDeploymentRoot 的边界；③Times/@creation|@queuing 与 ResultSummary 的窗口自洽；另列独立任务刷新基线（1973 vs 1959）。",
+      "closed_at": "2026-11-19T17:10:00+08:00"
     }
   ]
 }
