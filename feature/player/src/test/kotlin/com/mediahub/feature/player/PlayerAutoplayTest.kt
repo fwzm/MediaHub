@@ -51,6 +51,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -350,6 +351,155 @@ class PlayerAutoplayTest {
             assertEquals(1, engine.playCalls)
         } finally {
             vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+
+    // ---- #46 播放完成自动退出 ----
+
+    @Test
+    fun `a finished movie requests one automatic exit after the grace period`() = runTest(dispatcher) {
+        val engine = FakeEngine()
+        val items = mapOf(
+            "m1" to MediaItem(
+                serverId = "srv-1", id = "m1", type = MediaType.MOVIE,
+                title = "电影A", container = "mkv",
+            ),
+        )
+        val vm = viewModel(items, engine, library(), startItemId = "m1")
+        val exits = mutableListOf<Unit>()
+        val watcher = launch { vm.completionExit.collect { exits += it } }
+        try {
+            runCurrent()
+            engine.emitEvent(PlaybackEvent.Ended)
+            runCurrent()
+
+            assertTrue("宽限期内不应立刻退出", exits.isEmpty())
+
+            advanceTimeBy(PlaybackCompletionPolicy.AUTO_EXIT_GRACE_MS - 1)
+            runCurrent()
+            assertTrue("宽限期未满不应退出", exits.isEmpty())
+
+            advanceTimeBy(2)
+            runCurrent()
+            assertEquals("播完应请求一次自动退出", 1, exits.size)
+            assertEquals("自动退出不应换片", "m1", engine.playedSession?.itemId)
+            assertEquals("自动退出不应再次起播", 1, engine.playCalls)
+        } finally {
+            watcher.cancel()
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `the last episode of the last season requests an exit instead of freezing`() = runTest(dispatcher) {
+        val engine = FakeEngine()
+        val items = mapOf("s2e1" to episodeItem("s2e1", "s2", seasonNumber = 2, episodeNumber = 1))
+        val library = FakeLibrary(
+            seasons = listOf(season("s1", 1), season("s2", 2)),
+            episodes = mapOf(
+                "s1" to listOf(episodeRecord("s1e1", "s1", 1)),
+                "s2" to listOf(episodeRecord("s2e1", "s2", 1)),
+            ),
+        )
+        val vm = viewModel(items, engine, library, startItemId = "s2e1")
+        val exits = mutableListOf<Unit>()
+        val watcher = launch { vm.completionExit.collect { exits += it } }
+        try {
+            runCurrent()
+            engine.emitEvent(PlaybackEvent.Ended)
+            runCurrent()
+
+            assertEquals("s2e1", engine.playedSession?.itemId)
+            assertEquals(1, engine.playCalls)
+
+            advanceTimeBy(PlaybackCompletionPolicy.AUTO_EXIT_GRACE_MS + 1)
+            runCurrent()
+            assertEquals("末集播完应请求退出", 1, exits.size)
+        } finally {
+            watcher.cancel()
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `a continued episode never requests an exit`() = runTest(dispatcher) {
+        val engine = FakeEngine()
+        val vm = viewModel(twoEpisodeSeries(), engine, library())
+        val exits = mutableListOf<Unit>()
+        val watcher = launch { vm.completionExit.collect { exits += it } }
+        try {
+            runCurrent()
+            engine.emitEvent(PlaybackEvent.Ended)
+            runCurrent()
+            assertEquals("s1e2", engine.playedSession?.itemId)
+
+            advanceTimeBy(PlaybackCompletionPolicy.AUTO_EXIT_GRACE_MS + 1)
+            runCurrent()
+            assertTrue("已有续播时不得自动退出", exits.isEmpty())
+        } finally {
+            watcher.cancel()
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `repeated ended events request only one exit`() = runTest(dispatcher) {
+        val engine = FakeEngine()
+        val items = mapOf(
+            "m1" to MediaItem(
+                serverId = "srv-1", id = "m1", type = MediaType.MOVIE,
+                title = "电影A", container = "mkv",
+            ),
+        )
+        val vm = viewModel(items, engine, library(), startItemId = "m1")
+        val exits = mutableListOf<Unit>()
+        val watcher = launch { vm.completionExit.collect { exits += it } }
+        try {
+            runCurrent()
+            engine.emitEvent(PlaybackEvent.Ended)
+            engine.emitEvent(PlaybackEvent.Ended)
+            runCurrent()
+
+            advanceTimeBy(PlaybackCompletionPolicy.AUTO_EXIT_GRACE_MS + 1)
+            runCurrent()
+            assertEquals("重复 Ended 只退出一次", 1, exits.size)
+        } finally {
+            watcher.cancel()
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `stopping during the grace window suppresses the automatic exit`() = runTest(dispatcher) {
+        val engine = FakeEngine()
+        val items = mapOf(
+            "m1" to MediaItem(
+                serverId = "srv-1", id = "m1", type = MediaType.MOVIE,
+                title = "电影A", container = "mkv",
+            ),
+        )
+        val vm = viewModel(items, engine, library(), startItemId = "m1")
+        val exits = mutableListOf<Unit>()
+        val watcher = launch { vm.completionExit.collect { exits += it } }
+        try {
+            runCurrent()
+            engine.emitEvent(PlaybackEvent.Ended)
+            runCurrent()
+            advanceTimeBy(500)
+
+            vm.stopAndFlush()
+            runCurrent()
+            advanceTimeBy(PlaybackCompletionPolicy.AUTO_EXIT_GRACE_MS + 1)
+            runCurrent()
+            assertTrue("已退出后不得再发退出请求", exits.isEmpty())
+        } finally {
+            watcher.cancel()
             runCurrent()
         }
     }
