@@ -119,10 +119,10 @@ class PlayerRouteVisualEffectsTest {
                     subtitle = mapOf(0 to TrackSelection(0, 0, 777L), 1 to TrackSelection(0, 1, 777L)),
                     snapshotToken = 777L))
         }
-        composeRule.onNodeWithText(context.getString(R.string.player_audio_tracks)).performClick()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.player_audio_tracks_description)).performClick()
         composeRule.onNodeWithText("audio-second", substring = true).performClick()
         composeRule.runOnIdle { assertEquals(TrackSelection(0, 1, 777L), engine.audioSelection) }
-        composeRule.onNodeWithText(context.getString(R.string.player_subtitles)).performClick()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.player_subtitles_description)).performClick()
         composeRule.onNodeWithText("text-second", substring = true).performClick()
         composeRule.runOnIdle { assertEquals(TrackSelection(0, 1, 777L), engine.subtitleSelection) }
         assertEquals(1, engine.playCount)
@@ -314,7 +314,7 @@ class PlayerRouteVisualEffectsTest {
         composeRule.waitUntil(10_000) { vm.resolveState.value is ResolveState.Ready && vm.subtitleCenter.value.discovered.size == 1 }
         val engine = checkNotNull(lastEngine)
         val initialSource = vm.playbackSource.value
-        composeRule.onNodeWithText(context.getString(R.string.player_info_entry)).performClick()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.player_info_entry_description)).performClick()
         composeRule.onNodeWithText(context.getString(R.string.player_info_expert_toggle)).assertIsDisplayed()
         captureVisualEvidence(composeRule, "a-four-player-information")
         composeRule.onNode(isToggleable()).performClick()
@@ -323,7 +323,7 @@ class PlayerRouteVisualEffectsTest {
         composeRule.onNode(isToggleable()).performClick()
         composeRule.waitUntil(10_000) { vm.preferences.value?.professionalInfo?.expertMode == true }
         dismissProductSheet()
-        composeRule.onNodeWithText(context.getString(R.string.player_subtitles)).performClick()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.player_subtitles_description)).performClick()
         composeRule.onNodeWithText(candidate.name).performScrollToWithClock(composeRule).performClick()
         composeRule.waitUntil(10_000) { vm.subtitleCenter.value.selectedExternalId == candidate.id && memory.entry?.subtitleId == candidate.id }
         assertEquals(candidate.id, memory.entry!!.subtitleId)
