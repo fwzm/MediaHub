@@ -278,6 +278,10 @@
 #     empty RunInfos block beside the one that carries the items, or a RunInfos
 #     block outside ResultSummary -> red: the block is one container, and its
 #     placement is part of the summary's shape even when its item list is intact.
+#   a RunInfo item outside the one ResultSummary/RunInfos block, or a Deployment
+#     element outside TestSettings -> red: the block counts only see containers,
+#     so a parked item or a second deployment record keeps every count and its
+#     own text intact while the report assigns the run to two owners.
 #   a ResultSummary/Output/StdOut block that is missing, duplicated, blank, or
 #     whose text does not name the suite the file belongs to -> red: the console
 #     output is the host's record of what it ran, and a summary whose output block
@@ -360,6 +364,10 @@
 #     (a bare name, another timestamp precision, a tab or a wider gap, or
 #     trailing text leaves the item list and the exact name intact when only
 #     the name is compared).
+#   a RunInfo item outside the one ResultSummary/RunInfos block, or a Deployment
+#     element outside TestSettings -> red (the block counts above only count the
+#     containers, so a parked item still leaves every count and its own Text
+#     intact while the report has two owners for the same run).
 
 #   the row at position N of Results does not name the test that position N of
 #     TestEntries declares -> red. The two sections are emitted from one ordered
@@ -1781,6 +1789,37 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): the ResultSummary/RunInfos block layout in $($e.file) does not describe this suite's failure log while the total was $total - the items and the container that owns them are two halves of the same summary, so a file whose items were split across wrappers, whose empty second wrapper was left behind, or whose wrapper was moved outside ResultSummary can keep every count, every ErrorInfo and every RunInfo identical. broken: $($runInfoLayoutProblems -join ', '). A TRX whose failure log has no single owner was reassembled; regenerate it from a clean test run."
   }
 
+  # The block counts above count the ResultSummary/RunInfos containers, not the
+  # RunInfo items themselves or a Deployment record outside the settings block.
+  # A RunInfo parked under Deployment or nested in another RunInfo, or a second
+  # Deployment under ResultSummary, leaves every block and header count intact
+  # while the report names two owners for one failure log or one run.
+  $runInfoOwnerCount = 0
+  foreach ($runInfoBlock in @($runInfoLayoutBlocks)) {
+    foreach ($runInfoItem in @($runInfoBlock.ChildNodes)) {
+      if ([string]$runInfoItem.LocalName -eq 'RunInfo') { $runInfoOwnerCount++ }
+    }
+  }
+  $runInfoAnywhere = @($xml.SelectNodes('//*[local-name()="RunInfo"]')).Count
+  $deploymentOwnerCount = 0
+  foreach ($headerChild in @($xml.TestRun.ChildNodes)) {
+    if ([string]$headerChild.LocalName -ne 'TestSettings') { continue }
+    foreach ($headerSub in @($headerChild.ChildNodes)) {
+      if ([string]$headerSub.LocalName -eq 'Deployment') { $deploymentOwnerCount++ }
+    }
+  }
+  $deploymentAnywhere = @($xml.SelectNodes('//*[local-name()="Deployment"]')).Count
+  $ownerProblems = @()
+  if ($runInfoAnywhere -ne $runInfoOwnerCount) {
+    $ownerProblems += "the file carries $runInfoAnywhere RunInfo item(s) but only $runInfoOwnerCount directly under the ResultSummary/RunInfos block"
+  }
+  if ($deploymentAnywhere -ne $deploymentOwnerCount) {
+    $ownerProblems += "the file carries $deploymentAnywhere Deployment element(s) but only $deploymentOwnerCount directly under TestSettings"
+  }
+  if ($ownerProblems.Count -gt 0) {
+    throw "$($e.suite): the failure-log/deployment ownership in $($e.file) does not describe this suite while the total was $total - the block counts above only count the RunInfos containers and the settings-side Deployment, so an item parked under Deployment, an item nested in another item, or a second Deployment under ResultSummary can keep every count, every name and every Text identical while the report assigns the run to two owners. broken: $($ownerProblems -join ', '). A TRX whose failure log or deployment record has a second owner was reassembled; regenerate it from a clean test run."
+  }
+
   # ResultSummary/Output/StdOut is the test host's own console text: what the
   # runner printed while it discovered and executed this suite. No check above
   # reads it, so a summary whose output was dropped, duplicated, blanked or
@@ -2062,6 +2101,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): failureEvidence=$evidenceRows failed=$failedWithEvidence/$failedRows passed=$passedWithEvidence/$passedRows blankMessages=$blankFailureText duplicates=$duplicateEvidence"
   "$($e.suite): runInfos=$runInfoRows failedRows=$failedRows matched=$($matchedFailedNames.Count) passed=$runInfoForPassed unmatched=$runInfoUnmatched duplicateMatches=$runInfoDuplicates outside=$runInfoOutside blankText=$runInfoBlank wrongMachine=$runInfoWrongMachine badOutcome=$runInfoBadOutcome"
   "$($e.suite): runInfoBlocks=$runInfoLayoutCount strayRunInfoBlocks=$([int]$runInfoLayoutAnywhere - [int]$runInfoLayoutCount)"
+  "$($e.suite): runInfoBoundary=$runInfoOwnerCount/$runInfoAnywhere deploymentBoundary=$deploymentOwnerCount/$deploymentAnywhere"
   "$($e.suite): runInfoTexts=$runInfoTextSingular/$(@($runInfoNodes).Count)"
   "$($e.suite): runInfoTextExact=$runInfoTextExact/$failedRows"
   "$($e.suite): runInfoTextCanonical=$runInfoTextCanonical/$(@($runInfoNodes).Count)"
