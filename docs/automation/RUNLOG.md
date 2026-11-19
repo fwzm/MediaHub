@@ -1257,3 +1257,36 @@
 
 - 本轮 run-id `w6-113-round14-20261119`，8 把锁（3 remote-ref + 5 worktree，含 worktree:D:/mh-w6-r41）；收尾 `release-plan`，status count=0。
 - Windows GUI `GUI_UNVERIFIED`、真机与两机 `NOT_RUN`；W6-P1-E2E 仍 `BLOCKED`（维护者 ≥1200 s 空闲窗口 + 真机）；PR #39 正文归档改写 `NOT_RUN`；Draft，`G7 = DO_NOT_MERGE`。
+## Round 54（W6-113ba，2026-11-19）：phase 账本必须读自己的时钟
+
+### 动机
+
+- 第 24 层加入的 StdOut phase 账本只检查四个阶段行（`Discovering` → `Discovered` → `Starting` → `Finished`）的名称、出现次数与相对位置，**完全不读每行前的 `[xUnit.net hh:mm:ss.ff]` 时钟**。
+- 因此把 `Discovered` 行从 `00:00:00.29` 改成 `00:00:00.03`，或把 `Finished` 从 `00:00:07.88` 改成 `00:00:01.00`，甚至把最后一条 RunInfo 的 canonical Text 时钟从 `4.44` 改成 `9.99`（其 `@timestamp` 仍在具名行的时间窗内），phase 名称/位置、RunInfo 名称/机器/outcome/行窗/时序都能继续通过。
+- 真实绿色语料与真实失败 TRX 的四个 phase 时钟均递增（gate-corpus windows `.11→.29→.46→7.88`、webdav `.12→.17→.19→4.69`；真实失败 TRX `.12→.28→.42→7.33`，最后 RunInfo Text `2.12 < Finished 7.33`），所以“phase 时钟必须递增且 `Finished` 不早于最后一条失败日志时钟”是真实 xUnit 输出本来满足、而现有闸门看不见的结构事实。
+
+### 变更
+
+- `windows/tools/check-test-suite-baseline.ps1`：在原 `$summaryPhaseOrdered` 计算之后、原 phase throw 之前插入独立的 phase clock 账本，不修改原 `phaseLedger` 检查。
+- 每个 phase 行用锚定正则匹配 `[xUnit.net hh:mm:ss.ff]` 与阶段名/套件名，`[TimeSpan]::TryParseExact($phaseClockText, 'hh\:mm\:ss\.ff', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.TimeSpanStyles]::None, [ref]$phaseClock)` 解析；要求每个 phase 恰好一行、四个时钟非递减、`Finished` 不早于最后一条 RunInfo 的 canonical Text 时钟（`$previousRunInfoClock` 来自第 33 层 chronology 块）。
+- 新增 `$summaryPhaseClockProblems`、`$summaryPhaseClockFound`、`$summaryPhaseClockOrdered`、`$summaryFinishedAfterRunInfo`、`$summaryPhaseFinishedClock`、`$summaryPhaseFinishedClockText`、`$previousPhaseClock`/`$previousPhaseClockText`；throw 前缀 `the StdOut phase clock ledger in ...`，消息携带 `(phaseClock=N/4 ordered=0|1 finishedAfterRunInfo=0|1)`。
+- 台阶行新增 `phaseClock=<found>/4 ordered=<0|1> finishedAfterRunInfo=<0|1>`；原有 `phaseLedger=<found>/4 ordered=<0|1>` 保持原样。文件 2,532 → 2,613 行、149,280 → 154,515 B，`git diff --stat` 1 file changed / 81 insertions / 0 deletions，sha256 `e960021ab6dd3ec410457ad0ace976a301b0a4e883ee914ae455cac250634d01`；纯 ASCII、无 BOM/CRLF；pwsh 7.6.10 与 Windows PowerShell 5.1.26100.10003 双 PARSE-OK。
+
+### 验证（EXECUTED）
+
+- 真实绿色语料 `D:/mh-w6-r41/windows/artifacts/gate-corpus`（1973 windows + 104 webdav）：exit 0；两套件 `phaseLedger=4/4 ordered=1`、`phaseClock=4/4 ordered=1 finishedAfterRunInfo=1`；`MediaHub.Tests total=1973 baseline=1973`、`MediaHub.WebDav.Tests total=104 baseline=104`、`combined tests=2077`；仅既有虚拟列表 warning；日志 `D:/mh-verify/r55/gate-real-r55.log`（sha256 `6d43a2d1458abbf61aa8c0f5137d23a97bbd8e04b6443153949c270be0b2b676`）。
+- 真实失败 TRX `D:/mh-verify/r53/real-trx`（total=767，failed=6）+ baseline `D:/mh-verify/r43/cases/fail-with-runinfo/baseline.json`：exit 1；`phaseClock=4/4 ordered=1 finishedAfterRunInfo=1`、`runInfoChronology=6/6`、`runInfoRowClock=6/6`；唯一 throw 为末尾 `MediaHub.Tests: 6 test(s) failed`，新闸门未误杀真实失败日志；日志 `D:/mh-verify/r55/gate-real-failing-r55.log`（sha256 `eabcc06c74630c8206682ff331f6c0aed45d1ba1e5e7ba840ccdddd5eeacfe38`）。
+- 旧/新负向矩阵（old=第 33 层 `D:/mh-verify/r55/gate-prev.ps1`，new=第 34 层当前文件）：7 例结果 `D:/mh-verify/r55/results-all.json`；`oldAllZero=true`、`cleanOk=true`、`redOk=true`。clean-real、clean-two-errors、clean-green、fail-with-runinfo 四例均 OLD=0/NEW=0（new `phaseClock=4/4 ordered=1 finishedAfterRunInfo=1`）；bad-phase-order OLD=0/NEW=1（phase `4/4 ordered=0`、problems `backwards=1`）；bad-finished-before-runinfo 与 bad-runinfo-clock-after-finished 均 OLD=0/NEW=1（phase `4/4 ordered=1`、`finishedAfterRunInfo=0`、problems `finished=1`）。
+- 三个 bad 夹具从 `D:/mh-verify/r54/cases/clean-two-errors` 构造，每处替换恰好 1 次：`bad-phase-order` 把 `[xUnit.net 00:00:00.29]   Discovered:` 改为 `.03`；`bad-finished-before-runinfo` 把 `[xUnit.net 00:00:07.88]   Finished:` 改为 `.00:01.00`；`bad-runinfo-clock-after-finished` 把最后 RunInfo `[xUnit.net 00:00:04.44]` 改为 `9.99`。
+- 矩阵首版失败与修复：fail-with-runinfo 误用不存在的 r54 baseline，改用 r43 的 baseline；PowerShell 错误文本换行导致 `goes backwards after ` 尾部空格匹配失败，runner 改用 `\s+` 匹配后通过。
+
+### 提交与 exact-head CI
+
+- 代码提交：`1984beb76d4c382783af6b85ec805fa46623af0d`（`ci(windows): the phase ledger must read its own clocks (W6-113ba)`），分支 `feature/windows-w6-113ba-phase-clock`，1 file +81/−0；非 force push 成功。
+- 代码 head windows-ci `44606617816`（push）`success`、`44606767243`（pull_request）`success`；同 head Android CI `44606767401` `success`。
+- Draft PR #168（base main，stacked on #164，G7 `DO_NOT_MERGE`）。
+
+### 锁与边界
+
+- 本轮 run-id `w6-113-round15-20261119`，8 把锁（3 remote-ref + 5 worktree，含 worktree:D:/mh-w6-r41）；收尾 `release-plan`，status count=0。
+- Windows GUI `GUI_UNVERIFIED`、真机与两机 `NOT_RUN`；W6-P1-E2E 仍 `BLOCKED`（维护者 ≥1200 s 空闲窗口 + 真机）；PR #39 正文归档改写 `NOT_RUN`；Draft，`G7 = DO_NOT_MERGE`。

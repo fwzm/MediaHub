@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-20T03:22:00+08:00",
-  "updated_by": "lead-W6-113-r53",
+  "updated_at": "2026-11-20T04:54:00+08:00",
+  "updated_by": "lead-W6-113-r54",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -1161,6 +1161,24 @@
       "notes": "第三十三层：ResultSummary/RunInfos 的每个 RunInfo 的 canonical Text clock 与 timestamp 必须按列表顺序非递减；第 32 层只校验单条 timestamp 的行窗，交换两条或改一条 Text 时钟仍可通过。",
       "next_action": "候选下一层：①RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用（真实语料中 ErrorInfo/StackTrace 不含测试名，当前不可行）；②Deployment/runDeploymentRoot 复核（已由 header 检查覆盖）；③继续侦察下一独立结构不变量。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
       "closed_at": "2026-11-20T03:22:00+08:00"
+    },
+    {
+      "id": "W6-113ba",
+      "title": "第三十四层：phase 账本必须读自己的时钟（W6-113ba）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r54",
+      "branch": "feature/windows-w6-113ba-phase-clock",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,532 -> 2,613 lines, 149,280 -> 154,515 B, 81 insertions / 0 deletions, sha256 e960021ab6dd3ec410457ad0ace976a301b0a4e883ee914ae455cac250634d01; old sha256 dec21a2517990e2061aee403916e59ed6817b3e1590356d2337e50756df99096; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 and phaseLedger=4/4 ordered=1; combined tests=2077; log D:/mh-verify/r55/gate-real-r55.log.",
+        "Real failing TRX (total=767, failed=6): phaseClock=4/4 ordered=1 finishedAfterRunInfo=1, runInfoChronology=6/6, runInfoRowClock=6/6; only final 6 test(s) failed; log D:/mh-verify/r55/gate-real-failing-r55.log.",
+        "Negative matrix 7 cases: clean-real, clean-two-errors, clean-green, fail-with-runinfo OLD=0/NEW=0; bad-phase-order, bad-finished-before-runinfo, bad-runinfo-clock-after-finished OLD=0/NEW=1 with exactly one new phase-clock problem; oldAllZero=true; results D:/mh-verify/r55/results-all.json.",
+        "Code commit 1984beb76d4c382783af6b85ec805fa46623af0d (ci(windows): the phase ledger must read its own clocks (W6-113ba)); windows-ci 44606617816 (push) success, 44606767243 (pull_request) success; Android CI 44606767401 success."
+      ],
+      "notes": "第三十四层：StdOut 四个 phase 行必须各带 canonical [xUnit.net hh:mm:ss.ff] 时钟、非递减，且 Finished 不早于最后一条 RunInfo canonical Text 时钟；第 24 层只读名称/位置，第 29-33 层只处理 RunInfo。",
+      "next_action": "候选第 35 层：继续从真实失败语料侦察可证的结构不变量；候选① RunInfo 与 ErrorInfo/StackTrace 文本交叉引用已因真实语料不含测试名而不可行，候选② Deployment/runDeploymentRoot 已由 header 检查覆盖。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T04:54:00+08:00"
     }
   ]
 }

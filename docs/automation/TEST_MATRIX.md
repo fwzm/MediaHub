@@ -1885,3 +1885,17 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 **为什么前三十二层看不见**：第 29/30 层只比较 Text 名字，第 31 层只校验元素归属，第 32 层只校验单条 timestamp 的行窗；都没有读取相邻 `RunInfo` 的 Text 时钟与 timestamp 是否保持运行顺序。
 
 **边界**：真机 / 两机 / Windows GUI `NOT_RUN`；`W6-P1-E2E` 仍 `BLOCKED`；Draft，`G7 = DO_NOT_MERGE`。
+## 6.40 第三十四层口径：phase 账本必须读自己的时钟（W6-113ba）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | `ResultSummary/Output/StdOut` 中 `Discovering`、`Discovered`、`Starting`、`Finished` 四个阶段行各自的 canonical `[xUnit.net hh:mm:ss.ff]` 时钟 | 第 24 层 phase 检查只读名称、出现次数与相对位置，不读时钟 |
+| 通过条件 | 每个 phase 恰好一行 canonical 时钟；四个时钟按阶段顺序非递减；`Finished` 不早于最后一条 RunInfo 的 canonical Text 时钟 | 真实绿色 gate-corpus 两套件均 `phaseClock=4/4 ordered=1 finishedAfterRunInfo=1`；真实失败 TRX 亦然 |
+| 台阶行 | `phaseClock=<found>/4 ordered=0或1 finishedAfterRunInfo=0或1`，原 `phaseLedger` 行保持不变 | 绿色两套件 `4/4`、`ordered=1`、`finishedAfterRunInfo=1` |
+| 负向对照 | 改 `Discovered` 时钟为 `.03`、改 `Finished` 为 `1.00`、把最后 RunInfo Text 改为 `9.99` → RED；clean-real、clean-two-errors、clean-green、fail-with-runinfo → GREEN | `D:/mh-verify/r55/results-all.json`：`oldAllZero=true`，三个 bad 例均 OLD=0/NEW=1 且恰好 1 条新问题；四个 clean 例均 OLD=0/NEW=0 |
+| 规模 | `check-test-suite-baseline.ps1` 2,532→2,613 行、149,280→154,515 B、+81/−0、sha256 `e960021a...` | 双 shell PARSE-OK；纯 ASCII、无 BOM/CRLF |
+| 残留限制 | 只校验 phase 账本与最后一条 RunInfo 的时钟互证，不证明 TRX 由 xUnit 真实产生；不覆盖 phase 时钟与 `TestRun/Times` 的绝对时间换算 | 仍需真实失败语料与真实 CI 作为下游证据 |
+
+**为什么前三十三层看不见**：第 24 层 phase 检查只读名称/位置，第 29–33 层只处理 RunInfo 的名称、归属、行窗与相邻顺序；没有任何一层读取 phase 行自身的时钟，也没有把 `Finished` 与最后一条失败日志的时钟钉在一起。
+
+**边界**：真机 / 两机 / Windows GUI `NOT_RUN`；`W6-P1-E2E` 仍 `BLOCKED`；Draft，`G7 = DO_NOT_MERGE`。
