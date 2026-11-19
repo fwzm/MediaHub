@@ -3,6 +3,7 @@ package com.mediahub.feature.library
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -259,80 +261,85 @@ fun LibraryContent(
                         )
                     }
                 } else {
-                    val gridState = rememberLazyGridState()
-                    val currentContent by rememberUpdatedState(s)
-                    LaunchedEffect(Unit) {
-                        snapshotFlow {
-                            val c = currentContent
-                            val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return@snapshotFlow false
-                            val totalItems = gridState.layoutInfo.totalItemsCount
-                            lastVisible >= totalItems - 3 && c.hasMore && !c.isLoadingMore && c.loadMoreError == null
-                        }.distinctUntilChanged().collect { shouldLoad ->
-                            if (shouldLoad) onLoadMore()
-                        }
-                    }
-
-                    LazyVerticalGrid(
-                        state = gridState,
-                        columns = GridCells.Fixed(3),
+                    BoxWithConstraints(
                         modifier = Modifier.fillMaxSize().padding(padding),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        if (s.canGoUp) {
-                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
-                                TextButton(onClick = onGoToParent, modifier = Modifier.fillMaxWidth()) {
-                                    Text("⬆ 返回上级")
-                                }
+                        val columns = LibraryGridPolicy.columnsForWidth(maxWidth.value.toInt())
+                        val gridState = rememberLazyGridState()
+                        val currentContent by rememberUpdatedState(s)
+                        LaunchedEffect(Unit) {
+                            snapshotFlow {
+                                val c = currentContent
+                                val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return@snapshotFlow false
+                                val totalItems = gridState.layoutInfo.totalItemsCount
+                                lastVisible >= totalItems - 3 && c.hasMore && !c.isLoadingMore && c.loadMoreError == null
+                            }.distinctUntilChanged().collect { shouldLoad ->
+                                if (shouldLoad) onLoadMore()
                             }
                         }
-                        if (shouldPreserveProviderOrder(s.sort)) {
-                            gridItems(
-                                s.items,
-                                key = { it.id },
-                                span = { item ->
-                                    if (item.type == MediaType.FOLDER) {
-                                        androidx.compose.foundation.lazy.grid.GridItemSpan(3)
-                                    } else {
-                                        androidx.compose.foundation.lazy.grid.GridItemSpan(1)
+
+                        LazyVerticalGrid(
+                            state = gridState,
+                            columns = GridCells.Fixed(columns),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            if (s.canGoUp) {
+                                item(span = { GridItemSpan(columns) }) {
+                                    TextButton(onClick = onGoToParent, modifier = Modifier.fillMaxWidth()) {
+                                        Text("⬆ 返回上级")
                                     }
-                                },
-                            ) { item ->
-                                if (item.type == MediaType.FOLDER) {
-                                    FolderRow(item = item, onClick = { onOpenFolder(item) })
-                                } else {
+                                }
+                            }
+                            if (shouldPreserveProviderOrder(s.sort)) {
+                                gridItems(
+                                    s.items,
+                                    key = { it.id },
+                                    span = { item ->
+                                        if (item.type == MediaType.FOLDER) {
+                                            GridItemSpan(columns)
+                                        } else {
+                                            GridItemSpan(1)
+                                        }
+                                    },
+                                ) { item ->
+                                    if (item.type == MediaType.FOLDER) {
+                                        FolderRow(item = item, onClick = { onOpenFolder(item) })
+                                    } else {
+                                        PosterCell(item = item, onClick = { onLibraryItemClick(item, onOpenFolder, onOpenItem) })
+                                    }
+                                }
+                            } else {
+                                val folders = s.items.filter { it.type == MediaType.FOLDER }
+                                val mediaItems = s.items.filter { it.type != MediaType.FOLDER }
+                                folders.forEach { folder ->
+                                    item(span = { GridItemSpan(columns) }) {
+                                        FolderRow(item = folder, onClick = { onOpenFolder(folder) })
+                                    }
+                                }
+                                gridItems(mediaItems, key = { it.id }) { item ->
                                     PosterCell(item = item, onClick = { onLibraryItemClick(item, onOpenFolder, onOpenItem) })
                                 }
                             }
-                        } else {
-                            val folders = s.items.filter { it.type == MediaType.FOLDER }
-                            val mediaItems = s.items.filter { it.type != MediaType.FOLDER }
-                            folders.forEach { folder ->
-                                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
-                                    FolderRow(item = folder, onClick = { onOpenFolder(folder) })
+                            if (s.isLoadingMore) {
+                                item(span = { GridItemSpan(columns) }) {
+                                    Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator(strokeWidth = 2.dp)
+                                    }
                                 }
                             }
-                            gridItems(mediaItems, key = { it.id }) { item ->
-                                PosterCell(item = item, onClick = { onLibraryItemClick(item, onOpenFolder, onOpenItem) })
-                            }
-                        }
-                        if (s.isLoadingMore) {
-                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
-                                Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                                    CircularProgressIndicator(strokeWidth = 2.dp)
+                            if (s.loadMoreError != null) {
+                                item(span = { GridItemSpan(columns) }) {
+                                    MediaHubStatus(
+                                        title = "更多内容载入失败",
+                                        message = s.loadMoreError,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        retryLabel = "加载更多",
+                                        onRetry = onLoadMore,
+                                    )
                                 }
-                            }
-                        }
-                        if (s.loadMoreError != null) {
-                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
-                                MediaHubStatus(
-                                    title = "更多内容载入失败",
-                                    message = s.loadMoreError,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    retryLabel = "加载更多",
-                                    onRetry = onLoadMore,
-                                )
                             }
                         }
                     }
