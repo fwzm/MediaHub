@@ -967,24 +967,6 @@ private fun PlayerControls(
                         .navigationBarsPadding()
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(
-                            text = formatSpeed(downloadSpeedBps),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        batteryLevel?.let {
-                            Text(
-                                text = stringResource(R.string.player_battery, it),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
                     // SEEK-A：进度条已抽成生产组件 PlayerSeekBar（本文件下方定义）。
                     // 抽取的唯一目的是让「拖动 → 提交」契约能被**真实组件**测试验证，
                     // 而不是在测试里复制一份 Slider 只验证框架行为（PR #53 的教训）。
@@ -1052,6 +1034,14 @@ private fun PlayerControls(
                             }
                         }
                     }
+                    // P10：速度/电量不再两端对齐占满整行，而是合并成右下角次级信息簇。
+                    PlayerSecondaryInfo(
+                        speedText = formatSpeed(downloadSpeedBps),
+                        batteryText = batteryLevel?.let { stringResource(R.string.player_battery, it) },
+                        modifier = Modifier
+                            .align(Alignment.End)
+                            .padding(top = 2.dp),
+                    )
                 }
             }
         }
