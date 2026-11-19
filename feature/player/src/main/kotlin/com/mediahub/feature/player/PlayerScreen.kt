@@ -554,6 +554,10 @@ fun PlayerRoute(
                         downloadSpeedBps = downloadSpeedBps,
                         batteryLevel = batteryLevel,
                         diagnostics = diagnostics,
+                        showDiagnostics = PlayerDiagnosticsVisibility.shouldShow(
+                            showPlayerInfoOverlay = preferences.showPlayerInfoOverlay,
+                            hasDiagnostics = diagnostics?.engine != null,
+                        ),
                         visualRequest = visualState.renderRequest,
                         visualSpectrum = spectrumProvider,
                         visualClock = sharedVisualClock,
@@ -814,6 +818,7 @@ private fun PlayerControls(
     downloadSpeedBps: Long,
     batteryLevel: Int?,
     diagnostics: PlaybackDiagnosticsState?,
+    showDiagnostics: Boolean,
     visualRequest: PlayerVisualRenderRequest,
     visualSpectrum: SpectrumProvider,
     visualClock: FlowGlowClock,
@@ -906,9 +911,11 @@ private fun PlayerControls(
                     )
                 }
             }
-            // 播放诊断（U4-E）：引擎/协议/首包/缓冲
-            if (diagnostics != null && diagnostics!!.engine != null) {
-                val d = diagnostics!!
+            // 播放诊断（U4-E）：引擎/协议/首包/缓冲。
+            // 审计 P5：默认隐藏，只有设置里打开「播放器显示媒体信息浮层」才出现。
+            val diagnosticsState = diagnostics
+            if (showDiagnostics && diagnosticsState != null && diagnosticsState.engine != null) {
+                val d = diagnosticsState
                 val diagParts = buildList {
                     d.engine?.let { add(it) }
                     d.mediaProtocol?.let { add(it) }
