@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mediahub.core.ui.menuSubtitleColor
 import com.mediahub.model.MediaServer
 import com.mediahub.provider.api.AuthSessionErrorKind
 import com.mediahub.provider.api.AuthSessionState
@@ -62,7 +63,7 @@ fun ServerCard(
                     Text(
                         text = server.baseUrl.ifBlank { "本地存储" },
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = menuSubtitleColor(MaterialTheme.colorScheme.surfaceContainerLow),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )

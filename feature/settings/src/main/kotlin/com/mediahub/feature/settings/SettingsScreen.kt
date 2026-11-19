@@ -53,6 +53,7 @@ import androidx.lifecycle.compose.currentStateAsState
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import com.mediahub.core.ui.R as CoreUiR
+import com.mediahub.core.ui.menuSubtitleColor
 import com.mediahub.core.ui.effects.PlayerVisualSettingsPanel
 import com.mediahub.core.ui.effects.PlayerVisualPalette
 import com.mediahub.core.ui.effects.PlayerVisualPresetMapper
@@ -449,7 +450,7 @@ internal fun VisualEffectsSettingsEntry(
                 Text(
                     summary,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = menuSubtitleColor(MaterialTheme.colorScheme.surfaceContainerHigh),
                 )
             }
             Text("›", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleLarge)
