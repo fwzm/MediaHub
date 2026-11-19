@@ -278,6 +278,7 @@ class PlayerInfoPanelStateTest {
                 engineKind = EngineKind.MEDIA3,
                 uiState = fullUiState().copy(
                     observed = PlaybackObservedInfo(
+                        container = "matroska",
                         videoCodec = "avc1.640028",
                         audioCodec = "mp4a.40.2",
                         videoBitrateBps = 12_000_000L,
@@ -293,6 +294,7 @@ class PlayerInfoPanelStateTest {
         )
         val runtime = sections[2].rows.associateBy { it.label }
         assertEquals("c2.qti.avc.decoder", runtime.getValue(labels.actualDecoder).value)
+        assertEquals("matroska", runtime.getValue(labels.actualContainer).value)
         assertEquals("mediacodec", runtime.getValue(labels.hwdecBackend).value)
         assertEquals("SurfaceView", runtime.getValue(labels.actualRenderer).value)
         assertEquals("avc1.640028", runtime.getValue(labels.actualVideoCodec).value)
@@ -320,6 +322,7 @@ class PlayerInfoPanelStateTest {
         )
         val runtime = sections[2].rows.associateBy { it.label }
         assertEquals(labels.unknown, runtime.getValue(labels.actualDecoder).value)
+        assertEquals(labels.unknown, runtime.getValue(labels.actualContainer).value)
         assertEquals(labels.unknown, runtime.getValue(labels.hwdecBackend).value)
         assertEquals(labels.unknown, runtime.getValue(labels.actualRenderer).value)
         assertEquals(labels.unknown, runtime.getValue(labels.actualVideoCodec).value)

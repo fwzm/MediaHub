@@ -84,8 +84,19 @@ class PlaybackObservedInfoTest {
     }
 
     @Test
+    fun `container only records non blank evidence and keeps prior value`() {
+        val observed = PlaybackObservedInfo().withContainer("matroska")
+        assertEquals("matroska", observed.container)
+
+        val kept = observed.withContainer("   ").withContainer(null)
+        assertEquals("matroska", kept.container)
+        assertNull(PlaybackObservedInfo().withContainer("").container)
+    }
+
+    @Test
     fun `default ui state reports nothing observed`() {
         val observed = PlaybackUiState().observed
+        assertNull(observed.container)
         assertNull(observed.videoCodec)
         assertNull(observed.audioCodec)
         assertNull(observed.videoBitrateBps)

@@ -226,7 +226,9 @@ class PlaybackEngine(
                 _uiState.update {
                     it.copy(
                         audioFormatMime = format.sampleMimeType,
-                        observed = it.observed.withAudioFormat(format.codecs, format.sampleMimeType, format.bitrate),
+                        observed = it.observed
+                            .withAudioFormat(format.codecs, format.sampleMimeType, format.bitrate)
+                            .withContainer(format.containerMimeType),
                     )
                 }
             }
@@ -238,12 +240,14 @@ class PlaybackEngine(
             ) {
                 _uiState.update {
                     it.copy(
-                        observed = it.observed.withVideoFormat(
-                            codecs = format.codecs,
-                            mimeType = format.sampleMimeType,
-                            bitrate = format.bitrate,
-                            frameRate = format.frameRate,
-                        ),
+                        observed = it.observed
+                            .withVideoFormat(
+                                codecs = format.codecs,
+                                mimeType = format.sampleMimeType,
+                                bitrate = format.bitrate,
+                                frameRate = format.frameRate,
+                            )
+                            .withContainer(format.containerMimeType),
                     )
                 }
             }

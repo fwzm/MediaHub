@@ -95,6 +95,7 @@
     <string name="player_info_actual_engine">实际内核</string>
     <string name="player_info_actual_decoder">实际解码器</string>
     <string name="player_info_actual_renderer">实际渲染器</string>
+    <string name="player_info_actual_container">实际封装</string>
     <string name="player_info_actual_video_codec">实际视频编码</string>
     <string name="player_info_actual_audio_codec">实际音频编码</string>
     <string name="player_info_actual_bitrate">实际码率</string>

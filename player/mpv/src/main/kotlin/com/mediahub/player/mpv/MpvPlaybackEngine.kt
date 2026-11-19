@@ -286,6 +286,7 @@ class MpvPlaybackEngine internal constructor(
                     m.observeProperty("audio-codec", MpvInstance.Format.STRING)
                     m.observeProperty("hwdec-current", MpvInstance.Format.STRING)
                     m.observeProperty("current-vo", MpvInstance.Format.STRING)
+                    m.observeProperty("file-format", MpvInstance.Format.STRING)
                     m.observeProperty("video-bitrate", MpvInstance.Format.DOUBLE)
                     m.observeProperty("audio-bitrate", MpvInstance.Format.DOUBLE)
                     m.observeProperty("container-fps", MpvInstance.Format.DOUBLE)
@@ -372,6 +373,7 @@ class MpvPlaybackEngine internal constructor(
                     _uiState.update { it.copy(observed = it.observed.withHwdec(value)) }
                 }
                 "current-vo" -> _uiState.update { it.copy(observed = it.observed.withRenderer(value)) }
+                "file-format" -> _uiState.update { it.copy(observed = it.observed.withContainer(value)) }
             }
         }
         override fun event(event: MpvInstance.Event) = withCurrent(run) {

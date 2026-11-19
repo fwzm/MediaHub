@@ -95,6 +95,7 @@
     <string name="player_info_actual_engine">Actual engine</string>
     <string name="player_info_actual_decoder">Actual decoder</string>
     <string name="player_info_actual_renderer">Actual renderer</string>
+    <string name="player_info_actual_container">Observed container</string>
     <string name="player_info_actual_video_codec">Observed video codec</string>
     <string name="player_info_actual_audio_codec">Observed audio codec</string>
     <string name="player_info_actual_bitrate">Observed bitrate</string>

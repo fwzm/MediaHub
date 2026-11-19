@@ -16,6 +16,8 @@ enum class AudioOutputStatus { UNKNOWN, ACTIVE, UNAVAILABLE }
 data class PlaybackObservedInfo(
     val videoCodec: String? = null,
     val audioCodec: String? = null,
+    /** 容器/封装（Media3 Format.containerMimeType 或 mpv file-format）。 */
+    val container: String? = null,
     val videoBitrateBps: Long? = null,
     val audioBitrateBps: Long? = null,
     val frameRate: Float? = null,
@@ -46,6 +48,9 @@ data class PlaybackObservedInfo(
         audioCodec = codecs?.takeIf { it.isNotBlank() } ?: mimeType?.takeIf { it.isNotBlank() } ?: audioCodec,
         audioBitrateBps = bitrate.takeIf { it > 0 }?.toLong() ?: audioBitrateBps,
     )
+
+    fun withContainer(name: String?): PlaybackObservedInfo =
+        copy(container = name?.takeIf { it.isNotBlank() } ?: container)
 
     fun withVideoDecoder(name: String?): PlaybackObservedInfo =
         copy(videoDecoder = name?.takeIf { it.isNotBlank() } ?: videoDecoder)

@@ -92,6 +92,7 @@ data class PlayerInfoLabels(
     val actualEngine: String = "实际内核",
     val actualDecoder: String = "实际解码器",
     val actualRenderer: String = "实际渲染器",
+    val actualContainer: String = "实际封装",
     val actualVideoCodec: String = "实际视频编码",
     val actualAudioCodec: String = "实际音频编码",
     val actualBitrate: String = "实际码率",
@@ -161,6 +162,7 @@ fun rememberPlayerInfoLabels(): PlayerInfoLabels = PlayerInfoLabels(
     actualEngine = stringResource(R.string.player_info_actual_engine),
     actualDecoder = stringResource(R.string.player_info_actual_decoder),
     actualRenderer = stringResource(R.string.player_info_actual_renderer),
+    actualContainer = stringResource(R.string.player_info_actual_container),
     actualVideoCodec = stringResource(R.string.player_info_actual_video_codec),
     actualAudioCodec = stringResource(R.string.player_info_actual_audio_codec),
     actualBitrate = stringResource(R.string.player_info_actual_bitrate),
@@ -281,6 +283,7 @@ fun buildPlayerInfoSections(
             ),
             PlayerInfoRow(label = labels.hwdecBackend, value = ui.observed.hwdec ?: unknown),
             PlayerInfoRow(label = labels.actualRenderer, value = ui.observed.renderer ?: unknown),
+            PlayerInfoRow(label = labels.actualContainer, value = ui.observed.container ?: unknown),
             PlayerInfoRow(
                 label = labels.actualResolution,
                 value = formatPlayerInfoResolution(ui.videoWidth, ui.videoHeight, unknown),
