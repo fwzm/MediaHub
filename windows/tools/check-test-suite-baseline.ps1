@@ -266,6 +266,10 @@
 #     item's text is the only place its test name lives, and a duplicated or
 #     missing Text leaves the item list, timestamps and outcomes intact while
 #     the failure log no longer names one test per item.
+#   a RunInfo Text that is not exactly one Failed/Error row name once the
+#     writer's own [xUnit.net ...] prefix and [FAIL] suffix are removed -> red:
+#     the list check above only proves the name appears somewhere in the line,
+#     so extra text around it leaves the item count and every other field intact.
 #   a failure log split across more than one ResultSummary/RunInfos block, an
 #     empty RunInfos block beside the one that carries the items, or a RunInfos
 #     block outside ResultSummary -> red: the block is one container, and its
@@ -344,6 +348,10 @@
 #     block outside ResultSummary -> red
 #   a RunInfo whose direct Text children are not exactly one -> red (the item's
 #     only name was duplicated, split or dropped while the item itself survives)
+#   a RunInfo Text that, after the xUnit timestamp prefix and [FAIL] suffix are
+#     removed, is not exactly one Failed/Error row name -> red (the list check
+#     only proves containment, so a prefixed or suffixed line passed while the
+#     item no longer names one test).
 
 #   the row at position N of Results does not name the test that position N of
 #     TestEntries declares -> red. The two sections are emitted from one ordered
@@ -1687,6 +1695,36 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): the RunInfo text layout in $($e.file) does not give every failure log item exactly one Text element while the total was $total - the item count, timestamp, machine and outcome can all stay identical while a duplicated or missing Text leaves the failure item without one unambiguous name. broken: $($runInfoTextProblems -join ', '). A TRX whose failure log item is not a single text node was hand-merged or patched; regenerate it from a clean test run."
   }
 
+  # The list check above asks whether a failure-log line contains a failed row
+  # name, not whether that line names exactly one test. A line with extra prose
+  # before or after the name keeps every item, timestamp, machine and outcome
+  # identical while the log no longer has one unambiguous test per line. The
+  # xUnit writer wraps its console line in a timestamp prefix and a [FAIL]
+  # suffix; that envelope is stripped before the name is compared exactly.
+  $runInfoExactProblems = @()
+  $runInfoTextExact = 0
+  foreach ($runInfo in @($runInfoNodes)) {
+    $runInfoText = ''
+    foreach ($runInfoChild in @($runInfo.ChildNodes)) {
+      if ([string]$runInfoChild.LocalName -eq 'Text') { $runInfoText = [string]$runInfoChild.InnerText; break }
+    }
+    $runInfoExactName = ([string]$runInfoText).Trim()
+    $xunitEnvelope = [regex]::Match($runInfoExactName, '^\[xUnit\.net [0-9:.]+\]\s+(?<name>.+?)\s+\[FAIL\]$')
+    if ($xunitEnvelope.Success) { $runInfoExactName = $xunitEnvelope.Groups['name'].Value }
+    $exactHit = $false
+    foreach ($fn in $failedRowNameList) {
+      if ([string]::Equals($runInfoExactName, $fn, [System.StringComparison]::Ordinal)) { $exactHit = $true; break }
+    }
+    if ($exactHit) {
+      $runInfoTextExact++
+    } elseif ($runInfoExactProblems.Count -lt 12) {
+      $runInfoExactProblems += "a RunInfo Text is not exactly one Failed/Error row name: '$runInfoExactName'"
+    }
+  }
+  if ($runInfoExactProblems.Count -gt 0) {
+    throw "$($e.suite): the RunInfo text identity in $($e.file) does not name exactly one Failed/Error row while the total was $total - the item list above only asks whether a line contains a failed test name, so extra text before or after the name keeps every item, timestamp, machine and outcome identical while the failure log stops being one test per line. broken: $($runInfoExactProblems -join ', '). A TRX whose failure log line carries more than the test name was hand-merged or patched; regenerate it from a clean test run."
+  }
+
   # ResultSummary/RunInfos is one container, not a bag of items. The layer above
   # counts the items wherever they sit, so two wrappers around one item, an empty
   # second wrapper, or a wrapper parked under Deployment all keep the item list
@@ -1994,6 +2032,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): runInfos=$runInfoRows failedRows=$failedRows matched=$($matchedFailedNames.Count) passed=$runInfoForPassed unmatched=$runInfoUnmatched duplicateMatches=$runInfoDuplicates outside=$runInfoOutside blankText=$runInfoBlank wrongMachine=$runInfoWrongMachine badOutcome=$runInfoBadOutcome"
   "$($e.suite): runInfoBlocks=$runInfoLayoutCount strayRunInfoBlocks=$([int]$runInfoLayoutAnywhere - [int]$runInfoLayoutCount)"
   "$($e.suite): runInfoTexts=$runInfoTextSingular/$(@($runInfoNodes).Count)"
+  "$($e.suite): runInfoTextExact=$runInfoTextExact/$failedRows"
   "$($e.suite): summaryOutput=$summaryOutputBlocks stdout=$summaryStdOutBlocks nonBlank=$summaryOutputNonBlank suiteNamed=$summaryOutputNamesSuite"
   "$($e.suite): phaseLedger=$summaryPhaseFound/4 ordered=$summaryPhaseOrdered"
   "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot nameStamp=$nameStampMatches bound rows=$boundRows header id collisions=$headerCollisions"
