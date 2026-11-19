@@ -1871,3 +1871,17 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 **为什么前三十一层看不见**：第 29/30 层把 Text 归一化后只比较名字，第 31 层只数字元素位置；均不读 `RunInfo/@timestamp` 与具名结果行的 `startTime/endTime` 关系。
 
 **边界**：真机 / 两机 / Windows GUI `NOT_RUN`；`W6-P1-E2E` 仍 `BLOCKED`；Draft，`G7 = DO_NOT_MERGE`。
+## 6.39 第三十三层口径：失败日志必须按运行顺序读取（W6-113az）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | 每个 `ResultSummary/RunInfos/RunInfo` 的 canonical Text `clock` 与 `@timestamp`，按列表顺序比较 | 第 32 层 row-clock 只逐项比对行窗，不比较相邻项的前后顺序 |
+| 通过条件 | Text 时钟非递减，且 item timestamp 非递减 | 真实 xUnit 2.9.3 的失败日志按运行时间递增写出 |
+| 台阶行 | `runInfoChronology=<bound>/<items>` | 真实绿色语料两套件 `0/0`；真实失败 TRX `6/6`；clean-two `2/2` |
+| 负向对照 | 交换两条 RunInfo、或把第一项 Text 时钟从 1.82 改为 5.00、或把第一项 timestamp 改到第二项之后 → RED；clean-green、fail-with-runinfo、clean-two-errors → GREEN | `D:/mh-verify/r54/results-all.json`：`oldAllZero=true`，三个 bad 例均 OLD=0/NEW=1、new `runInfoChronology=1/2`、`chronologyProblems=1` |
+| 规模 | `check-test-suite-baseline.ps1` 2,474→2,532 行、145,306→149,280 B、+58/−0、sha256 `dec21a25...` | 双 shell PARSE-OK；纯 ASCII、无 BOM/CRLF |
+| 残留限制 | 只校验失败日志在文件中的顺序，不证明 TRX 真实产生；不覆盖 RunInfo 与 ErrorInfo/StackTrace 的文本交叉引用（真实语料中 ErrorInfo/StackTrace 不含测试名，无法作为名字来源） | 仍需真实失败语料与真实 CI 作为下游证据 |
+
+**为什么前三十二层看不见**：第 29/30 层只比较 Text 名字，第 31 层只校验元素归属，第 32 层只校验单条 timestamp 的行窗；都没有读取相邻 `RunInfo` 的 Text 时钟与 timestamp 是否保持运行顺序。
+
+**边界**：真机 / 两机 / Windows GUI `NOT_RUN`；`W6-P1-E2E` 仍 `BLOCKED`；Draft，`G7 = DO_NOT_MERGE`。

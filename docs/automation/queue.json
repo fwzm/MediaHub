@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-20T01:38:00+08:00",
-  "updated_by": "lead-W6-113-r52",
+  "updated_at": "2026-11-20T03:22:00+08:00",
+  "updated_by": "lead-W6-113-r53",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -1143,6 +1143,24 @@
       "notes": "第三十二层：RunInfo timestamp 必须落在 canonical Text 命名的 Failed/Error 行自己的 [start-1s, end+5s] 时间窗；真实 xUnit 2.9.3 在行结束后 13-97ms 写 RunInfo，因此保留 5s 上界。第 29/30 层只校验名字，第 31 层只校验元素归属，均不读 timestamp 与结果行的时间关系。",
       "next_action": "候选第 33 层：①RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用（需真实失败语料证明）；②Deployment 的 runDeploymentRoot 字段与 Deployment 记录一致性（需先复核是否已被 header 检查覆盖）；③继续独立维护项。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
       "closed_at": "2026-11-20T01:38:00+08:00"
+    },
+    {
+      "id": "W6-113az",
+      "title": "第三十三层：失败日志必须按运行顺序读取（W6-113az）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r53",
+      "branch": "feature/windows-w6-113az-runinfo-chronology",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,474 -> 2,532 lines, 145,306 -> 149,280 B, 58 insertions / 0 deletions, sha256 dec21a2517990e2061aee403916e59ed6817b3e1590356d2337e50756df99096; old sha256 be0627691778cc7867ca1052ea6471cbd4e7554121b114e96cf1c3ecb3421daa; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites runInfoChronology=0/0 and runInfoRowClock=0/0 and runInfoTextCanonical=0/0; combined tests=2077; log D:/mh-verify/r54/gate-real-r54-final.log.",
+        "Real failing TRX (total=767, failed=6): runInfoChronology=6/6, runInfoRowClock=6/6, runInfoTextCanonical=6/6; only final 6 test(s) failed; log D:/mh-verify/r54/gate-real-failing-r54-final.log.",
+        "Negative matrix: clean-green, fail-with-runinfo, clean-two-errors OLD=0/NEW=0 (clean-two newChron=2/2); bad-clock, bad-order, bad-timestamp OLD=0/NEW=1 with newChron=1/2 and chronologyProblems=1; oldAllZero=true; results D:/mh-verify/r54/results-all.json.",
+        "Code commit e9ba2f5fcd420f091c6854e91277e2d6bafa67b2 (ci(windows): a failure log must read in the order it ran (W6-113az)); windows-ci 44590929480 (push) success, 44591032497 (pull_request) success; Android CI 44591032591 success."
+      ],
+      "notes": "第三十三层：ResultSummary/RunInfos 的每个 RunInfo 的 canonical Text clock 与 timestamp 必须按列表顺序非递减；第 32 层只校验单条 timestamp 的行窗，交换两条或改一条 Text 时钟仍可通过。",
+      "next_action": "候选下一层：①RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用（真实语料中 ErrorInfo/StackTrace 不含测试名，当前不可行）；②Deployment/runDeploymentRoot 复核（已由 header 检查覆盖）；③继续侦察下一独立结构不变量。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T03:22:00+08:00"
     }
   ]
 }

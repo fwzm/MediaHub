@@ -1229,3 +1229,31 @@
 
 - 本轮 run-id `w6-113-round13-20261119`，8 把锁（3 remote-ref + 5 worktree，含 worktree:D:/mh-w6-r41）；收尾 `release-plan`，status count=0。
 - Windows GUI `GUI_UNVERIFIED`、真机与两机 `NOT_RUN`；W6-P1-E2E 仍 `BLOCKED`（维护者 ≥1200 s 空闲窗口 + 真机）；PR #39 正文归档改写 `NOT_RUN`；Draft，`G7 = DO_NOT_MERGE`。
+## Round 53（W6-113az，2026-11-19）：失败日志必须按运行顺序读取
+
+### 动机
+
+- 第 32 层的 row-clock 检查只逐项判断“这条 `RunInfo` 的 timestamp 是否落在它命名的 Failed/Error 行时间窗内”。因此交换两条 `RunInfo`、或只改一条 canonical Text 里的 `[xUnit.net hh:mm:ss.ff]` 时钟，仍可让名称、机器、outcome、行窗与 canonical 外壳全部通过，而失败日志已经不再按运行顺序阅读。
+- 真实 xUnit 2.9.3 的失败日志按运行时间递增写出；把两条失败日志对调或改一条时钟，属于手工合并/补丁痕迹，现有各层都看不见。
+
+### 变更
+
+- `windows/tools/check-test-suite-baseline.ps1`：复用 canonical 正则捕获 `clock` 字段，用 `[TimeSpan]::TryParseExact($clockText,'hh\:mm\:ss\.ff',[CultureInfo]::InvariantCulture,[TimeSpanStyles]::None,[ref]$clock)` 解析；逐项比较前一 `$previousRunInfoClock` / `$previousRunInfoStamp`，新增 `$runInfoChronologyBound` 与 `$runInfoChronologyProblems`，throw 前缀 `the RunInfo chronology in ...`；台阶行新增 `runInfoChronology=<bound>/<items>`，错误消息内携带 `(runInfoChronology=bound/items)` 便于负向矩阵精确判红。
+- 文件 2,474 → 2,532 行、145,306 → 149,280 B，纯 ASCII、无 BOM/CRLF，sha256 `dec21a2517990e2061aee403916e59ed6817b3e1590356d2337e50756df99096`；`git diff --stat` 1 file changed / 58 insertions / 0 deletions；双 shell PARSE-OK（pwsh 7.6.10 与 Windows PowerShell 5.1.26100.10003）。
+
+### 验证（EXECUTED）
+
+- 真实绿色语料 `D:/mh-w6-r41/windows/artifacts/gate-corpus`（1973 windows + 104 webdav）：exit 0；两套件 `runInfoChronology=0/0`、`runInfoRowClock=0/0`、`runInfoTextCanonical=0/0`；`combined tests=2077`；仅既有虚拟列表提示，基线 JSON 未改；日志 `D:/mh-verify/r54/gate-real-r54-final.log`。
+- 真实失败 TRX `D:/mh-verify/r53/real-trx`（total=767，failed=6）：exit 1；`runInfoBoundary=6/6`、`runInfoTextCanonical=6/6`、`runInfoRowClock=6/6`、`runInfoChronology=6/6`；唯一 throw 为末尾 `MediaHub.Tests: 6 test(s) failed`，新闸门未误杀真实失败日志；日志 `D:/mh-verify/r54/gate-real-failing-r54-final.log`。
+- 旧/新负向矩阵（old=第 32 层 `D:/mh-verify/r54/gate-prev.ps1`，new=第 33 层）：clean-green、fail-with-runinfo、clean-two-errors 均 OLD=0/NEW=0（clean-two new `runInfoChronology=2/2`）；bad-clock、bad-order、bad-timestamp 均 OLD=0/NEW=1，new `runInfoChronology=1/2`、`chronologyProblems=1`；`oldAllZero=true`；结果 `D:/mh-verify/r54/results-all.json`。
+- 夹具构造踩坑：首版用 `indexOf('<UnitTestResult ', indexOf(rowToken)-5000)` 选错了结果行，造成 `ResumeFloorClientViewTests reports Error with no ErrorInfo` 与 `SourceSyncSessionBaselineTests reports Passed while carrying failure evidence`；改为 `lastIndexOf('<UnitTestResult ', tokenAt)` 后修正。clean-two 原 RunInfo 时钟从 0.00 改为 4.44，顺序为 1.82 → 4.44。
+
+### 提交与 exact-head CI
+
+- 代码提交：`e9ba2f5fcd420f091c6854e91277e2d6bafa67b2`（`ci(windows): a failure log must read in the order it ran (W6-113az)`）。
+- 代码 head windows-ci `44590929480`（push）`success`、`44591032497`（pull_request）`success`；Android CI `44591032591` `success`。
+
+### 锁与边界
+
+- 本轮 run-id `w6-113-round14-20261119`，8 把锁（3 remote-ref + 5 worktree，含 worktree:D:/mh-w6-r41）；收尾 `release-plan`，status count=0。
+- Windows GUI `GUI_UNVERIFIED`、真机与两机 `NOT_RUN`；W6-P1-E2E 仍 `BLOCKED`（维护者 ≥1200 s 空闲窗口 + 真机）；PR #39 正文归档改写 `NOT_RUN`；Draft，`G7 = DO_NOT_MERGE`。
