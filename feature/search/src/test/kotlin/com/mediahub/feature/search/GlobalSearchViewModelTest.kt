@@ -93,8 +93,10 @@ class GlobalSearchViewModelTest {
         },
     ) : MediaSearchProvider {
         val queries = mutableListOf<String>()
+        val pages = mutableListOf<PageRequest>()
         override suspend fun search(query: String, page: PageRequest): PagedResult<MediaItem> {
             queries += query
+            pages += page
             return behavior(query, page)
         }
     }
@@ -285,6 +287,43 @@ class GlobalSearchViewModelTest {
         assertEquals("予初", final.hits[0].serverName)
         assertTrue(final.errors.containsKey("srv-b"))
         assertFalse(final.isSearching)
+        job.cancel()
+    }
+
+    @Test
+    fun `load more appends the next page`() = runTest {
+        val searchA = FakeSearch { _, page ->
+            when (page.offset) {
+                0 -> PagedResult(
+                    items = listOf(item("srv-a", "m1", "冰血暴")),
+                    totalCount = 2,
+                    hasMore = true,
+                    nextOffset = 1,
+                )
+                1 -> PagedResult(
+                    items = listOf(item("srv-a", "m2", "冰血暴 2")),
+                    totalCount = 2,
+                    hasMore = false,
+                    nextOffset = null,
+                )
+                else -> PagedResult(emptyList(), totalCount = 0, hasMore = false, nextOffset = null)
+            }
+        }
+        val vm = viewModel(listOf(serverA), mapOf("srv-a" to handle(searchA)))
+
+        val job = launch { vm.state.collect {} }
+        runCurrent()
+        vm.onQueryChange("冰血暴")
+        advanceTimeBy(400)
+        runCurrent()
+
+        assertEquals(1, vm.state.value.hits.size)
+        vm.loadMore()
+        advanceTimeBy(50)
+        runCurrent()
+
+        assertEquals(listOf("m1", "m2"), vm.state.value.hits.map { it.item.id })
+        assertEquals(listOf(0, 1), searchA.pages.map { it.offset })
         job.cancel()
     }
 }
