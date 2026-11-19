@@ -240,6 +240,15 @@
 #   naming this suite, in that order, and the ladder line records
 #   phaseLedger=<n>/4 ordered=<0|1>.
 
+#   That ledger only reads where each phase line sits, not the clock in front of
+#   it. A clock edited to a different instant, two clocks in the wrong order, or a
+#   failure log whose last [xUnit.net ...] clock runs past Finished keeps every
+#   phase line in place while the console text stops reading in the order the host
+#   reported. The gate now requires one canonical clock per phase, nondecreasing in
+#   phase order, and Finished not earlier than the last RunInfo Text clock; the
+#   ladder line records
+#   phaseClock=<n>/4 ordered=<0|1> finishedAfterRunInfo=<0|1>.
+
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
 #   total    > baseline -> green + warning (please refresh the baseline)
@@ -308,6 +317,11 @@
 #     Starting / Finished) are missing, repeated, name another suite, or appear
 #     out of order -> red: the console text still names the suite somewhere, but
 #     no longer shows that this host discovered, started and finished it.
+#   a phase line whose [xUnit.net ...] clock is missing or unreadable, phase
+#     clocks that are not nondecreasing in phase order, or a Finished clock
+#     earlier than the last RunInfo Text clock -> red: the phase ledger above
+#     only reads where the lines sit, so edited clocks keep every line in place
+#     while the console text stops reading in the order the host reported.
 #   the date and time embedded in TestRun/@name disagree with Times/@creation
 #     -> red: the run's two self-descriptions name different creation instants,
 #        even while every count and every row timing stays unchanged.
@@ -1997,6 +2011,72 @@ foreach ($e in $baseline.suites) {
       $summaryPhaseProblems += 'the four phase lines are not in the order Discovering, Discovered, Starting, Finished'
     }
   }
+
+  # The phase ledger above reads where each line sits, not the clock in front of
+  # it. An edited clock, two clocks in the wrong order, or a last failure-log
+  # clock that runs past Finished keeps every phase line, RunInfo and count in
+  # place while the console text no longer reads in the order the host reported.
+  # The canonical [xUnit.net hh:mm:ss.ff] clock is parsed per phase, must be
+  # nondecreasing in phase order, and Finished must not precede the last RunInfo
+  # Text clock. The two ledgers already exist; this layer ties them together.
+  $summaryPhaseClockProblems = @()
+  $summaryPhaseClockFound = 0
+  $summaryPhaseClockOrdered = 0
+  $summaryFinishedAfterRunInfo = 0
+  $summaryPhaseFinishedClock = $null
+  $summaryPhaseFinishedClockText = ''
+  if ($summaryPhaseProblems.Count -eq 0) {
+    $previousPhaseClock = $null
+    $previousPhaseClockText = ''
+    $phaseClockOrdered = 1
+    foreach ($phaseName in $summaryPhaseNames) {
+      $phaseClockPattern = '(?m)^\[xUnit\.net (?<clock>[0-9]{2}:[0-5][0-9]:[0-5][0-9]\.[0-9]{2})\][ \t]+' + [regex]::Escape($phaseName) + ':[ \t]*' + [regex]::Escape([string]$e.suite) + '[ \t]*\r?$'
+      $phaseClockMatches = [regex]::Matches($summaryStdOutText, $phaseClockPattern)
+      if ($phaseClockMatches.Count -ne 1) {
+        if ($summaryPhaseClockProblems.Count -lt 12) {
+          $summaryPhaseClockProblems += "the '$phaseName' phase line carries $($phaseClockMatches.Count) canonical xUnit clock(s)"
+        }
+        continue
+      }
+      $phaseClockText = [string]$phaseClockMatches[0].Groups['clock'].Value
+      $phaseClock = [TimeSpan]::Zero
+      if (-not [TimeSpan]::TryParseExact($phaseClockText, 'hh\:mm\:ss\.ff', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.TimeSpanStyles]::None, [ref]$phaseClock)) {
+        if ($summaryPhaseClockProblems.Count -lt 12) {
+          $summaryPhaseClockProblems += "the '$phaseName' clock '$phaseClockText' is not readable"
+        }
+        continue
+      }
+      $summaryPhaseClockFound++
+      if ($null -ne $previousPhaseClock -and $phaseClock -lt $previousPhaseClock) {
+        if ($summaryPhaseClockProblems.Count -lt 12) {
+          $summaryPhaseClockProblems += "the '$phaseName' clock '$phaseClockText' goes backwards after '$previousPhaseClockText'"
+        }
+        $phaseClockOrdered = 0
+      }
+      if ($phaseName -eq 'Finished') {
+        $summaryPhaseFinishedClock = $phaseClock
+        $summaryPhaseFinishedClockText = $phaseClockText
+      }
+      $previousPhaseClock = $phaseClock
+      $previousPhaseClockText = $phaseClockText
+    }
+    if ($summaryPhaseClockFound -eq $summaryPhaseNames.Count -and $phaseClockOrdered -eq 1) {
+      $summaryPhaseClockOrdered = 1
+    }
+    if ($summaryPhaseClockOrdered -eq 1 -and $null -ne $summaryPhaseFinishedClock) {
+      if ($null -eq $previousRunInfoClock) {
+        $summaryFinishedAfterRunInfo = 1
+      } elseif ($summaryPhaseFinishedClock -ge $previousRunInfoClock) {
+        $summaryFinishedAfterRunInfo = 1
+      } elseif ($summaryPhaseClockProblems.Count -lt 12) {
+        $summaryPhaseClockProblems += "the Finished clock '$summaryPhaseFinishedClockText' precedes the last failure-log clock '$previousRunInfoClockText'"
+      }
+    }
+  }
+  if ($summaryPhaseClockProblems.Count -gt 0) {
+    throw "$($e.suite): the StdOut phase clock ledger in $($e.file) does not read forward while the total was $total (phaseClock=$($summaryPhaseClockFound)/$($summaryPhaseNames.Count) ordered=$($summaryPhaseClockOrdered) finishedAfterRunInfo=$($summaryFinishedAfterRunInfo)) - the phase ledger above only checks where each line sits, so an edited clock, two clocks in the wrong order, or a failure log whose last clock runs past Finished keeps every phase line in place while the console text no longer reads in the order the host reported. expected one canonical [xUnit.net hh:mm:ss.ff] clock per phase, nondecreasing in phase order, and Finished not earlier than the last RunInfo Text clock. broken: $($summaryPhaseClockProblems -join ', '). A TRX whose phase clocks were hand-merged or patched; regenerate it from a clean test run."
+  }
+
   if ($summaryPhaseProblems.Count -gt 0) {
     throw "$($e.suite): the ResultSummary/Output/StdOut phase ledger in $($e.file) does not describe this suite's discovery and run while the total was $total - the console text can still name the suite while the lines that say it was discovered, started and finished are missing, repeated or out of order, and no count above reads them. broken: $($summaryPhaseProblems -join ', '). A TRX whose console output no longer describes its own phases was hand-merged or patched; regenerate it from a clean test run."
   }
@@ -2216,6 +2296,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): runInfoChronology=$runInfoChronologyBound/$(@($runInfoNodes).Count)"
   "$($e.suite): summaryOutput=$summaryOutputBlocks stdout=$summaryStdOutBlocks nonBlank=$summaryOutputNonBlank suiteNamed=$summaryOutputNamesSuite"
   "$($e.suite): phaseLedger=$summaryPhaseFound/4 ordered=$summaryPhaseOrdered"
+  "$($e.suite): phaseClock=$summaryPhaseClockFound/4 ordered=$summaryPhaseClockOrdered finishedAfterRunInfo=$summaryFinishedAfterRunInfo"
   "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot nameStamp=$nameStampMatches bound rows=$boundRows header id collisions=$headerCollisions"
   "$($e.suite): assemblyDeclaration=$assemblyPairs storage/codeBase pairs=$($assemblyPairs - $assemblyPairLostCount) same file adapters=$($adapterValues.Count)"
   "$($e.suite): listVocabulary=$listKnown/$listCount canonical names=$listCanonical distinct names=$($listNames.Count - $listNameBlank - $listNameDuplicates.Count) unreferenced lists=$($unreferencedLists.Count)"
