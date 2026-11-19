@@ -43,8 +43,23 @@ data class PlaybackUiState(
     val playWhenReady: Boolean = isPlaying,
     /** Media3 row ordinals and engine group/track coordinates belong to this snapshot. */
     val trackRowMap: TrackRowMap = TrackRowMap.EMPTY,
+    /** 已缓冲到的位置（毫秒）；0 表示引擎未上报。 */
+    val bufferedPositionMs: Long = 0,
 ) {
     fun shouldWarnAboutAudioOutput(): Boolean =
         audioOutputStatus == AudioOutputStatus.UNAVAILABLE && audioTracks.isNotEmpty() &&
             isPlaying && !isBuffering && !isEnded
 }
+
+/** 将一次进度轮询结果写入状态；抽成纯函数以便验证缓冲位置确实被传播。 */
+internal fun PlaybackUiState.withProgress(
+    positionMs: Long,
+    durationMs: Long,
+    bufferedPositionMs: Long,
+    isSeekable: Boolean,
+): PlaybackUiState = copy(
+    positionMs = positionMs,
+    durationMs = durationMs,
+    bufferedPositionMs = bufferedPositionMs,
+    isSeekable = isSeekable,
+)

@@ -124,6 +124,8 @@ data class PlayerCombinedState(
     /** G3：用户播放意图（缓冲时 isPlaying=false 但本字段仍为 true）。 */
     val playWhenReady: Boolean = false,
     val isEnded: Boolean = false,
+    /** 已缓冲到的位置（毫秒）；用于缓存命中时解释 0 B/s。 */
+    val bufferedPositionMs: Long = 0,
 )
 
 private object SubtitleMemoryOwnership {
@@ -599,6 +601,7 @@ class PlayerViewModel @Inject constructor(
                 error = player.error,
                 playWhenReady = player.playWhenReady,
                 isEnded = player.isEnded,
+                bufferedPositionMs = player.bufferedPositionMs,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerCombinedState())
 

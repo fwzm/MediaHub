@@ -841,6 +841,14 @@ private fun PlayerControls(
         disabledInactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
         disabledInactiveTickColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
     )
+    val speedStatus = PlaybackSpeedPolicy.status(
+        bytesPerSecond = downloadSpeedBps,
+        isBuffering = state.isBuffering,
+        positionMs = state.positionMs,
+        bufferedPositionMs = state.bufferedPositionMs,
+        playWhenReady = state.playWhenReady,
+        isEnded = state.isEnded,
+    )
     BoxWithConstraints(modifier = modifier.testTag(PlayerVisualTestTags.PLAYER_CONTROLS)) {
         // Use the full player height, not the tall controls content, to protect subtitle pixels.
         val maxAmbientHeight = maxHeight * (1f - PlayerVisualMaskConfig().bottomStart)
@@ -973,7 +981,7 @@ private fun PlayerControls(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text(
-                            text = formatSpeed(downloadSpeedBps),
+                            text = formatSpeed(downloadSpeedBps, speedStatus),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -1016,7 +1024,7 @@ private fun PlayerControls(
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (state.isBuffering) {
+                            if (PlaybackSpeedPolicy.shouldShowBufferingIndicator(state.isBuffering, speedStatus)) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.padding(end = 12.dp),
                                     color = MaterialTheme.colorScheme.primary,
@@ -1207,13 +1215,19 @@ private fun formatTime(ms: Long): String {
 }
 
 @Composable
-private fun formatSpeed(bytesPerSecond: Long): String {
-    if (bytesPerSecond <= 0) return stringResource(R.string.player_download_speed_unknown)
-    val kb = bytesPerSecond / 1024.0
-    return if (kb < 1024) {
-        stringResource(R.string.player_download_speed_kb, kb)
-    } else {
-        stringResource(R.string.player_download_speed_mb, kb / 1024.0)
+private fun formatSpeed(bytesPerSecond: Long, status: PlaybackSpeedStatus): String {
+    return when (PlaybackSpeedPolicy.labelKind(bytesPerSecond, status)) {
+        PlaybackSpeedLabel.RATE -> {
+            val kb = bytesPerSecond / 1024.0
+            if (kb < 1024) {
+                stringResource(R.string.player_download_speed_kb, kb)
+            } else {
+                stringResource(R.string.player_download_speed_mb, kb / 1024.0)
+            }
+        }
+        PlaybackSpeedLabel.CACHED -> stringResource(R.string.player_download_speed_cached)
+        PlaybackSpeedLabel.BUFFERING -> stringResource(R.string.player_download_speed_buffering)
+        PlaybackSpeedLabel.UNKNOWN -> stringResource(R.string.player_download_speed_unknown)
     }
 }
 

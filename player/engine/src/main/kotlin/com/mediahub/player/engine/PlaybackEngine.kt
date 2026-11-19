@@ -583,12 +583,14 @@ class PlaybackEngine(
             while (isActive) {
                 speedMonitor.tick()
                 val position = player.currentPosition
+                val bufferedPosition = player.bufferedPosition
                 val actualDuration = player.duration.takeIf { it > 0 }
                 val effectiveDuration = actualDuration ?: _uiState.value.durationMs
                 _uiState.update { current ->
-                    current.copy(
+                    current.withProgress(
                         positionMs = position,
                         durationMs = actualDuration ?: current.durationMs,
+                        bufferedPositionMs = bufferedPosition,
                         isSeekable = player.isCurrentMediaItemSeekable,
                     )
                 }

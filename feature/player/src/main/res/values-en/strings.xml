@@ -30,6 +30,8 @@
     <string name="player_download_speed_unknown">--</string>
     <string name="player_download_speed_kb">%1$.0f KB/s</string>
     <string name="player_download_speed_mb">%1$.1f MB/s</string>
+    <string name="player_download_speed_cached">Cached</string>
+    <string name="player_download_speed_buffering">Buffering</string>
     <string name="player_audio_mono">Mono</string>
     <string name="player_audio_stereo">Stereo</string>
     <string name="player_audio_channels">%1$d ch</string>
