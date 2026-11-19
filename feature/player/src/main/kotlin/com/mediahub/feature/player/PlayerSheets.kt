@@ -9,14 +9,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -84,26 +79,13 @@ fun formatSampleRate(hz: Int?): String? = hz?.takeIf { it > 0 }?.let {
 
 // ---- 音轨 Bottom Sheet ----
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AudioTrackSheet(
     tracks: List<AudioTrack>,
     onDismiss: () -> Unit,
     onSelect: (AudioTrack) -> Unit,
 ) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.onSurfaceVariant) },
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp),
-        ) {
+    PlayerSheetScaffold(onDismiss = onDismiss) {
             Text(stringResource(R.string.player_audio_tracks), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
             if (tracks.isEmpty()) {
                 Text(stringResource(R.string.player_audio_tracks_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -145,7 +127,6 @@ fun AudioTrackSheet(
                 }
             }
         }
-    }
 }
 
 @Composable
@@ -178,7 +159,6 @@ private val BG_COLORS = listOf(
     ColorOption(R.string.player_color_white, 0xFFFFFFFF.toInt()),
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SubtitleSheet(
     tracks: List<SubtitleTrack>,
@@ -193,20 +173,10 @@ fun SubtitleSheet(
     onImportClick: () -> Unit,
     onOffsetChange: (Long) -> Unit,
 ) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.onSurfaceVariant) },
+    PlayerSheetScaffold(
+        onDismiss = onDismiss,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
             Text(stringResource(R.string.player_subtitles), style = MaterialTheme.typography.titleMedium)
 
             Text(stringResource(R.string.player_subtitle_tracks), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
@@ -384,7 +354,6 @@ fun SubtitleSheet(
                 )
             }
         }
-    }
 }
 
 @Composable
