@@ -55,6 +55,7 @@ class UserPreferencesStore internal constructor(
             updated.maxBitrateBps?.let { prefs[Keys.MAX_BITRATE] = it }
                 ?: prefs.remove(Keys.MAX_BITRATE)
             prefs[Keys.SHOW_INFO] = updated.showPlayerInfoOverlay
+            prefs[Keys.SHOW_PLAY_BUTTON] = updated.showPlayerPlayButton
             prefs[Keys.AUTO_LANDSCAPE] = updated.autoLandscape
             prefs[Keys.IMMERSIVE_BARS] = updated.immersiveBars
             writeSubtitleStyle(prefs, updated.subtitleStyle)
@@ -90,6 +91,7 @@ class UserPreferencesStore internal constructor(
             autoPlayNextEpisode = prefs[Keys.AUTO_NEXT] ?: true,
             maxBitrateBps = prefs[Keys.MAX_BITRATE],
             showPlayerInfoOverlay = prefs[Keys.SHOW_INFO] ?: false,
+            showPlayerPlayButton = prefs[Keys.SHOW_PLAY_BUTTON] ?: true,
             autoLandscape = prefs[Keys.AUTO_LANDSCAPE] ?: true,
             immersiveBars = prefs[Keys.IMMERSIVE_BARS] ?: true,
             subtitleStyle = readSubtitleStyle(prefs),
@@ -205,6 +207,7 @@ class UserPreferencesStore internal constructor(
         val AUTO_NEXT = booleanPreferencesKey("auto_play_next_episode")
         val MAX_BITRATE = longPreferencesKey("max_bitrate_bps")
         val SHOW_INFO = booleanPreferencesKey("show_player_info_overlay")
+        val SHOW_PLAY_BUTTON = booleanPreferencesKey("show_player_play_button")
         val AUTO_LANDSCAPE = booleanPreferencesKey("auto_landscape")
         val IMMERSIVE_BARS = booleanPreferencesKey("immersive_bars")
         val SUB_TEXT_COLOR = intPreferencesKey("subtitle_text_color")

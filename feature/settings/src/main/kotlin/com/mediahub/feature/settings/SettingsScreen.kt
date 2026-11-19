@@ -234,6 +234,11 @@ fun SettingsRoute(
                 checked = prefs.showPlayerInfoOverlay,
                 onCheckedChange = { viewModel.update { p -> p.copy(showPlayerInfoOverlay = it) } },
             )
+            SettingSwitch(
+                label = stringResource(R.string.settings_show_play_button),
+                checked = prefs.showPlayerPlayButton,
+                onCheckedChange = { viewModel.update { p -> p.copy(showPlayerPlayButton = it) } },
+            )
             // 专业/精简开关（P1）：只改播放信息面板密度，不重建播放、不改内核/画质。
             SettingSwitch(
                 label = stringResource(R.string.settings_professional_info),

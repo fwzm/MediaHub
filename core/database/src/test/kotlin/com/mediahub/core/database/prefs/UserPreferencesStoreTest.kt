@@ -66,6 +66,16 @@ class UserPreferencesStoreTest {
     }
 
     @Test
+    fun `play button visibility defaults true and survives a store round trip`() = runBlocking {
+        assertTrue(store.flow.first().showPlayerPlayButton)
+
+        store.update { current -> current.copy(showPlayerPlayButton = false) }
+
+        val recreatedStore = UserPreferencesStore(dataStore)
+        assertFalse(recreatedStore.flow.first().showPlayerPlayButton)
+    }
+
+    @Test
     fun `visual preferences survive a store round trip`() = runBlocking {
         val expected = PlayerVisualEffectsPreferences(
             enabled = true,
