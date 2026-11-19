@@ -251,6 +251,15 @@
 #   is red. The ladder line records
 #   phaseClock=<n>/4 ordered=<0|1> finishedAfterRunInfo=<0|1> withinRun=<0|1>.
 
+#   That clock and each RunInfo clock are relative to the run's start, while every
+#   RunInfo also carries an absolute timestamp. The writer emits the item a little
+#   after the test ends, so timestamp - Times.start - Text clock is a constant for
+#   one run. A Text clock copied from another run, or a timestamp moved from
+#   another failure, keeps order, row window and canonical envelope intact while
+#   the two views stop describing the same instant. The gate now requires every
+#   such offset to sit within 100 ms of the first; the ladder line records
+#   runInfoOffset=<bound>/<items>.
+
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
 #   total    > baseline -> green + warning (please refresh the baseline)
@@ -328,6 +337,11 @@
 #     (Times.finish - Times.start) -> red: the relative console clock and the
 #     absolute run window are two records of one run, and the phase ledger above
 #     only compares the clocks with each other and with the last failure-log clock.
+#   a RunInfo Text clock and its item timestamp whose offset from Times.start
+#     differs by more than 100 ms from the run's first item -> red: the row-clock
+#     and chronology checks read each item on its own and only in order, so a
+#     copied clock or a borrowed timestamp keeps every name, row window and order
+#     intact while the two views stop describing the same instant.
 #   the date and time embedded in TestRun/@name disagree with Times/@creation
 #     -> red: the run's two self-descriptions name different creation instants,
 #        even while every count and every row timing stays unchanged.
@@ -1891,6 +1905,56 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): the RunInfo chronology in $($e.file) does not read forward while the total was $total (runInfoChronology=$($runInfoChronologyBound)/$(@($runInfoNodes).Count)) - the row-clock check above reads every item on its own, so two swapped items or an edited Text clock keep every name, machine, outcome, row window and canonical envelope identical while the failure log stops reading in the order the run produced it. expected both the xUnit Text clock and the item timestamp to be nondecreasing in list order. broken: $($runInfoChronologyProblems -join ', '). A TRX whose failure log is out of order was hand-merged or patched; regenerate it from a clean test run."
   }
 
+  # The chronology check above reads two views of the same event only as order.
+  # The same two views also encode the same instant: the xUnit Text clock starts
+  # at Times.start, while each item timestamp is an absolute instant. The writer
+  # emits the item a little after the test ends, so timestamp - Times.start - clock
+  # is a constant for one run. A Text clock copied from another run, or a timestamp
+  # moved from another failure, keeps order, row window and canonical envelope
+  # intact while the two views stop describing the same instant.
+  $runInfoOffsetProblems = @()
+  $runInfoOffsetBound = 0
+  $runInfoOffsetFirst = $null
+  $runInfoOffsetFirstText = ''
+  $runInfoOffsetStart = $null
+  try {
+    $runInfoOffsetStart = [DateTimeOffset]::Parse([string]$xml.TestRun.Times.start, [System.Globalization.CultureInfo]::InvariantCulture)
+  } catch {
+    if ($runInfoOffsetProblems.Count -lt 12) {
+      $runInfoOffsetProblems += 'the run Times.start is not readable, so the RunInfo clock/timestamp offset cannot be placed'
+    }
+  }
+  if ($null -ne $runInfoOffsetStart) {
+    foreach ($runInfo in @($runInfoNodes)) {
+      $runInfoRawText = ''
+      foreach ($runInfoChild in @($runInfo.ChildNodes)) {
+        if ([string]$runInfoChild.LocalName -eq 'Text') { $runInfoRawText = [string]$runInfoChild.InnerText; break }
+      }
+      $offsetMatch = [regex]::Match($runInfoRawText, $runInfoChronologyPattern)
+      if (-not $offsetMatch.Success) { continue }
+      $offsetClockText = $offsetMatch.Groups['clock'].Value
+      $offsetClock = [TimeSpan]::Zero
+      if (-not [TimeSpan]::TryParseExact($offsetClockText, 'hh\:mm\:ss\.ff', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.TimeSpanStyles]::None, [ref]$offsetClock)) { continue }
+      $offsetStamp = Convert-ToInstant ([string]$runInfo.timestamp)
+      if ($null -eq $offsetStamp) { continue }
+      $runInfoOffsetValue = ($offsetStamp - $runInfoOffsetStart) - $offsetClock
+      if ($null -eq $runInfoOffsetFirst) {
+        $runInfoOffsetFirst = $runInfoOffsetValue
+        $runInfoOffsetFirstText = "$offsetClockText @ $([string]$runInfo.timestamp)"
+        $runInfoOffsetBound++
+      } elseif ([math]::Abs(($runInfoOffsetValue - $runInfoOffsetFirst).TotalMilliseconds) -gt 100) {
+        if ($runInfoOffsetProblems.Count -lt 12) {
+          $runInfoOffsetProblems += "a RunInfo '$offsetClockText @ $([string]$runInfo.timestamp)' has offset '$([string]$runInfoOffsetValue)' against '$runInfoOffsetFirstText' '$([string]$runInfoOffsetFirst)'"
+        }
+      } else {
+        $runInfoOffsetBound++
+      }
+    }
+  }
+  if ($runInfoOffsetProblems.Count -gt 0) {
+    throw "$($e.suite): the RunInfo clock/timestamp offset in $($e.file) is not one run while the total was $total (runInfoOffset=$runInfoOffsetBound/$(@($runInfoNodes).Count)) - the row-clock and chronology checks read every item on its own and only in order, so a Text clock copied from another run or a timestamp moved from another failure keeps every name, row window and order intact while the two views stop describing the same instant. expected every RunInfo timestamp to sit within 100 ms of Times.start + its own xUnit Text clock. broken: $($runInfoOffsetProblems -join ', '). A TRX whose failure-log clock and timestamp were copied from different runs was hand-merged or patched; regenerate it from a clean test run."
+  }
+
   # ResultSummary/RunInfos is one container, not a bag of items. The layer above
   # counts the items wherever they sit, so two wrappers around one item, an empty
   # second wrapper, or a wrapper parked under Deployment all keep the item list
@@ -2318,6 +2382,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): runInfoTextCanonical=$runInfoTextCanonical/$(@($runInfoNodes).Count)"
   "$($e.suite): runInfoRowClock=$runInfoRowClockBound/$(@($runInfoNodes).Count)"
   "$($e.suite): runInfoChronology=$runInfoChronologyBound/$(@($runInfoNodes).Count)"
+  "$($e.suite): runInfoOffset=$runInfoOffsetBound/$(@($runInfoNodes).Count)"
   "$($e.suite): summaryOutput=$summaryOutputBlocks stdout=$summaryStdOutBlocks nonBlank=$summaryOutputNonBlank suiteNamed=$summaryOutputNamesSuite"
   "$($e.suite): phaseLedger=$summaryPhaseFound/4 ordered=$summaryPhaseOrdered"
   "$($e.suite): phaseClock=$summaryPhaseClockFound/4 ordered=$summaryPhaseClockOrdered finishedAfterRunInfo=$summaryFinishedAfterRunInfo withinRun=$summaryPhaseWithinRun"
