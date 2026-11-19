@@ -18,6 +18,7 @@ import com.mediahub.model.PlaybackSource
 import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.ServerType
 import com.mediahub.model.UserPreferences
+import java.io.IOException
 import com.mediahub.player.engine.InMemoryEnginePreferenceHistory
 import com.mediahub.player.engine.PlaybackEngineCreator
 import com.mediahub.player.engine.PlaybackEnginePort
@@ -223,6 +224,54 @@ class PlayerViewModelTest {
 
             assertTrue(vm.resolveState.value is ResolveState.Failed)
             assertNull(engine.playedSession)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    // ---- D：瞬时网络错误自动重试一次成功 ----
+    @Test
+    fun `transient network failure is retried once and then plays`() = runTest(dispatcher) {
+        val source = PlaybackSource(url = "http://media/stream.mkv")
+        val playback = SequencedPlayback(
+            source = source,
+            failures = listOf(ProviderException.Network("srv-1", IOException("boom"))),
+        )
+        val registry = FakeRegistry(
+            detail = FakeDetail(
+                MediaItem(
+                    serverId = "srv-1", id = "m1", type = MediaType.MOVIE,
+                    title = "电影A",
+                )
+            ),
+            playback = playback,
+        )
+        val engine = FakeEngine()
+        val vm = PlayerViewModel(
+            savedStateHandle = savedState("m1"),
+            serverStore = FakeServerStore(embyServer()),
+            progressStore = FakeProgressStore(resume = null),
+            subtitleMemoryStore = FakeSubtitleMemoryStore(),
+            registry = registry,
+            media3EngineFactory = PlaybackEngineCreator { engine },
+            mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+            engineHistory = InMemoryEnginePreferenceHistory(),
+            userPreferencesRepository = FakeUserPreferences(),
+            artworkPaletteLoader = NoArtworkPalette,
+            logger = noOpLogger,
+        )
+        try {
+            runCurrent()
+            assertEquals(1, playback.attempts)
+            assertEquals(ResolveState.Resolving, vm.resolveState.value)
+
+            advanceTimeBy(PlaybackResolveRetryPolicy.RETRY_DELAY_MS)
+            runCurrent()
+
+            assertEquals(2, playback.attempts)
+            assertEquals(ResolveState.Ready, vm.resolveState.value)
+            assertEquals(source, engine.playedSession?.source)
         } finally {
             vm.stopAndFlush()
             runCurrent()
@@ -498,6 +547,24 @@ class PlayerViewModelTest {
         override suspend fun getItemDetail(itemId: String): MediaDetail {
             if (remaining.isNotEmpty()) last = remaining.removeFirst()
             return MediaDetail(item = last)
+        }
+    }
+
+    private class SequencedPlayback(
+        private val source: PlaybackSource,
+        failures: List<ProviderException>,
+    ) : MediaPlaybackProvider {
+        private val remaining = ArrayDeque(failures)
+        var attempts: Int = 0
+            private set
+
+        override suspend fun resolvePlayback(
+            item: MediaItem,
+            options: PlaybackOptions,
+        ): PlaybackSource {
+            attempts++
+            remaining.removeFirstOrNull()?.let { throw it }
+            return source
         }
     }
 

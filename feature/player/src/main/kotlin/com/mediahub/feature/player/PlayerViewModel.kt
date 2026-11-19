@@ -47,6 +47,7 @@ import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderHandle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -662,7 +663,10 @@ class PlayerViewModel @Inject constructor(
                         container = launchContainer.ifBlank { null },
                     )
                 } else {
-                    detailProvider?.getItemDetail(itemId)?.item ?: MediaItem(
+                    val detailItem = withResolveRetry(autoplay) {
+                        detailProvider?.getItemDetail(itemId)?.item
+                    }
+                    detailItem ?: MediaItem(
                         serverId = serverId,
                         id = itemId,
                         type = MediaTypeGuesser.forPath(itemId),
@@ -677,10 +681,12 @@ class PlayerViewModel @Inject constructor(
                 val resume = progressStore.getResume(serverId, itemId)
                 coroutineContext.ensureActive()
                 if (stopped || resolveGeneration.get() != generation) return@launch
-                val source = playbackProvider.resolvePlayback(
-                    item,
-                    PlaybackOptions(startPositionMs = resume, enableDirectPlay = true),
-                )
+                val source = withResolveRetry(autoplay) {
+                    playbackProvider.resolvePlayback(
+                        item,
+                        PlaybackOptions(startPositionMs = resume, enableDirectPlay = true),
+                    )
+                }
                 coroutineContext.ensureActive()
                 if (stopped || resolveGeneration.get() != generation) return@launch
                 trace.record(PlaybackStartupTrace.Milestone.SOURCE_RESOLVED)
@@ -729,6 +735,33 @@ class PlayerViewModel @Inject constructor(
                 PlaybackNetworkTraceRegistry.set(null)
                 logger.w(LogTag.PLAYER, "播放解析失败 serverId=$serverId itemId=$itemId", e)
                 _resolveState.value = ResolveState.Failed(userMessage(e))
+            }
+        }
+    }
+
+    /**
+     * 播放解析的瞬时错误重试：只对网络类/服务端临时错误重试一次。
+     *
+     * 连播（autoplay=true）不重试：连播切换失败过一次就整轮停住，避免失败后连环跳集。
+     * 重试延迟可取消：用户退出或发起新一轮 resolve 时旧任务随协程取消。
+     */
+    private suspend fun <T> withResolveRetry(autoplay: Boolean, block: suspend () -> T): T {
+        if (autoplay) return block()
+        var attempt = 0
+        while (true) {
+            try {
+                return block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (!PlaybackResolveRetryPolicy.shouldRetry(e, attempt)) throw e
+                attempt++
+                logger.w(
+                    LogTag.PLAYER,
+                    "播放解析瞬时失败，${PlaybackResolveRetryPolicy.RETRY_DELAY_MS}ms 后重试（第 $attempt 次）",
+                    e,
+                )
+                delay(PlaybackResolveRetryPolicy.RETRY_DELAY_MS)
             }
         }
     }
