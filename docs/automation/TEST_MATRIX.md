@@ -1664,3 +1664,45 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 ### exact-head CI 验收
 
 - 代码 head 8c1d5de896b851177d1f989250020ca4f6dc5e34：windows-ci 44501175782（push）success / 44501257430（pull_request）success；同 head Android CI 44501257547 = in_progress（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+
+## 6.33 第二十八层口径：每个失败日志项只能有一个 Text（W6-113at）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| 每个 RunInfo 的直接子元素中 Text 必须恰好 1 个 | ResultSummary/RunInfos/RunInfo | RED |
+| 0 个或 2 个及以上 Text 均拒绝 | 同上 | RED |
+| 台阶行记录 runInfoTexts=<singular>/<total> | ladder | 仅记录 |
+
+### 为什么前二十七层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 23 层 | 把 RunInfos 里的 RunInfo 与失败行逐项对齐，读取第一个 Text 后 break | 第二个 Text、空 Text 兄弟 |
+| 第 27 层 | RunInfos 容器的数量与位置 | RunInfo 内部的 Text 子元素数量 |
+| 全层 | — | 失败日志项文本的单一性 |
+
+### 依据（EXECUTED）
+
+- 真实绿色语料 D:/mh-w6-r41/windows/artifacts/gate-corpus：新闸门 exit 0，两套件 runInfoTexts=0/0，combined tests=2077，只有基线增长 warning。
+- 四例矩阵：clean-green 与 fail-with-runinfo 均 OLD=0 NEW=0；runinfo-text-duplicate 与 runinfo-text-extra-empty 均 OLD=0 NEW=1，broken 均点名 `a RunInfo carries 2 Text child element(s)`。
+
+### 数据源与规模
+
+- check-test-suite-baseline.ps1 131,885 → 133,857 B，2,283 → 2,312 行（+1,972 B，+29/-0 行），0 非 ASCII，sha256 803d2f9c431a0b1b9dee768f84975b41c5a21fc1be251b23fddf00e3cad29493。
+- 台阶行：runInfoBlocks=... 之后追加 runInfoTexts=<n>/<n>。
+
+### 负向对照
+
+- 四例矩阵全按预期；实现态 sha256 在对照前后一致，矩阵后 clean-green 复跑仍绿；旧层在两个变异上保持 PASS，证明新层不是旧层的重复。
+
+### 残留限制
+
+- 只统计 RunInfo 的直接 Text 子元素数量；不比较 Text 内容与 ErrorInfo Message/StackTrace。
+- 不校验 Text 的非空性以外的格式；英文 UI 语料仍是前提。
+- 不改变基线 JSON 与 updater。
+
+### exact-head CI 验收
+
+- 代码 head 3cf422eb05a5f30519df4b1a393688ef794139b9：windows-ci 44510242835（push）success / 44510303586（pull_request）success；同 head Android CI 44510303772 = in_progress（CI_PENDING，19:03 取证）（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。

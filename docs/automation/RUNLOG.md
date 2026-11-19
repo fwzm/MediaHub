@@ -979,3 +979,53 @@
 ### 边界
 
 - 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。
+
+## Round 47（W6-113at，2026-11-19）：每个失败日志项只能有一个 Text
+
+### 切片动机
+
+- 第 23 层把 ResultSummary/RunInfos 里的 RunInfo 条目与失败行逐项对齐，但读取 Text 时只取第一个非空 Text 后 `break`；第 27 层只钉容器数量与位置。
+- 一个 RunInfo 可以携带两个 Text（重复同一 testName，或第一个有文本、第二个为空），条目数量、timestamp、machine、outcome 全部保持不变，前二十七层仍 PASS。
+- 真实失败语料 D:/mh-verify/r41-art/test-results/windows-tests.trx 的 6 个 RunInfo 与 D:/mh-verify/r43/cases/fail-with-runinfo/windows-tests.trx 的 1 个 RunInfo 都只有一个 Text；本层只钉结构，不改基线 JSON。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化）
+
+- 在既有 ResultSummary/RunInfos 逐项检查之后、container layout 之前，新增 $runInfoTextProblems / $runInfoTextSingular / $runInfoTextChildren。
+- 对每个 RunInfo 的直接 ChildNodes 统计 LocalName=Text 的个数，必须恰为 1；0 个或 2 个及以上均 RED。
+- 错误文案以 `the RunInfo text layout ... does not give every failure log item exactly one Text element` 开头，broken 明细写出 `a RunInfo carries N Text child element(s)`，细节上限 12 条。
+- 台阶行在 runInfoBlocks 行后追加 `runInfoTexts=<singular>/<total>`。
+- 头部文档与 SEMANTICS 各新增一条说明。
+
+### 负向对照（EXECUTED）
+
+- old=D:/mh-verify/r48/gate-prev.ps1（第 27 层，2,283 行，sha256 45d6ff72ded3bed62bb41c0cbffefcb687f654c2de9d3cec6c6f17509f9cc95e），new=本层。
+- clean-green OLD=0 NEW=0，new ladder 两套件均 runInfoTexts=0/0。
+- fail-with-runinfo OLD=0 NEW=0，new ladder MediaHub.Tests runInfoTexts=1/1。
+- runinfo-text-duplicate OLD=0 NEW=1，broken 点名 `a RunInfo carries 2 Text child element(s)`。
+- runinfo-text-extra-empty OLD=0 NEW=1，broken 同样点名 2 个 Text 子元素。
+- 实现态 sha256 在矩阵前后一致；对照结束后 clean-green 复跑仍 OLD=0 NEW=0。
+
+### 真实语料
+
+- gate-corpus（1973 windows + 104 webdav，英文 UI）：新闸门 exit 0；两套件台阶行均 runInfoTexts=0/0；combined tests=2077；只有基线增长 warning（1973 > 1959）。
+
+### 数据源与规模
+
+- windows/tools/check-test-suite-baseline.ps1 131,885 B / 2,283 行 → 133,857 B / 2,312 行（+1,972 B，+29/−0 行），0 个非 ASCII；sha256 803d2f9c431a0b1b9dee768f84975b41c5a21fc1be251b23fddf00e3cad29493。
+- 双 shell 语法：pwsh 7.6.10 与 Windows PowerShell 5.1.26100.10003 均 errors=0。
+- git diff --stat：1 file changed / +29 insertions / 0 deletions；git diff --check 干净。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+
+- 提交 3cf422eb05a5f30519df4b1a393688ef794139b9（ci(windows): each failure log item must name itself exactly once (W6-113at)），1 file changed / +29/-0，非 force push 到 feature/windows-w6-113at-runinfo-text-singular。
+- exact-head windows-ci：44510242835（push）success；44510303586（pull_request）success。
+- 同 head Android CI：44510303772（pull_request）in_progress（CI_PENDING，19:03 取证）（本提交只动 windows/tools，android/core/feature/app 子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+- Draft PR 145（base main，stacked 在 #143 第 27 层之上）；G7 恒 DO_NOT_MERGE。
+
+### 锁
+
+- run-id w6-113-round8-20261119，owner lead，8 把资源锁（3 remote-ref + 5 worktree），本轮结束 release-plan 释放。
+
+### 边界
+
+- 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。
