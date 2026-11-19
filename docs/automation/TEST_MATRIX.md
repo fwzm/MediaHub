@@ -1839,3 +1839,21 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 ### exact-head CI 验收
 
 - 代码 head 7e9cef7933bc105bc03a95ef978ea037148072f6：windows-ci 44541458120（push）success / 44541577847（pull_request）success；同 head Android CI 44541577966 = success。
+## 6.37 基线刷新（W6-113ax）
+
+| 条目 | 旧基线 | 新基线 | 证据 |
+|---|---:|---:|---|
+| `MediaHub.Tests` expected | 1959 | 1973 | `gate-new-baseline.log`: `total=1973 baseline=1973` |
+| `MediaHub.Tests` classes | 113 | 115 | `ArtworkDiskCacheTests`（10）、`MpvSubtitleStyleTests`（2） |
+| `MediaHub.Tests` methods | — | 1656 | `methods=1656 baseline=method table 1656 methods` |
+| `MediaHub.Tests` outcomes.Passed | 1959 | 1973 | `outcomes=1 baseline=outcome table 1 outcomes` |
+| `MediaHub.WebDav.Tests` expected | 104 | 104 | `total=104 baseline=104`（未变） |
+| 基线与闸门逻辑 | 第 31 层 `16fcef0a...` | 第 31 层 `16fcef0a...` | 只改 JSON，闸门代码未动 |
+
+**为什么现在刷新**：旧基线连续产生 4 条增长 warning；这次把已由真实绿色语料证明的 14 个新增 case 固定进基线，避免 warning 常态化、并用 `total < baseline -> red` 继续挡住未来删 test 的情况。
+
+**验证**：旧基线 `::warning::` 5 条 → 新基线 1 条；两套件合计 `combined tests=2077`；`git diff --check` 干净。
+
+**额外自洽反例（EXECUTED）**：新基线 `expected` 改为 1974 而 outcome 表仍 1973 -> exit 1（`outcome table adds up to 1973 but expected is 1974`）；基线字段与结果表必须自洽。
+
+**边界**：真机 / 两机 / Windows GUI `NOT_RUN`；`W6-P1-E2E` 仍 `BLOCKED`；Draft，`G7=DO_NOT_MERGE`。

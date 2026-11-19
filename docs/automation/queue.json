@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-19T22:50:00+08:00",
-  "updated_by": "lead-W6-113-r50",
+  "updated_at": "",
+  "updated_by": "lead-W6-113-r51",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -1107,6 +1107,24 @@
       "notes": "第 31 层收的是每类节点的归属：所有 RunInfo 必须直接挂在唯一 ResultSummary/RunInfos 下，所有 Deployment 必须直接挂在 TestSettings 下；把 RunInfo 放到 Deployment/TestSettings、嵌套进 RunInfo，或把额外 Deployment 放到 ResultSummary/RunInfos，都会让报告出现两个 owner。基线 JSON 与 updater 未改，无迁移。",
       "next_action": "候选下一层：①RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用（需真实语料证明）；②Deployment 的 runDeploymentRoot 字段与 Deployment 记录的一致性；③独立任务刷新基线（1973 vs 1959）。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
       "closed_at": "2026-11-19T22:50:00+08:00"
+    },
+    {
+      "id": "W6-113ax",
+      "title": "基线刷新：Windows 套件基线 1959 -> 1973（W6-113ax）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r51",
+      "branch": "feature/windows-w6-113ax-baseline-refresh",
+      "evidence": [
+        "windows/tools/test-suite-baseline.json 165,251 -> 166,328 B, 23 insertions / 3 deletions; old sha256 99c754ad88ba61aedb3b1dac7aa88cf6381c0ec9217b29b55b6767d0e02b9e13, new sha256 0622d04fc6edc169c1b9103a0436a707fcaa6c6d8d3c6885bb9d349dad2a0cc8.",
+        "Old baseline gate-corpus: exit 0 with 5 warnings (1 virtual-list + 4 baseline growth: total 1973 > 1959, 2 new classes, 4 new methods, Passed +14); log D:/mh-verify/r52/gate-old-baseline.log.",
+        "New baseline gate-corpus: exit 0 with 1 virtual-list warning; MediaHub.Tests total=1973 baseline=1973, classes=115 baseline=class table 115 entries, methods=1656 baseline=method table 1656 methods, combined tests=2077; log D:/mh-verify/r52/gate-new-baseline.log.",
+        "Gate logic unchanged: check-test-suite-baseline.ps1 sha256 16fcef0a631c44fa95179e42aa3c4900f01d50f60cb2af9033d03791544a53bf; git diff --check clean.",
+        "Code commit cc0575a7a6a33963c82f0ed2a2ff44d72d8cde8a (chore(windows): refresh the test-suite baseline to 1973 (W6-113ax)); windows-ci 44556355724 (push) success, 44556498755 (pull_request) success; Android CI 44556499067 success."
+      ],
+      "notes": "独立任务：只刷新基线 JSON，不改闸门逻辑；把已由真实绿色语料证明的 14 个新增 case 固定进基线，消除 4 条长期存在的基线增长 warning。无测试删除或降级；基线 JSON 新增 2 个类、4 个方法、Passed +14。",
+      "next_action": "候选下一层：①RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用（需真实语料证明）；②Deployment 的 runDeploymentRoot 字段与 Deployment 记录一致性（已被现有 header 检查覆盖，需先复核）；③继续独立维护项/下一层结构不变量。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": ""
     }
   ]
 }

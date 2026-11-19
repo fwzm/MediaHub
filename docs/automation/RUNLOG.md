@@ -1173,3 +1173,31 @@
 ### 边界
 
 - 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。
+## Round 51（W6-113ax，2026-11-19）：Windows 套件基线刷新到 1973
+
+### 动机
+
+- `windows/tools/test-suite-baseline.json` 仍停留在 `1959` 项，而 `D:/mh-w6-r41/windows/artifacts/gate-corpus` 的真实绿色语料已经是 `1973` 项（`MediaHub.Tests` 1973 + `MediaHub.WebDav.Tests` 104）。
+- 旧基线让闸门每次输出 4 条增长 warning（total 1973>1959、两个新类、4 个新方法、Passed +14）；warning 长期存在会掩盖真正的新增测试，也无法在基线层钉住这些新测试。
+
+### 变更（数据-only，不修改闸门逻辑）
+
+- 只更新 `windows/tools/test-suite-baseline.json`：`1959 → 1973`，新增 `MediaHub.Tests.ArtworkDiskCacheTests`（10 个方法/10 个 case）与 `MediaHub.Tests.MpvSubtitleStyleTests`（2 个方法/2 个 case），`MediaHub.Tests.PlaylistStoreTests` 增加 `ReorderItemsPersistsACompleteNewOrder`、`ReorderItemsRejectsAnythingThatIsNotAPermutation` 两个方法（各 1 case）；`outcomes.Passed` 同步 1959 → 1973。
+- `check-test-suite-baseline.ps1` 未改（第 31 层 sha256 `16fcef0a631c44fa95179e42aa3c4900f01d50f60cb2af9033d03791544a53bf`）。基线文件旧 165,251 B / sha256 `99c754ad88ba61aedb3b1dac7aa88cf6381c0ec9217b29b55b6767d0e02b9e13`；新 166,328 B / sha256 `0622d04fc6edc169c1b9103a0436a707fcaa6c6d8d3c6885bb9d349dad2a0cc8`。
+
+### 验证（EXECUTED）
+
+- 旧基线跑 gate-corpus：exit 0，`::warning::` 共 5 条（1 条虚拟列表提示 + 4 条基线增长提示：`total 1973 > 1959`、两个新类、4 个新方法、`Passed +14`）；日志 `D:/mh-verify/r52/gate-old-baseline.log`。
+- 新基线跑同一 gate-corpus：exit 0，`::warning::` 只剩 1 条虚拟列表提示；`MediaHub.Tests total=1973 baseline=1973`、`classes=115 baseline=class table 115 entries`、`methods=1656 baseline=method table 1656 methods`、`combined tests=2077`；日志 `D:/mh-verify/r52/gate-new-baseline.log`。
+- 额外自洽反例（EXECUTED）：把新基线复制为 `D:/mh-verify/r52/baseline-1974.json` 只改 `expected` 为 1974（outcome 表仍 1973），闸门 exit 1，错误为 `outcome table adds up to 1973 but expected is 1974`；证明基线字段必须与结果表自洽。
+- `git diff --stat`：1 file changed / 23 insertions / 3 deletions；`git diff --check` 干净；JSON 可被闸门正常读取。
+
+### 提交与 exact-head CI
+
+- 代码提交：`cc0575a7a6a33963c82f0ed2a2ff44d72d8cde8a`（`chore(windows): refresh the test-suite baseline to 1973 (W6-113ax)`）。
+- 代码 head windows-ci `44556355724`（push）`success`、`44556498755`（pull_request）`success`；Android CI `44556499067` `success`。
+
+### 锁与边界
+
+- 本轮 run-id `w6-113-round12-20261119`，8 把锁（3 remote-ref + 5 worktree，含 worktree:D:/mh-w6-r41）；收尾 `release-plan`，status count=0。
+- Windows GUI `GUI_UNVERIFIED`、两机 `NOT_RUN`；`W6-P1-E2E` 仍 `BLOCKED`（维护者 >=1200s 空闲窗口 + 真机）；`PR #39` 正文归档改写 `NOT_RUN`；未 merge/close/mark-ready、未写 main、未 force push。
