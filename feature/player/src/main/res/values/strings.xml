@@ -20,6 +20,8 @@
     <string name="player_time_progress_unknown">%1$s / --:--</string>
     <string name="player_pause">暂停</string>
     <string name="player_play">播放</string>
+    <string name="player_seek_back_10">后退 10 秒</string>
+    <string name="player_seek_forward_10">前进 10 秒</string>
     <string name="player_playback_speed">%1$.2f×</string>
     <string name="player_gesture_seek">%1$s → %2$s</string>
     <string name="player_gesture_rewinding">↺ %1$.2f× 快退中</string>
