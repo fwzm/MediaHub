@@ -1,6 +1,10 @@
 package com.mediahub.app.navigation
 
+import android.app.Activity
 import android.net.Uri
+import android.os.SystemClock
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -11,9 +15,11 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.navArgument
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.common.NavArgCodec
+import com.mediahub.core.ui.HomeBackExitPolicy
 import com.mediahub.feature.detail.DetailRoute
 import com.mediahub.feature.home.HomeRoute
 import com.mediahub.feature.library.LibraryRoute
@@ -32,6 +38,21 @@ fun MediaHubNavHost() {
     NavHost(navController = navController, startDestination = Routes.HOME) {
 
         composable(Routes.HOME) {
+            val context = LocalContext.current
+            var lastBackAtMs by remember { mutableStateOf<Long?>(null) }
+            BackHandler(enabled = true) {
+                val nowMs = SystemClock.elapsedRealtime()
+                when (HomeBackExitPolicy.decide(nowMs, lastBackAtMs)) {
+                    HomeBackExitPolicy.Decision.ShowHint -> {
+                        lastBackAtMs = nowMs
+                        Toast.makeText(context, "再按一次退出", Toast.LENGTH_SHORT).show()
+                    }
+                    HomeBackExitPolicy.Decision.Exit -> {
+                        lastBackAtMs = null
+                        (context as? Activity)?.finish()
+                    }
+                }
+            }
             val homeEntry = navController.currentBackStackEntry
             // re-login 成功后 Home 状态立即刷新：观察导航返回的 auth_changed_server_id（评审 FINAL PATCH 3）
             var forceRestoreId by remember { mutableStateOf<String?>(null) }
