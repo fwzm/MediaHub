@@ -4,7 +4,7 @@
 
 - Round 12/256；task_id=detail-current-episode-20261120；branch=feature/detail-current-episode-20261120。
 - 代码提交：ba56c37eef823410f43a3cb8075784554f7ee18f（Git Data API；本地等价 23f431640f82d28e56c97bb9947155e76c6c788b；5 files，+282/−8）。
-- Draft PR：待创建（base=main；创建后由 handoff 提交更新 head）。
+- Draft PR：https://github.com/fwzm/MediaHub/pull/159（base=main；创建时 head a939344fa30cb906d6226c2eb9026046875582d1，handoff 修正提交后 head 继续推进）。
 - 实现：新增 DetailResumePolicy（isInProgress/currentEpisodeId/findInProgressSeason）；SeriesBrowseState 新增 currentEpisodeId；DetailViewModel 默认季立即展示后按季扫描其他季，找到正在观看剧集时切季并高亮；DetailScreen 用 scrollState + onGloballyPositioned 定位并高亮“继续”行；详情页不依赖 ProgressRepository。
 - 验证：RED 25 tests / 5 failed（DetailResumePolicyTest 3 红、DetailViewModelTest 2 红）；聚焦 GREEN 2m53s/68 tasks/exit 0（25 tests，0 failures）；NC 3/3 PASS_ONE_RED；全量 GREEN 13m25s/568 tasks/exit 0；121 suites / 1184 tests / 12 skipped / 0 failures / 0 errors；APK size=130595735 sha256=e6c0e164a045ecf844e7a93cbef3a08ed0083ae5c9bc9cd80bdd816e388153bc（未安装）。
 - 真机：NOT_RUN（设备 123e243f 未触碰；Room 6↔5 阻塞，禁清库）。
