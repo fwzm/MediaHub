@@ -180,6 +180,40 @@
 #   position, requires the two to name the same test, and prints the ladder line
 #   rowOrder=<positions> aligned=<n> first mismatch=<none|n>.
 
+#   The rows also record the evidence behind a failure, and nothing above read it:
+#   a failed row carries Output/ErrorInfo with the message and stack the runner
+#   captured, a passing row carries none, and one row carries at most one such
+#   block. Every count above is read from outcome names and metadata, so a file
+#   whose failed rows lost their evidence, whose passing rows still carry a stale
+#   stack, or whose row carries the same failure twice keeps all of them identical
+#   while the report no longer explains what went wrong. The gate now requires
+#   Failed/Error rows to carry exactly one ErrorInfo with a non-blank Message,
+#   forbids ErrorInfo on a Passed row, and refuses a row with more than one
+#   ErrorInfo; the ladder line records failureEvidence=<rows> failed=<with>/<failed>
+#   passed=<with>/<passed> blankMessages=<n> duplicates=<n>. StackTrace is recorded
+#   but not required: a producer may report a message without a stack, and
+#   requiring it would accuse a shape this gate cannot prove.
+
+#   The runner also writes ResultSummary/RunInfos: one item per failure, carrying
+#   the failed test's display name in its Text. Nothing above reads it, so a file
+#   whose failure list was dropped, duplicated, or left behind by an earlier green
+#   run keeps every count and every ErrorInfo above identical. The gate now requires
+#   the list to describe the Failed/Error rows one for one: the same number of items
+#   as failed rows, every failed row named exactly once, no item naming a passing
+#   row, a non-blank Text, a timestamp inside the run window, a machine that matches
+#   the rows, and an outcome that does not claim success; the ladder line records
+#   runInfos=<n> failedRows=<n> matched=<n> passed=<n> unmatched=<n> outside=<n>
+#   blankText=<n> wrongMachine=<n>.
+
+#   The summary also carries the runner's own console output: ResultSummary/Output/
+#   StdOut is what the test host printed while it discovered and ran this suite.
+#   Nothing above reads it, so a file whose output block was dropped, duplicated,
+#   blanked or copied from another suite keeps every count, every ErrorInfo and
+#   every RunInfo identical while the report no longer shows what the host ran.
+#   The gate now requires exactly one Output and one StdOut, a non-blank StdOut,
+#   and a StdOut that names the suite it belongs to; the ladder line records
+#   summaryOutput=<n> stdout=<n> nonBlank=<0|1> suiteNamed=<0|1>.
+
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
 #   total    > baseline -> green + warning (please refresh the baseline)
@@ -201,6 +235,20 @@
 #     own results file -> red (the entry is wired to another suite's results)
 #   per-row outcomes disagree with the run's own Counters -> red
 #     (the summary is not trusted on its own; the rows are counted, total included)
+#   a Failed or Error row with no Output/ErrorInfo, an ErrorInfo whose Message is
+#     blank, a Passed row that carries Output/ErrorInfo, or one row carrying more
+#     than one ErrorInfo -> red: the row's own failure evidence contradicts the
+#     verdict it reports, and no count above reads the evidence block
+#   a ResultSummary/RunInfos list that does not describe the Failed/Error rows one
+#     for one - wrong item count, an item naming a passing row or no row, a blank
+#     Text, a timestamp outside Times, another machine, or an outcome that claims
+#     success - -> red: the failure log and the verdicts are two halves of the same
+#     report and no count above compares them
+#   a ResultSummary/Output/StdOut block that is missing, duplicated, blank, or
+#     whose text does not name the suite the file belongs to -> red: the console
+#     output is the host's record of what it ran, and a summary whose output block
+#     was dropped, copied from another suite, or left stale keeps every count
+#     identical.
 #   an outcome kind the baseline did not have appears, or a baseline outcome
 #     reports fewer rows -> red; an outcome reporting more rows -> green + warning
 #   a test id that is not unique inside one TRX, a definition whose id has no
@@ -1006,6 +1054,27 @@ foreach ($e in $baseline.suites) {
   $nameMismatch = @()
   $namesUnprovable = 0
   $unmapped = 0
+  $failedRows = 0
+  $passedRows = 0
+  $evidenceRows = 0
+  $failedWithEvidence = 0
+  $passedWithEvidence = 0
+  $failedNoEvidence = 0
+  $blankFailureText = 0
+  $duplicateEvidence = 0
+  $evidenceProblems = @()
+  $failedRowNames = @{}
+  $passedRowNames = @{}
+  $runInfoRows = 0
+  $runInfoMatched = 0
+  $runInfoDuplicates = 0
+  $runInfoForPassed = 0
+  $runInfoUnmatched = 0
+  $runInfoOutside = 0
+  $runInfoBlank = 0
+  $runInfoWrongMachine = 0
+  $runInfoBadOutcome = 0
+  $runInfoProblems = @()
   foreach ($res in @($xml.TestRun.Results.UnitTestResult)) {
     if ($null -eq $res) { continue }
     $rowCount++
@@ -1090,6 +1159,51 @@ foreach ($e in $baseline.suites) {
     $oc = [string]$res.outcome
     if ([string]::IsNullOrWhiteSpace($oc)) { $oc = "(missing)" }
     if ($actualOutcomes.ContainsKey($oc)) { $actualOutcomes[$oc] = $actualOutcomes[$oc] + 1 } else { $actualOutcomes[$oc] = 1 }
+    if ($oc -eq 'Passed') { $passedRows++ }
+    if ($oc -eq 'Failed' -or $oc -eq 'Error') { $failedRows++ }
+    $rowDisplayName = [string]$res.testName
+    if (-not [string]::IsNullOrWhiteSpace($rowDisplayName)) {
+      if ($oc -eq 'Passed') {
+        $passedRowNames[$rowDisplayName] = $true
+      } elseif ($oc -eq 'Failed' -or $oc -eq 'Error') {
+        $failedRowNames[$rowDisplayName] = $true
+      }
+    }
+    $rowEvidence = @()
+    foreach ($rowOutput in @($res.ChildNodes)) {
+      if ([string]$rowOutput.LocalName -ne 'Output') { continue }
+      foreach ($rowOutputChild in @($rowOutput.ChildNodes)) {
+        if ([string]$rowOutputChild.LocalName -eq 'ErrorInfo') { $rowEvidence += $rowOutputChild }
+      }
+    }
+    if ($rowEvidence.Count -gt 0) {
+      $evidenceRows++
+      $evidenceText = ""
+      foreach ($evidenceChild in @($rowEvidence[0].ChildNodes)) {
+        if ([string]$evidenceChild.LocalName -eq 'Message') { $evidenceText = [string]$evidenceChild.InnerText; break }
+      }
+      if ($rowEvidence.Count -gt 1) {
+        $duplicateEvidence++
+        if ($evidenceProblems.Count -lt 12) { $evidenceProblems += "$cls (outcome $oc) carries $($rowEvidence.Count) ErrorInfo elements" }
+      }
+      if ($oc -eq 'Passed') {
+        $passedWithEvidence++
+        if ($evidenceProblems.Count -lt 12) {
+          $preview = $evidenceText
+          if ($preview.Length -gt 60) { $preview = $preview.Substring(0, 60) + "..." }
+          $evidenceProblems += "$cls reports Passed while carrying failure evidence: '$preview'"
+        }
+      } elseif ($oc -eq 'Failed' -or $oc -eq 'Error') {
+        $failedWithEvidence++
+        if ([string]::IsNullOrWhiteSpace($evidenceText)) {
+          $blankFailureText++
+          if ($evidenceProblems.Count -lt 12) { $evidenceProblems += "$cls reports $oc with a blank failure Message" }
+        }
+      }
+    } elseif ($oc -eq 'Failed' -or $oc -eq 'Error') {
+      $failedNoEvidence++
+      if ($evidenceProblems.Count -lt 12) { $evidenceProblems += "$cls reports $oc with no ErrorInfo at all" }
+    }
   }
   if ($unmapped -gt 0) {
     $orphanResIds = @($resIdCounts.Keys | Where-Object { -not $defIdCounts.ContainsKey($_) } | Sort-Object)
@@ -1406,6 +1520,153 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): $($e.file) disagrees with its own ResultSummary/Counters - the per-outcome rows do not reproduce the summary (total $total): $($counterMismatch -join '; '). The summary alone cannot be trusted; if the artifact came from another runner, teach the gate that vocabulary before trusting it."
   }
 
+  # The failure evidence is the only part of a failed row that says what went
+  # wrong, and no check above read it: every count comes from outcome names and
+  # row metadata, so a report whose failed rows lost their message, whose passed
+  # rows still carry a stale stack, or whose row carries the same failure twice
+  # keeps all of them identical. A Passed row carrying ErrorInfo is the sharpest
+  # case: the verdict and the text it ships contradict each other.
+  if ($evidenceProblems.Count -gt 0) {
+    throw "$($e.suite): the failure evidence in $($e.file) does not agree with the verdict each row reports while the total was $total - no count above reads the evidence block, so a file whose failed rows lost their message, whose passed rows carry a stale stack, or whose row carries the same failure twice can keep every count identical. broken: $($evidenceProblems -join ', '). A TRX whose failure evidence contradicts its own outcomes was hand-merged or patched; regenerate it from a clean test run."
+  }
+
+  # ResultSummary/RunInfos is the runner's failure log: one item per failed test,
+  # with that test's display name in Text. The rows and the log were written by the
+  # same run, so a log that lost an item, kept a stale one, named a passing row,
+  # carried a blank Text or a time outside the run window, or named another machine
+  # can leave every count and every ErrorInfo identical while the report no longer
+  # says which failures produced the run. The list is read by local name for the
+  # same adapter reason as ErrorInfo.
+  $runInfoNodes = @()
+  foreach ($summaryChild in @($xml.TestRun.ResultSummary.ChildNodes)) {
+    if ([string]$summaryChild.LocalName -ne 'RunInfos') { continue }
+    foreach ($runInfoChild in @($summaryChild.ChildNodes)) {
+      if ([string]$runInfoChild.LocalName -eq 'RunInfo') { $runInfoNodes += $runInfoChild }
+    }
+  }
+  $runInfoRows = @($runInfoNodes).Count
+  $failedRowNameList = @($failedRowNames.Keys)
+  $passedRowNameList = @($passedRowNames.Keys)
+  $runInfoRowMachine = ''
+  if ([int]$attrValues['computerName'].Count -eq 1) {
+    foreach ($rmk in @($attrValues['computerName'].Keys)) { $runInfoRowMachine = [string]$rmk }
+  }
+  $matchedFailedNames = @{}
+  foreach ($runInfo in @($runInfoNodes)) {
+    $runInfoText = ''
+    foreach ($runInfoChild in @($runInfo.ChildNodes)) {
+      if ([string]$runInfoChild.LocalName -eq 'Text') { $runInfoText = [string]$runInfoChild.InnerText; break }
+    }
+    $runInfoStamp = Convert-ToInstant ([string]$runInfo.timestamp)
+    $runInfoMachine = [string]$runInfo.computerName
+    $runInfoOutcome = [string]$runInfo.outcome
+    if ([string]::IsNullOrWhiteSpace($runInfoText)) {
+      $runInfoBlank++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += 'a RunInfo carries no Text' }
+    }
+    if ($null -eq $runInfoStamp) {
+      $runInfoOutside++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += 'a RunInfo carries an unreadable timestamp' }
+    } elseif ($null -ne $tRunStart -and $null -ne $tRunFinish) {
+      if ($runInfoStamp -lt $tRunStart -or $runInfoStamp -gt $tRunFinish) {
+        $runInfoOutside++
+        if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo timestamp '$([string]$runInfo.timestamp)' is outside the run window" }
+      }
+    }
+    if ([string]::IsNullOrWhiteSpace($runInfoMachine)) {
+      $runInfoWrongMachine++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += 'a RunInfo names no machine' }
+    } elseif (-not [string]::IsNullOrWhiteSpace($runInfoRowMachine) -and -not [string]::Equals($runInfoMachine, $runInfoRowMachine, [System.StringComparison]::OrdinalIgnoreCase)) {
+      $runInfoWrongMachine++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo names machine '$runInfoMachine' while the rows ran on '$runInfoRowMachine'" }
+    }
+    if ([string]::IsNullOrWhiteSpace($runInfoOutcome)) {
+      $runInfoBadOutcome++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += 'a RunInfo names no outcome' }
+    } elseif ($runInfoOutcome -in @('Passed', 'Completed', 'Succeeded')) {
+      $runInfoBadOutcome++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo reports success ('$runInfoOutcome') inside the failure log" }
+    }
+    $bestName = ''
+    $bestOutcome = ''
+    foreach ($fn in $failedRowNameList) {
+      if ($runInfoText.IndexOf($fn, [System.StringComparison]::Ordinal) -ge 0 -and $fn.Length -gt $bestName.Length) {
+        $bestName = $fn
+        $bestOutcome = 'Failed'
+      }
+    }
+    foreach ($pn in $passedRowNameList) {
+      if ($runInfoText.IndexOf($pn, [System.StringComparison]::Ordinal) -ge 0 -and $pn.Length -gt $bestName.Length) {
+        $bestName = $pn
+        $bestOutcome = 'Passed'
+      }
+    }
+    if ($bestOutcome -eq 'Failed') {
+      $runInfoMatched++
+      if ($matchedFailedNames.ContainsKey($bestName)) {
+        $runInfoDuplicates++
+        if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo names '$bestName' more than once" }
+      } else {
+        $matchedFailedNames[$bestName] = $true
+      }
+    } elseif ($bestOutcome -eq 'Passed') {
+      $runInfoForPassed++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo names the passing row '$bestName'" }
+    } else {
+      $runInfoUnmatched++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo names no result row: '$runInfoText'" }
+    }
+  }
+  if ($runInfoRows -ne $failedRows) {
+    $runInfoProblems += "RunInfos carries $runInfoRows item(s) while $failedRows row(s) report Failed/Error"
+  }
+  if ($matchedFailedNames.Count -ne $failedRows) {
+    $runInfoProblems += "RunInfos names $($matchedFailedNames.Count) of $failedRows Failed/Error row(s)"
+  }
+  if ($runInfoProblems.Count -gt 0) {
+    throw "$($e.suite): the ResultSummary/RunInfos list in $($e.file) does not describe the Failed/Error rows one for one while the total was $total - the failure log and the verdicts are two halves of the same report, so a file whose log lost an item, kept a stale item, named a passing row, or moved an item outside the run window can keep every count and every ErrorInfo identical. broken: $($runInfoProblems -join ', '). A TRX whose failure log contradicts its own verdicts was hand-merged or patched; regenerate it from a clean test run."
+  }
+
+  # ResultSummary/Output/StdOut is the test host's own console text: what the
+  # runner printed while it discovered and executed this suite. No check above
+  # reads it, so a summary whose output was dropped, duplicated, blanked or
+  # copied from another suite keeps every count, every ErrorInfo and every
+  # RunInfo identical while the report no longer shows which suite produced it.
+  # The block is read by local name for the same adapter reason as ErrorInfo.
+  $summaryOutputBlocks = 0
+  $summaryStdOutBlocks = 0
+  $summaryStdOutText = ''
+  foreach ($summaryChild in @($xml.TestRun.ResultSummary.ChildNodes)) {
+    if ([string]$summaryChild.LocalName -ne 'Output') { continue }
+    $summaryOutputBlocks++
+    foreach ($outputChild in @($summaryChild.ChildNodes)) {
+      if ([string]$outputChild.LocalName -ne 'StdOut') { continue }
+      $summaryStdOutBlocks++
+      $summaryStdOutText = [string]$outputChild.InnerText
+    }
+  }
+  $summaryOutputProblems = @()
+  if ($summaryOutputBlocks -ne 1) {
+    $summaryOutputProblems += "the summary declares $summaryOutputBlocks Output block(s)"
+  }
+  if ($summaryStdOutBlocks -ne 1) {
+    $summaryOutputProblems += "the summary declares $summaryStdOutBlocks StdOut block(s)"
+  }
+  if ([string]::IsNullOrWhiteSpace($summaryStdOutText)) {
+    $summaryOutputProblems += 'the StdOut text is blank'
+  }
+  $summaryOutputNonBlank = [int](-not [string]::IsNullOrWhiteSpace($summaryStdOutText))
+  $summaryOutputNamesSuite = 0
+  if ($summaryOutputNonBlank -eq 1 -and $summaryStdOutText.IndexOf([string]$e.suite, [System.StringComparison]::Ordinal) -ge 0) {
+    $summaryOutputNamesSuite = 1
+  }
+  if ($summaryOutputNonBlank -eq 1 -and $summaryOutputNamesSuite -eq 0) {
+    $summaryOutputProblems += "the StdOut text does not name the suite '$($e.suite)'"
+  }
+  if ($summaryOutputProblems.Count -gt 0) {
+    throw "$($e.suite): the ResultSummary/Output/StdOut block in $($e.file) does not belong to this suite while the total was $total - the console output is the host's own record of what it ran, so a file whose output block was dropped, duplicated, blanked or copied from another suite can keep every count identical. broken: $($summaryOutputProblems -join ', '). A TRX whose console output contradicts its own suite was hand-merged or patched; regenerate it from a clean test run."
+  }
+
   # The verdict on top of the counters: ResultSummary/@outcome says how the whole
   # run ended, and no count above reads it. The rows and the buckets can agree with
   # each other while the verdict that summarises both is stale or invented - a file
@@ -1596,6 +1857,9 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): executionIds=$($execByDefId.Count) distinct declared ids=$($defExecCounts.Count) paired rows=$pairedRowExecs paired result directories=$pairedRowDirs"
   "$($e.suite): displayNames=$displayNameChecked declared prefixes=$($displayNameChecked - $displayNameLost.Count) mismatched=$($displayNameLost.Count)"
   "$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"
+  "$($e.suite): failureEvidence=$evidenceRows failed=$failedWithEvidence/$failedRows passed=$passedWithEvidence/$passedRows blankMessages=$blankFailureText duplicates=$duplicateEvidence"
+  "$($e.suite): runInfos=$runInfoRows failedRows=$failedRows matched=$($matchedFailedNames.Count) passed=$runInfoForPassed unmatched=$runInfoUnmatched duplicateMatches=$runInfoDuplicates outside=$runInfoOutside blankText=$runInfoBlank wrongMachine=$runInfoWrongMachine badOutcome=$runInfoBadOutcome"
+  "$($e.suite): summaryOutput=$summaryOutputBlocks stdout=$summaryStdOutBlocks nonBlank=$summaryOutputNonBlank suiteNamed=$summaryOutputNamesSuite"
   "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot bound rows=$boundRows header id collisions=$headerCollisions"
   "$($e.suite): assemblyDeclaration=$assemblyPairs storage/codeBase pairs=$($assemblyPairs - $assemblyPairLostCount) same file adapters=$($adapterValues.Count)"
   "$($e.suite): listVocabulary=$listKnown/$listCount canonical names=$listCanonical distinct names=$($listNames.Count - $listNameBlank - $listNameDuplicates.Count) unreferenced lists=$($unreferencedLists.Count)"

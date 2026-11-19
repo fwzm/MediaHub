@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-05T01:00+08:00",
-  "updated_by": "lead-W6-113-r40",
+  "updated_at": "2026-11-19T15:40:00+08:00",
+  "updated_by": "lead-W6-113-r43",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -885,6 +885,76 @@
       "notes": "第 21 层收的是「文件讲述这次运行的顺序」：Results 第 N 行必须是 TestEntries 第 N 条声明的那个 testId。规范顺序由生产者（运行时写入顺序）决定，本层不假定任何排序规则；只比较 entries 与 results 两侧，TestDefinitions 的文档顺序随 VSTest 内部调度变化，不作判据。",
       "next_action": "候选下一层：①Counters/@inconclusive、@inProgress、@pending 三个桶与结果行分布的桶表补全；②UnitTestResult/@duration 与 startTime/endTime 的算术自洽（duration 与差值是否一致）；③TestSettings/@name 与 Deployment 目录名的多重派生关系。",
       "closed_at": "2026-11-05T01:00+08:00"
+    },
+    {
+      "id": "W6-113an",
+      "title": "第二十二层：失败证据必须与自己的 verdict 一致（Output/ErrorInfo ↔ outcome）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r41",
+      "branch": "feature/windows-w6-113an-failure-evidence",
+      "evidence": [
+        "check-test-suite-baseline.ps1 109,291 -> 113,800 B (+75 lines, 1,987 lines, sha256 26428d0621b8f7e81792da727da1f94e911bbb1e9528381c41d12866a4b632e6, pure ASCII), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-22 invariants: a Failed/Error row carries exactly one Output/ErrorInfo whose Message is not blank; a Passed row carries none; more than one ErrorInfo is RED; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI): new gate exit 0; ladder failureEvidence=0 failed=0/0 passed=0/1973 blankMessages=0 duplicates=0 and .../104; combined tests=2077; growth warnings only (ArtworkDiskCacheTests +10, MpvSubtitleStyleTests +2, PlaylistStoreTests +2 over baseline 1959).",
+        "Negative controls: 7 cases at D:/mh-verify/r41; clean-green OLD=0 NEW=0, error-with-evidence OLD=0 NEW=0 (failureEvidence=1 failed=1/1 passed=0/1972); passed-with-evidence, passed-with-duplicate-evidence, error-with-blank-message, error-without-evidence, error-with-duplicate-evidence all OLD=0 NEW=1, each naming its own defect.",
+        "Implementation sha256 26428d06... unchanged across the whole matrix; clean-green re-run after the matrix still OLD=0 NEW=0 (byte restoration verified).",
+        "Real failure corpus (artifact 44120750161, 767 rows): 6 Failed rows all carry non-empty Message+StackTrace, 761 Passed rows carry no ErrorInfo; 6 RunInfos carry [FAIL] text and timestamps inside [start, finish].",
+        "Incident recorded: PowerShell XML adapter flattens the namespaced Message child to System.String, so .InnerText read empty; the fix walks ChildNodes by LocalName. Probe evidence: messageType=System.String, messageInnerText=[], XPath messageInnerText=[boom: Error 42].",
+        "Corpus must be generated with DOTNET_CLI_UI_LANGUAGE=en-US VSLANG=1033; localized TestList names trip the layer-20 listVocabulary check.",
+        "Commit 1762cd35f40d529f443cdaaaea848f4ac79a1246 (1 file changed / +75 insertions / 0 deletions), non-force push 77ef1f2f..1762cd35; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44465809330 (push) = success and 44465888575 (pull_request) = success, both printing the new ladder line; licence check-licence-surface checks=57 failed=0 warnings=0 skipped=0.",
+        "Android CI 44465888544 = success at the code head; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001."
+      ],
+      "notes": "第 22 层收的是失败证据：verdict 为 Failed/Error 的行必须带一个非空 Message，Passed 行不得带任何 ErrorInfo。前二十一层全部按 id 与计数建表，Output 子树从未进入比较；ErrorInfo/StackTrace/RunInfos/StdOut 在脚本里引用计数为 0。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①RunInfos 与失败行一一对应（数量、outcome、[FAIL] 文本、时间窗）；②ResultSummary/Output/StdOut 与执行器诊断的自洽；③ErrorInfo/StackTrace 文本与 RunInfo 文本的交叉引用。",
+      "closed_at": "2026-11-19T14:00+08:00"
+    },
+    {
+      "id": "W6-113ao",
+      "title": "第二十三层：失败日志必须一一描述失败行（RunInfos ↔ Failed/Error）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r42",
+      "branch": "feature/windows-w6-113ao-runinfos",
+      "evidence": [
+        "check-test-suite-baseline.ps1 113,800 -> 121,162 B (+134 lines, 2,121 lines, sha256 20e3c53cda1cfd8f90ac1057b2819657e1fb3dc5c561bdd3fefe8390bc75826a, pure ASCII), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-23 invariants: RunInfo count equals Failed/Error row count; every failed row is named exactly once; Text is not blank; timestamp parses inside [Times.start, Times.finish]; computerName matches the row; outcome is not a success verdict; naming a Passed row, naming no row, or naming a row twice is RED; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI): new gate exit 0; ladder runInfos=0 failedRows=0 matched=0 passed=0 unmatched=0 duplicateMatches=0 outside=0 blankText=0 wrongMachine=0 badOutcome=0 for both suites; combined tests=2077; growth warnings only (1973 > baseline 1959).",
+        "Negative controls: 10 cases at D:/mh-verify/r43; clean-green OLD=0 NEW=0; fail-with-runinfo OLD=0 NEW=0 (runInfos=1 failedRows=1 matched=1); fail-without-runinfo, runinfo-for-passing, runinfo-duplicate, runinfo-outside-window, runinfo-wrong-machine, runinfo-blank-text, runinfo-bad-outcome, runinfo-unmatched-text all OLD=0 NEW=1, each naming its own defect.",
+        "Incident recorded: the first duplicate fixture placed the second RunInfo outside the <RunInfos> wrapper, so the ladder still read runInfos=1 and the new layer stayed green; moving it inside the wrapper made the case RED with 'RunInfos carries 2 item(s) while 1 row(s)'. Negative controls must check the ladder count, not only the exit code.",
+        "Implementation sha256 20e3c53c... unchanged across the whole matrix; clean-green re-run after the matrix still OLD=0 NEW=0 (byte restoration verified).",
+        "Commit c99ac346c8cdb248a55995c0f82d243d5461cd10 (ci(windows): the failure log must describe the failed rows (W6-113ao)), 1 file changed / +134 insertions / 0 deletions, non-force push to feature/windows-w6-113ao-runinfos; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44475518066 (push) = success and 44475570854 (pull_request) = success; the push run printed MediaHub.Tests: runInfos=0 failedRows=0 matched=0 passed=0 unmatched=0 duplicateMatches=0 outside=0 blankText=0 wrongMachine=0 badOutcome=0 and the webdav line of the same shape.",
+        "Android CI 44475570962 在取证时 visual-instrumentation (API 32/36) 仍 in_progress（CI_PENDING）; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001.",
+        "Draft PR #135 (base main, stacked on #132) carries the layer text; G7 remains DO_NOT_MERGE. Baseline JSON and updater were not changed, so there is no migration."
+      ],
+      "notes": "第 23 层收的是 ResultSummary/RunInfos 这棵失败日志：runner 写的每条 RunInfo 必须一一描述 Results 里的 Failed/Error 行，而不是只靠 Counters 的失败数。前二十二层只读计数、位置、outcome 桶与每行 ErrorInfo，RunInfos 在脚本里引用计数为 0。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①ResultSummary/Output/StdOut 与执行器诊断的自洽；②ErrorInfo/StackTrace 文本与 RunInfo 文本的交叉引用；③RunInfos 多条/空块与 runDeploymentRoot 的边界；另列独立任务刷新基线（1973 vs 1959）。",
+      "closed_at": "2026-11-19T15:15:00+08:00"
+    },
+    {
+      "id": "W6-113ap",
+      "title": "第二十四层：控制台输出必须命名自己的套件（ResultSummary/Output/StdOut）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r43",
+      "branch": "feature/windows-w6-113ap-summary-output",
+      "evidence": [
+        "check-test-suite-baseline.ps1 121,162 -> 124,609 B (+55 lines, 2,176 lines, sha256 b9c7e10b59db94e5d0f0c224c4374f26c6208f200e3ed21f9606e5b5e8b4d532, pure ASCII), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-24 invariants: ResultSummary has exactly one direct Output child; Output has exactly one StdOut child; the StdOut text is not blank; the StdOut text names its own suite (MediaHub.Tests or MediaHub.WebDav.Tests); missing, duplicate, blank, or wrong-suite blocks are RED; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI): new gate exit 0; ladder summaryOutput=1 stdout=1 nonBlank=1 suiteNamed=1 for both suites; combined tests=2077; growth warnings only (1973 > baseline 1959).",
+        "Negative controls: 7 cases at D:/mh-verify/r44; clean-green OLD=0 NEW=0; stdout-missing, stdout-blank, stdout-duplicate, stdout-wrong-suite, output-missing, output-duplicate all OLD=0 NEW=1, each naming its own defect; implementation sha256 b9c7e10b... unchanged across the matrix and clean-green re-run after the matrix still OLD=0 NEW=0.",
+        "Real failure corpus (artifact 44120750161, 767 rows): ResultSummary/Output/StdOut is 7,084 B; 6 Failed testNames all occur in StdOut, 761 Passed testNames occur zero times; green windows/webdav corpora carry 504/556 B and name their own suites.",
+        "Incident recorded: a single runner process calling the gate 14 times exceeded the 120 s run_code wrapper; the matrix was split into run-group.mjs groups of 4+3 cases and completed. Old-gate logs are UTF-8 text and ops_read_files returning empty for them is a tool behavior, not an exit-code issue.",
+        "Commit 781d102421ea9f8ea322e5e72e9968d48d3e2da5 (ci(windows): the console output must name its own suite (W6-113ap)), 1 file changed / +55 insertions / 0 deletions, non-force push to feature/windows-w6-113ap-summary-output; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44479925035 (push) = success and 44479988695 (pull_request) = success; the runs printed summaryOutput=1 stdout=1 nonBlank=1 suiteNamed=1 for both suites.",
+        "Android CI 44479988666 = in_progress (CI_PENDING) at the code head; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001.",
+        "Draft PR #136 (base main, stacked on #135) carries the layer text; G7 remains DO_NOT_MERGE. Baseline JSON and updater were not changed, so there is no migration."
+      ],
+      "notes": "第 24 层收的是 ResultSummary/Output/StdOut：runner 写的控制台记录必须存在、非空白，并且命名自己的套件。前二十三层只读计数、位置、outcome 桶、每行 ErrorInfo 与 RunInfos，ResultSummary/Output/StdOut 在脚本里引用计数为 0。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①ErrorInfo/StackTrace 文本与 RunInfo Text 的交叉引用；②RunInfos 多条/空块与 runDeploymentRoot 的边界；③Times/@creation|@queuing 与 ResultSummary 的窗口自洽；另列独立任务刷新基线（1973 vs 1959）。",
+      "closed_at": "2026-11-19T15:45:00+08:00"
     }
   ]
 }
