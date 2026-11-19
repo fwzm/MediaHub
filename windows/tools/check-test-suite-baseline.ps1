@@ -262,6 +262,10 @@
 #     Text, a timestamp outside Times, another machine, or an outcome that claims
 #     success - -> red: the failure log and the verdicts are two halves of the same
 #     report and no count above compares them
+#   a RunInfo that carries zero or more than one direct Text child -> red: the
+#     item's text is the only place its test name lives, and a duplicated or
+#     missing Text leaves the item list, timestamps and outcomes intact while
+#     the failure log no longer names one test per item.
 #   a failure log split across more than one ResultSummary/RunInfos block, an
 #     empty RunInfos block beside the one that carries the items, or a RunInfos
 #     block outside ResultSummary -> red: the block is one container, and its
@@ -338,6 +342,8 @@
 #   a failed run that does not carry exactly one ResultSummary/RunInfos container,
 #     a run without Failed/Error rows that carries more than one, or any RunInfos
 #     block outside ResultSummary -> red
+#   a RunInfo whose direct Text children are not exactly one -> red (the item's
+#     only name was duplicated, split or dropped while the item itself survives)
 
 #   the row at position N of Results does not name the test that position N of
 #     TestEntries declares -> red. The two sections are emitted from one ordered
@@ -1659,6 +1665,28 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): the ResultSummary/RunInfos list in $($e.file) does not describe the Failed/Error rows one for one while the total was $total - the failure log and the verdicts are two halves of the same report, so a file whose log lost an item, kept a stale item, named a passing row, or moved an item outside the run window can keep every count and every ErrorInfo identical. broken: $($runInfoProblems -join ', '). A TRX whose failure log contradicts its own verdicts was hand-merged or patched; regenerate it from a clean test run."
   }
 
+  # Each RunInfo is one failure-log item and its Text is the only child that
+  # names the test. A duplicated Text or a missing one leaves the item count,
+  # timestamp, machine and outcome identical while the item no longer has one
+  # unambiguous name. The check is kept separate from the item list above so a
+  # failure log with the right number of items still fails on its own shape.
+  $runInfoTextProblems = @()
+  $runInfoTextSingular = 0
+  foreach ($runInfo in @($runInfoNodes)) {
+    $runInfoTextChildren = @()
+    foreach ($runInfoChild in @($runInfo.ChildNodes)) {
+      if ([string]$runInfoChild.LocalName -eq 'Text') { $runInfoTextChildren += $runInfoChild }
+    }
+    if (@($runInfoTextChildren).Count -eq 1) {
+      $runInfoTextSingular++
+    } elseif ($runInfoTextProblems.Count -lt 12) {
+      $runInfoTextProblems += "a RunInfo carries $(@($runInfoTextChildren).Count) Text child element(s)"
+    }
+  }
+  if ($runInfoTextProblems.Count -gt 0) {
+    throw "$($e.suite): the RunInfo text layout in $($e.file) does not give every failure log item exactly one Text element while the total was $total - the item count, timestamp, machine and outcome can all stay identical while a duplicated or missing Text leaves the failure item without one unambiguous name. broken: $($runInfoTextProblems -join ', '). A TRX whose failure log item is not a single text node was hand-merged or patched; regenerate it from a clean test run."
+  }
+
   # ResultSummary/RunInfos is one container, not a bag of items. The layer above
   # counts the items wherever they sit, so two wrappers around one item, an empty
   # second wrapper, or a wrapper parked under Deployment all keep the item list
@@ -1965,6 +1993,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): failureEvidence=$evidenceRows failed=$failedWithEvidence/$failedRows passed=$passedWithEvidence/$passedRows blankMessages=$blankFailureText duplicates=$duplicateEvidence"
   "$($e.suite): runInfos=$runInfoRows failedRows=$failedRows matched=$($matchedFailedNames.Count) passed=$runInfoForPassed unmatched=$runInfoUnmatched duplicateMatches=$runInfoDuplicates outside=$runInfoOutside blankText=$runInfoBlank wrongMachine=$runInfoWrongMachine badOutcome=$runInfoBadOutcome"
   "$($e.suite): runInfoBlocks=$runInfoLayoutCount strayRunInfoBlocks=$([int]$runInfoLayoutAnywhere - [int]$runInfoLayoutCount)"
+  "$($e.suite): runInfoTexts=$runInfoTextSingular/$(@($runInfoNodes).Count)"
   "$($e.suite): summaryOutput=$summaryOutputBlocks stdout=$summaryStdOutBlocks nonBlank=$summaryOutputNonBlank suiteNamed=$summaryOutputNamesSuite"
   "$($e.suite): phaseLedger=$summaryPhaseFound/4 ordered=$summaryPhaseOrdered"
   "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot nameStamp=$nameStampMatches bound rows=$boundRows header id collisions=$headerCollisions"
