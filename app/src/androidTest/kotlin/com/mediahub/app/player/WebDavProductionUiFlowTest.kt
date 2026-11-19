@@ -127,11 +127,18 @@ class WebDavProductionUiFlowTest {
             waitNode(hasText("电影 a+b%.mp4")).performClick()
             waitNode(hasText("立即播放", substring = false)).performClick()
             fun playerEntry(resource: Int) {
-                val label = context.getString(resource)
-                if (compose.onAllNodesWithText(label).fetchSemanticsNodes().isEmpty()) {
+                val descriptionResource = when (resource) {
+                    com.mediahub.feature.player.R.string.player_info_entry ->
+                        com.mediahub.feature.player.R.string.player_info_entry_description
+                    com.mediahub.feature.player.R.string.player_subtitles ->
+                        com.mediahub.feature.player.R.string.player_subtitles_description
+                    else -> resource
+                }
+                val label = context.getString(descriptionResource)
+                if (compose.onAllNodes(hasContentDescription(label)).fetchSemanticsNodes().isEmpty()) {
                     compose.onRoot().performTouchInput { click(center) }
                 }
-                waitNode(hasText(label)).performClick()
+                waitNode(hasContentDescription(label)).performClick()
             }
             fun leaveSubtitleAndPlayer() {
                 device.pressBack()
