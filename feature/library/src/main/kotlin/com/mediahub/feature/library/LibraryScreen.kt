@@ -3,6 +3,7 @@ package com.mediahub.feature.library
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -272,67 +274,72 @@ fun LibraryContent(
                         }
                     }
 
-                    LazyVerticalGrid(
-                        state = gridState,
-                        columns = GridCells.Fixed(3),
+                    BoxWithConstraints(
                         modifier = Modifier.fillMaxSize().padding(padding),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        if (s.canGoUp) {
-                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
-                                TextButton(onClick = onGoToParent, modifier = Modifier.fillMaxWidth()) {
-                                    Text("⬆ 返回上级")
+                        val columns = libraryGridColumnCount(maxWidth.value)
+                        LazyVerticalGrid(
+                            state = gridState,
+                            columns = GridCells.Fixed(columns),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            if (s.canGoUp) {
+                                item(span = { GridItemSpan(maxLineSpan) }) {
+                                    TextButton(onClick = onGoToParent, modifier = Modifier.fillMaxWidth()) {
+                                        Text("⬆ 返回上级")
+                                    }
                                 }
                             }
-                        }
-                        if (shouldPreserveProviderOrder(s.sort)) {
-                            gridItems(
-                                s.items,
-                                key = { it.id },
-                                span = { item ->
+                            if (shouldPreserveProviderOrder(s.sort)) {
+                                gridItems(
+                                    s.items,
+                                    key = { it.id },
+                                    span = { item ->
+                                        if (item.type == MediaType.FOLDER) {
+                                            GridItemSpan(maxLineSpan)
+                                        } else {
+                                            GridItemSpan(1)
+                                        }
+                                    },
+                                ) { item ->
                                     if (item.type == MediaType.FOLDER) {
-                                        androidx.compose.foundation.lazy.grid.GridItemSpan(3)
+                                        FolderRow(item = item, onClick = { onOpenFolder(item) })
                                     } else {
-                                        androidx.compose.foundation.lazy.grid.GridItemSpan(1)
+                                        PosterCell(item = item, onClick = { onLibraryItemClick(item, onOpenFolder, onOpenItem) })
                                     }
-                                },
-                            ) { item ->
-                                if (item.type == MediaType.FOLDER) {
-                                    FolderRow(item = item, onClick = { onOpenFolder(item) })
-                                } else {
+                                }
+                            } else {
+                                val folders = s.items.filter { it.type == MediaType.FOLDER }
+                                val mediaItems = s.items.filter { it.type != MediaType.FOLDER }
+                                folders.forEach { folder ->
+                                    item(span = { GridItemSpan(maxLineSpan) }) {
+                                        FolderRow(item = folder, onClick = { onOpenFolder(folder) })
+                                    }
+                                }
+                                gridItems(mediaItems, key = { it.id }) { item ->
                                     PosterCell(item = item, onClick = { onLibraryItemClick(item, onOpenFolder, onOpenItem) })
                                 }
                             }
-                        } else {
-                            val folders = s.items.filter { it.type == MediaType.FOLDER }
-                            val mediaItems = s.items.filter { it.type != MediaType.FOLDER }
-                            folders.forEach { folder ->
-                                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
-                                    FolderRow(item = folder, onClick = { onOpenFolder(folder) })
+                            if (s.isLoadingMore) {
+                                item(span = { GridItemSpan(maxLineSpan) }) {
+                                    Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator(strokeWidth = 2.dp)
+                                    }
                                 }
                             }
-                            gridItems(mediaItems, key = { it.id }) { item ->
-                                PosterCell(item = item, onClick = { onLibraryItemClick(item, onOpenFolder, onOpenItem) })
-                            }
-                        }
-                        if (s.isLoadingMore) {
-                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
-                                Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                                    CircularProgressIndicator(strokeWidth = 2.dp)
+                            if (s.loadMoreError != null) {
+                                item(span = { GridItemSpan(maxLineSpan) }) {
+                                    MediaHubStatus(
+                                        title = "更多内容载入失败",
+                                        message = s.loadMoreError,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        retryLabel = "加载更多",
+                                        onRetry = onLoadMore,
+                                    )
                                 }
-                            }
-                        }
-                        if (s.loadMoreError != null) {
-                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
-                                MediaHubStatus(
-                                    title = "更多内容载入失败",
-                                    message = s.loadMoreError,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    retryLabel = "加载更多",
-                                    onRetry = onLoadMore,
-                                )
                             }
                         }
                     }
