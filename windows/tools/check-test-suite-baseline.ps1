@@ -214,6 +214,15 @@
 #   and a StdOut that names the suite it belongs to; the ladder line records
 #   summaryOutput=<n> stdout=<n> nonBlank=<0|1> suiteNamed=<0|1>.
 
+#   The run's name and its creation stamp are two descriptions of the same act.
+#   TestRun/@name carries "<user>@<machine> <date> <time>" and Times/@creation
+#   carries the machine instant, but no check above compared the two. A header
+#   whose creation stamp was shifted, or whose name was rewritten together with
+#   its deployment root, keeps every count, every row time and every header
+#   derivation identical while the report names a run that did not produce it.
+#   The gate now requires the name's date and time to match Times/@creation to
+#   the second; the ladder line records nameStamp=<0|1>.
+
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
 #   total    > baseline -> green + warning (please refresh the baseline)
@@ -249,6 +258,9 @@
 #     output is the host's record of what it ran, and a summary whose output block
 #     was dropped, copied from another suite, or left stale keeps every count
 #     identical.
+#   the date and time embedded in TestRun/@name disagree with Times/@creation
+#     -> red: the run's two self-descriptions name different creation instants,
+#        even while every count and every row timing stays unchanged.
 #   an outcome kind the baseline did not have appears, or a baseline outcome
 #     reports fewer rows -> red; an outcome reporting more rows -> green + warning
 #   a test id that is not unique inside one TRX, a definition whose id has no
@@ -1741,11 +1753,15 @@ foreach ($e in $baseline.suites) {
   $runUser = [string]$xml.TestRun.runUser
   $runNameUser = $null
   $runNameMachine = $null
+  $runNameDate = ''
+  $runNameTime = ''
   $runNameCanonical = $false
   if ($runName -match '^(\S+)@(\S+) ([0-9]{4}-[0-9]{2}-[0-9]{2}) ([0-9]{2}:[0-9]{2}:[0-9]{2})$') {
     $runNameCanonical = $true
     $runNameUser = [string]$Matches[1]
     $runNameMachine = [string]$Matches[2]
+    $runNameDate = [string]$Matches[3]
+    $runNameTime = [string]$Matches[4]
   }
   $runUserMachine = $null
   $runUserLeaf = $null
@@ -1756,6 +1772,7 @@ foreach ($e in $baseline.suites) {
     $runUserLeaf = [string]$Matches[2]
   }
   $derivedRoot = 0
+  $nameStampMatches = 0
   $headerMachine = $null
   if ($settingsCount -ne 1) { $headerLost += "the file declares $settingsCount TestSettings block(s)" }
   if ([string]::IsNullOrWhiteSpace($settingsName)) { $headerLost += 'TestSettings names no settings block' }
@@ -1774,6 +1791,15 @@ foreach ($e in $baseline.suites) {
   if (-not $runNameCanonical) {
     if ($headerFileWarn.Count -lt 12) { $headerFileWarn += "$($e.file) run name '$runName' is not user@machine plus a timestamp - the deployment root cannot be derived from it" }
   } else {
+    if ($null -ne $declarationCreation) {
+      $runNameStamp = $runNameDate + ' ' + $runNameTime
+      $creationStamp = $declarationCreation.ToString('yyyy-MM-dd HH:mm:ss', [System.Globalization.CultureInfo]::InvariantCulture)
+      if ([string]::Equals($runNameStamp, $creationStamp, [System.StringComparison]::Ordinal)) {
+        $nameStampMatches = 1
+      } else {
+        if ($headerLost.Count -lt 12) { $headerLost += "TestRun name carries '$runNameStamp' while Times.creation is '$creationStamp'" }
+      }
+    }
     if ($runUserCanonical) {
       if (-not [string]::Equals($runNameUser, $runUserLeaf, [System.StringComparison]::OrdinalIgnoreCase)) {
         $headerLost += "TestRun name says user '$runNameUser' while runUser says '$runUserLeaf'"
@@ -1860,7 +1886,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): failureEvidence=$evidenceRows failed=$failedWithEvidence/$failedRows passed=$passedWithEvidence/$passedRows blankMessages=$blankFailureText duplicates=$duplicateEvidence"
   "$($e.suite): runInfos=$runInfoRows failedRows=$failedRows matched=$($matchedFailedNames.Count) passed=$runInfoForPassed unmatched=$runInfoUnmatched duplicateMatches=$runInfoDuplicates outside=$runInfoOutside blankText=$runInfoBlank wrongMachine=$runInfoWrongMachine badOutcome=$runInfoBadOutcome"
   "$($e.suite): summaryOutput=$summaryOutputBlocks stdout=$summaryStdOutBlocks nonBlank=$summaryOutputNonBlank suiteNamed=$summaryOutputNamesSuite"
-  "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot bound rows=$boundRows header id collisions=$headerCollisions"
+  "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot nameStamp=$nameStampMatches bound rows=$boundRows header id collisions=$headerCollisions"
   "$($e.suite): assemblyDeclaration=$assemblyPairs storage/codeBase pairs=$($assemblyPairs - $assemblyPairLostCount) same file adapters=$($adapterValues.Count)"
   "$($e.suite): listVocabulary=$listKnown/$listCount canonical names=$listCanonical distinct names=$($listNames.Count - $listNameBlank - $listNameDuplicates.Count) unreferenced lists=$($unreferencedLists.Count)"
   "$($e.suite): runDeclarations=$declarationFacts/4 namespace=$([string](@('foreign','TeamTest/2010')[$declarationNamesOk])) timestamps=$declarationStamps ordered=$declarationOrdered explicit offsets=$declarationOffsets outside window=$declarationOutside"
