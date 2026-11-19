@@ -737,3 +737,345 @@
 
 ### 锁
 - run-id w6-r40-t5n8q3，owner lead，ttl 5400，三把资源：branch:feature/cross-device-source-sync、ref:origin/feature/cross-device-source-sync、worktree:D:/mh-w6；本轮结束全部释放。
+
+## Round 41（W6-113an，2026-11-19）：失败证据必须与自己的 verdict 一致
+
+### 切片动机
+- 第 15 层已经让 Counters 的每个非零桶与结果行分布逐桶相等（check 脚本 :1385 起），第 21 层钉住了两侧行的位置对应；失败的「证据」维度此前零引用：脚本里 ErrorInfo / StackTrace / RunInfos / StdOut 的引用计数都是 0。
+- 真实失败语料（artifact 44120750161 的 windows-tests.trx，767 行、6 个 Failed）显示：ErrorInfo 只出现在 Failed 行，Passed 行 761 条全部没有；6 条 RunInfo 的 outcome 均为 Error 且 Text 含 [FAIL]，时间戳都落在 [start, finish] 内。这使「证据与 verdict 一致」成为可断言的稳定结构。
+- 三个既有 next_action 候选的实际处置：①（inconclusive/inProgress/pending 桶）已被第 15 层桶表覆盖；②（duration 与 startTime/endTime 算术自洽）经实测 0/767 相等，不能作为不变量；③（TestSettings/@name 与 Deployment 目录名派生）已由头部层覆盖。因此第 22 层改读 ErrorInfo。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化、updater 未改 ⇒ 无迁移）
+- 行循环内收集 Output/ErrorInfo：Passed 行携带证据 → RED；Failed/Error 行没有 ErrorInfo → RED；Message 为空白 → RED；同一个 Output 内多个 ErrorInfo → RED；问题细节上限 12 条。
+- 文本读取必须按 local name 遍历 ChildNodes。PowerShell 的 XML adapter 把带默认命名空间的 Message 子元素压平成 System.String，取该字符串的 .InnerText 得到空串；探针输出 messageType=System.String、messageInnerText=[]，而 XPath 取到的同一节点 InnerText 为 'boom: Error 42'。
+- throw 排在 counterMismatch 之后，旧文案优先；台阶行在 counters 行后追加 failureEvidence=<rows> failed=<with>/<failed> passed=<with>/<passed> blankMessages=<n> duplicates=<n>；头部文档与 SEMANTICS 各加一条。
+
+### 负向对照（EXECUTED）
+- 七例矩阵（同一套语料、同一基线，old=main 闸门，new=本层闸门）：clean-green OLD=0 NEW=0；error-with-evidence OLD=0 NEW=0（台阶行 failureEvidence=1 failed=1/1 passed=0/1972）；passed-with-evidence、passed-with-duplicate-evidence、error-with-blank-message、error-without-evidence、error-with-duplicate-evidence 五个变异全部 OLD=0 NEW=1。
+- 五个 RED 的 new.log 各自点名具体缺陷：Passed 携带证据、Passed 携带 2 个 ErrorInfo、Error 的 Message 空白、Error 完全没有 ErrorInfo、Error 携带 2 个 ErrorInfo。
+- 实现态快照 sha256 26428d0621b8f7e81792da727da1f94e911bbb1e9528381c41d12866a4b632e6 在全部对照前后一致；对照结束后 clean-green 再跑仍 OLD=0 NEW=0。
+
+### 真实语料
+- 本机 dotnet test：MediaHub.Tests 1973 passed / 0 failed / 0 skipped，exit 0；MediaHub.WebDav.Tests 104 / 0 / 0，exit 0。
+- 新闸门 -ResultsDir ./artifacts/gate-corpus exit 0；台阶行 MediaHub.Tests: failureEvidence=0 failed=0/0 passed=0/1973 blankMessages=0 duplicates=0、MediaHub.WebDav.Tests: failureEvidence=0 failed=0/0 passed=0/104 blankMessages=0 duplicates=0；combined tests=2077；只有增长 warning（1973 > 基线 1959，新类 ArtworkDiskCacheTests +10、MpvSubtitleStyleTests +2、PlaylistStoreTests +2）。
+- 语料必须用英文 UI 生成：默认中文 UI 下 VSTest 写出「列表中未列出的结果 / 所有已加载的结果」，会触发第 20 层的 listVocabulary 判据；环境变量 DOTNET_CLI_UI_LANGUAGE=en-US、VSLANG=1033 可固定英文。
+
+### 数据源与规模
+- windows/tools/check-test-suite-baseline.ps1 109,291 B / 1,913 行 → 113,800 B / 1,987 行（+4,509 B / +75 行），0 个非 ASCII；sha256 26428d0621b8f7e81792da727da1f94e911bbb1e9528381c41d12866a4b632e6。
+- 双 shell 语法：pwsh 7.6.10 与 Windows PowerShell 5.1.26100.10003 均 errors=0。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+- 提交 1762cd35f40d529f443cdaaaea848f4ac79a1246（ci(windows): the failure evidence must agree with the verdict (W6-113an)），1 file changed / +75 insertions / 0 deletions，非 force push。
+- exact-head windows-ci：44465809330（push 事件）= success，44465888575（pull_request 事件）= success；两 run 的台阶行都出现 `MediaHub.Tests: failureEvidence=0 failed=0/0 passed=0/1973 blankMessages=0 duplicates=0` 与 webdav `…/104`，licence `check-licence-surface  checks=57 failed=0 warnings=0 skipped=0`；同 head Android CI 44465888544 = success（本提交只动 `windows/tools`，android/core/feature/app 子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+
+### 锁
+- run-id w6-113-round2-20261119，owner lead，8 把资源锁（3 remote-ref + 5 worktree），本轮结束 release-plan 释放。
+
+## Round 42（W6-113ao，2026-11-19）：失败日志必须一一描述失败行
+
+### 切片动机
+- 第 22 层把 Output/ErrorInfo 与 verdict 对齐后，RunInfos 仍是脚本里引用计数为 0 的子树；它是 runner 自己写的失败日志，与 Results 的 Failed/Error 行是同一份报告的两半。
+- 真实失败语料（artifact 44120750161，767 行、6 个 Failed）显示 6 条 RunInfo 与 6 个失败行同数，Text 都含 [FAIL]，时间戳都在 [start, finish] 内，因此“一一对应”可以断言。
+- 这也是 W6-113an 的 next_action 第一候选（RunInfos 数量、outcome、[FAIL] 文本、时间窗），不需要另找维度。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化）
+- 行循环在 `$oc` 后记录 `$failedRowNames` 与 `$passedRowNames`（testName 非空白）。
+- 新增 RunInfos 块，按 ChildNodes + LocalName 读取 `ResultSummary/RunInfos/RunInfo` 的 Text，沿用第 22 层的 adapter 规避。
+- 判据：RunInfo 条数等于 Failed/Error 行数；每个失败行被恰好命名一次；Text 非空白；timestamp 可解析且落在 [Times.start, Times.finish]；computerName 与行一致；outcome 非空且不在 {Passed, Completed, Succeeded}；把 Text 用最长名称匹配到行，命中 Passed、无命中、重复命中都 RED。
+- throw 位于第 22 层 counter/evidence throw 之后，旧文案优先；细节上限 12 条。
+- 台阶行追加 `runInfos= failedRows= matched= passed= unmatched= duplicateMatches= outside= blankText= wrongMachine= badOutcome=`。
+
+### 负向对照（EXECUTED）
+- 同一套 1973+104 行英文语料，old=D:/mh-verify/r43/gate-prev.ps1（第 22 层，113,800 B，sha256 26428d0621b8f7e81792da727da1f94e911bbb1e9528381c41d12866a4b632e6），new=本层。
+- clean-green OLD=0 NEW=0；fail-with-runinfo OLD=0 NEW=0（台阶行 runInfos=1 failedRows=1 matched=1；WebDav 为 0/0）；八个变异全部 OLD=0 NEW=1。
+- 八个变异分别覆盖：失败行没有 RunInfo；RunInfo 命名 Passed 行；同名重复；时间戳在窗口外；machine 不符；Text 空白；outcome=Passed；Text 不含任何行名。
+- 事故记录：首个 duplicate 夹具把第二个 RunInfo 放在 `<RunInfos>` 包装外，台阶行仍是 `runInfos=1`，新层因此保持绿；改为包装内两个子元素后才 RED，文案点名 `RunInfos carries 2 item(s) while 1 row(s)`。负向对照必须核对台阶计数确认真的走到新层，不能只看 exit code。
+- 实现态 sha256 20e3c53cda1cfd8f90ac1057b2819657e1fb3dc5c561bdd3fefe8390bc75826a 在矩阵前后一致；矩阵后 clean-green 复跑仍绿。
+
+### 真实语料
+- 本机 dotnet test：MediaHub.Tests 1973 passed / 0 failed / 0 skipped，exit 0；MediaHub.WebDav.Tests 104 / 0 / 0，exit 0（英文 UI）。
+- 新闸门 -ResultsDir ./artifacts/gate-corpus exit 0；两套件台阶行均为 runInfos=0 failedRows=0 matched=0 passed=0 unmatched=0 duplicateMatches=0 outside=0 blankText=0 wrongMachine=0 badOutcome=0；combined tests=2077；只有基线增长 warning（1973 > 1959）。
+
+### 提交 / CI
+- 提交 c99ac346c8cdb248a55995c0f82d243d5461cd10（1 文件 +134 行），非 force push 新分支 feature/windows-w6-113ao-runinfos；Draft PR #135（base main，stacked 在 #132 第 22 层之上）。
+- exact-head windows-ci **44475518066**（push）= success，**44475570854**（pull_request）= success；push 日志台阶行 `MediaHub.Tests: runInfos=0 failedRows=0 matched=0 passed=0 unmatched=0 duplicateMatches=0 outside=0 blankText=0 wrongMachine=0 badOutcome=0`，WebDav 台阶行同形。
+- 两个事件 run 使用同一 head c99ac346；许可证检查 check-licence-surface 随 Windows job 一起通过（57 checks / 0 failed / 0 warnings / 0 skipped）。
+- 同 head Android CI **44475570962** 在取证时 visual-instrumentation (API 32/36) 仍 in_progress（CI_PENDING，不写 PASS）；本提交只动 windows/tools，android/core/feature/app 子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承。
+- 基线 JSON 与 updater 未改，无迁移。
+
+### 边界
+- 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；G7 恒 DO_NOT_MERGE。
+
+## Round 43（W6-113ap，2026-11-19）：控制台输出必须命名自己的套件
+
+### 切片动机
+- 第 23 层收 RunInfos 后，ResultSummary/Output/StdOut 仍是脚本里引用计数为 0 的子树；它是 runner 自己写的控制台记录，和 Results/Counters 是同一份报告的不同部分。
+- 真实失败语料（artifact 44120750161，767 行、6 个 Failed）的 StdOut 为 7,084 B，6 个失败 testName 全部出现在 StdOut，761 个 Passed 行的 testName 一个也没有出现；绿色语料 windows 504 B / webdav 556 B，各自都含自己的套件名。
+- 这对应 W6-113ao 的 next_action 第一候选（ResultSummary/Output/StdOut 与执行器诊断自洽），且不需要改基线 JSON。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化）
+- ResultSummary 必须有且只有一个直接子节点 Output，Output 内必须有且只有一个 StdOut。
+- StdOut 文本必须非空白，并且必须包含本套件名（$e.suite，MediaHub.Tests 或 MediaHub.WebDav.Tests）；缺失、重复、空白、错套件都 RED。
+- 读取沿用 ChildNodes + LocalName，避开 PowerShell XML adapter 把带默认命名空间的子元素压平成字符串的坑。
+- throw 位于第 23 层 RunInfos throw 之后，旧文案优先；细节上限 12 条。
+- 台阶行追加 `summaryOutput=<n> stdout=<n> nonBlank=<0|1> suiteNamed=<0|1>`。
+
+### 负向对照（EXECUTED）
+- 同一套 1973+104 行英文语料，old=D:/mh-verify/r44/gate-prev.ps1（第 23 层，2,121 行，sha256 20e3c53cda1cfd8f90ac1057b2819657e1fb3dc5c561bdd3fefe8390bc75826a），new=本层。
+- clean-green OLD=0 NEW=0；stdout-missing、stdout-blank、stdout-duplicate、stdout-wrong-suite、output-missing、output-duplicate 六个变异全部 OLD=0 NEW=1。
+- 六个 RED 的 broken 细节分别点名：0 个 StdOut + 空白、StdOut 空白、2 个 StdOut、StdOut 不命名套件、0 个 Output + 0 个 StdOut + 空白、2 个 Output + 2 个 StdOut。
+- 实现态 sha256 在矩阵前后一致；对照结束后 clean-green 复跑仍 OLD=0 NEW=0。
+
+### 真实语料
+- 本机 dotnet test：MediaHub.Tests 1973 passed / 0 failed / 0 skipped，exit 0；MediaHub.WebDav.Tests 104 / 0 / 0，exit 0（英文 UI）。
+- 新闸门 -ResultsDir ./artifacts/gate-corpus exit 0；两套件台阶行均为 summaryOutput=1 stdout=1 nonBlank=1 suiteNamed=1；combined tests=2077；只有基线增长 warning（1973 > 1959）。
+- 语料必须用英文 UI 生成：默认中文 UI 下 VSTest 写出本地化的 TestList 名，会触发第 20 层 listVocabulary 判据。
+
+### 数据源与规模
+- windows/tools/check-test-suite-baseline.ps1 121,162 B / 2,121 行 → 124,609 B / 2,176 行（+3,447 B / +55 行），0 个非 ASCII；sha256 b9c7e10b59db94e5d0f0c224c4374f26c6208f200e3ed21f9606e5b5e8b4d532。
+- 双 shell 语法：pwsh 7.6.10 与 Windows PowerShell 5.1.26100.10003 均 errors=0。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+- 提交 781d102421ea9f8ea322e5e72e9968d48d3e2da5（ci(windows): the console output must name its own suite (W6-113ap)），1 file changed / +55 insertions / 0 deletions，非 force push 到 feature/windows-w6-113ap-summary-output。
+- exact-head windows-ci：44479925035（push）success（push）；44479988695（pull_request）success（pull_request）。
+- 同 head Android CI：44479988666 取证时 in_progress（CI_PENDING；本提交只动 windows/tools，按 ADR-AUTO-001 继承）（本提交只动 windows/tools，android/core/feature/app 子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+- Draft PR #136（base main，stacked 在 #135 第 23 层之上）；G7 恒 DO_NOT_MERGE。
+
+### 锁
+- run-id w6-113-round4-20261119，owner lead，8 把资源锁（3 remote-ref + 5 worktree），本轮结束 release-plan 释放。
+
+### 边界
+- 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。
+
+## Round 44（W6-113aq，2026-11-19）：运行名与创建时刻必须同一个瞬间
+
+### 切片动机
+- 第 24 层收 ResultSummary/StdOut 后，TestRun/@name 的日期时间与 Times/@creation 仍是同一 header 的两种自述，脚本从未比较。
+- 真实语料证明两者精确到秒一致：green windows name=55160@INKCHOI 2026-11-19 13:17:39、creation=2026-11-19T13:17:39.6311170+08:00；failing artifact name=runneradmin@runnervmm7ud1 2026-11-17 16:02:17、creation=2026-11-17T16:02:17.6256719+00:00。
+- 这不改基线 JSON；只钉 TRX 头部两个自述字段的一致性。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化）
+- TestRun/@name 命中 canonical 形状后，捕获其中的日期与时间；与 Times/@creation 按 yyyy-MM-dd HH:mm:ss 逐字比较，任何不一致都 RED。
+- 读取继续使用既有 Convert-ToInstant 的 $declarationCreation；不新增对 Times 的独立解析。
+- 台阶行在 runHeader 后追加 nameStamp=<0|1>。
+- 头部文档与 SEMANTICS 各新增一条说明；throw 细节沿用 $headerLost 上限 12。
+
+### 负向对照（EXECUTED）
+- 同一套 1973+104 行英文语料，old=D:/mh-verify/r45/gate-prev.ps1（第 24 层，2,176 行，sha256 b9c7e10b59db94e5d0f0c224c4374f26c6208f200e3ed21f9606e5b5e8b4d532），new=本层。
+- clean-green OLD=0 NEW=0，new ladder 两套件均 nameStamp=1。
+- creation-shift（Times creation/queuing 13:17:39→13:07:39，name 仍 13:17:39）OLD=0 NEW=1，new ladder nameStamp=0，throw 点名 name 2026-11-19 13:17:39 vs creation 2026-11-19 13:07:39。
+- name-shift（name 13:17:39→13:07:39 且 deploymentRoot 同步，Times 仍 13:17:39）OLD=0 NEW=1，new ladder nameStamp=0，throw 点名 name 2026-11-19 13:07:39 vs creation 2026-11-19 13:17:39。
+- 实现态 sha256 在矩阵前后一致；对照结束后 clean-green 复跑仍 OLD=0 NEW=0。
+
+### 真实语料
+- 本机 dotnet test：MediaHub.Tests 1973 passed / 0 failed / 0 skipped，exit 0；MediaHub.WebDav.Tests 104 / 0 / 0，exit 0（英文 UI，artifacts/test-results-r45）。
+- 新闸门 -ResultsDir ./artifacts/gate-corpus exit 0；两套件台阶行均 runHeader=3/3 ... nameStamp=1 ...；combined tests=2077；只有基线增长 warning（1973 > 1959）。
+
+### 数据源与规模
+- windows/tools/check-test-suite-baseline.ps1 124,609 B / 2,176 行 → 126,138 B / 2,202 行（+1,529 B，+27/−1 行），0 个非 ASCII；sha256 a075ac386e331f88c918c0c01824f49c56114ff5ca13b31d2203d0447ac18b20。
+- 双 shell 语法：pwsh 7.6.10 与 Windows PowerShell 5.1.26100.10003 均 errors=0。
+- git diff --stat：1 file changed / +27 insertions / -1 deletion；git diff --check 干净。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+- 提交 eb073088d7504924a37dcfaba1f028b6df87d5f3（ci(windows): the run name and the creation stamp must name one instant (W6-113aq)），1 file changed / +27/-1，非 force push 到 feature/windows-w6-113aq-run-name-stamp。
+- exact-head windows-ci：44486463532（push）success（push）；44486549036（pull_request）success（pull_request）。
+- 同 head Android CI：44486548899（pull_request）in_progress（CI_PENDING）（本提交只动 windows/tools，android/core/feature/app 子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+- Draft PR 139（base main，stacked 在 #136 第 24 层之上）；G7 恒 DO_NOT_MERGE。
+
+### 锁
+- run-id w6-113-round5-20261119，owner lead，8 把资源锁（3 remote-ref + 5 worktree），本轮结束 release-plan 释放。
+
+### 边界
+- 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。
+## Round 45（W6-113ar，2026-11-19）：控制台输出必须命名自己的发现与运行阶段
+
+### 切片动机
+- 第 24 层只要求 ResultSummary/Output/StdOut 的文本在任意位置出现本套件名；测试主机的 StdOut 同时是一份阶段账本：Discovering / Discovered / Starting / Finished 四行各出现一次，并各自带套件名。
+- 名字被复制、改写或拼接到别的输出时，阶段行仍可能缺失、重复、错套件或乱序，而计数、行 verdict、RunInfos 全部保持不变；前二十五层没有任何一层读这四条阶段行。
+- 本层只钉这四条阶段行的存在、唯一、归属与顺序；不改基线 JSON。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化）
+- 在既有 ResultSummary/Output/StdOut 检查之后，按 Discovering、Discovered、Starting、Finished 四个 literal marker 逐条匹配，marker 后允许横向空白，随后必须是本套件名。
+- 每条必须恰好匹配 1 次；四条位置必须严格递增；缺失、重复、错套件或乱序均 RED。
+- 读取沿用已有的 $summaryStdOutText；不新增 XML 读取路径。
+- 台阶行在 summaryOutput 行后追加 phaseLedger=<n>/4 ordered=<0|1>。
+- 头部文档与 SEMANTICS 各新增一条说明。
+
+### 负向对照（EXECUTED）
+- 同一套 1973+104 行英文语料，old=D:/mh-verify/r46/gate-prev.ps1（第 25 层，2,202 行，sha256 a075ac386e331f88c918c0c01824f49c56114ff5ca13b31d2203d0447ac18b20），new=本层。
+- clean-green OLD=0 NEW=0，new ladder 两套件均 phaseLedger=4/4 ordered=1。
+- phase-missing OLD=0 NEW=1，broken 点名 0 个 Finished 行。
+- phase-duplicate OLD=0 NEW=1，broken 点名 2 个 Starting 行。
+- phase-out-of-order OLD=0 NEW=1，broken 点名四条阶段行顺序错误。
+- phase-wrong-suite OLD=0 NEW=1，broken 点名 0 个 Starting 行命名本套件。
+- 实现态 sha256 在矩阵前后一致；对照结束后 clean-green 复跑仍 OLD=0 NEW=0。
+
+### 真实语料
+- gate-corpus（1973 windows + 104 webdav，英文 UI）：新闸门 exit 0；两套件台阶行均 phaseLedger=4/4 ordered=1；combined tests=2077；只有基线增长 warning（1973 > 1959）。
+- test-results-r45（本机 dotnet test 的真实 TRX）：新闸门 -ResultsDir ./artifacts/test-results-r45 exit 0；两套件均 phaseLedger=4/4 ordered=1；combined tests=2077。
+
+### 数据源与规模
+- windows/tools/check-test-suite-baseline.ps1 126,138 B / 2,202 行 → 129,275 B / 2,250 行（+1,137 B，+48/−0 行），0 个非 ASCII；sha256 c40b83b59c48e293ddca3cea9c40bb98abd7c6b1e767e99c3eb23d6791163c0a。
+- 双 shell 语法：pwsh 7.6.10 与 Windows PowerShell 5.1.26100.10003 均 errors=0。
+- git diff --stat：1 file changed / +48 insertions / 0 deletions；git diff --check 干净。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+- 提交 bad8b42a9210aa1d895f2ed84d86e1af3184639d（ci(windows): the console output must name its own phases (W6-113ar)），1 file changed / +48/-0，非 force push 到 feature/windows-w6-113ar-counter-arithmetic。
+- exact-head windows-ci：44491834447（push）success；44491896251（pull_request）success。
+- 同 head Android CI：44491896189（pull_request）in_progress（CI_PENDING，17:07 取证）（本提交只动 windows/tools，android/core/feature/app 子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+- Draft PR 140（base main，stacked 在 #139 第 25 层之上）；G7 恒 DO_NOT_MERGE。
+
+### 锁
+- run-id w6-113-round6-20261119，owner lead，8 把资源锁（3 remote-ref + 5 worktree），本轮结束 release-plan 释放。
+
+### 边界
+- 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。
+## Round 46（W6-113as，2026-11-19）：失败日志必须装在一个 RunInfos 容器里
+
+### 切片动机
+
+- 第 23 层把 ResultSummary 下所有 RunInfos 里的 RunInfo 扁平收集起来，逐项核对失败行；它读的是“条目”，没有读“容器”。
+- 同一个 RunInfo 被拆进两个 RunInfos 包装、旁边留一个空包装，或把一份 RunInfos 放到 Deployment 下，条目列表仍可完整，旧层仍 PASS；前二十六层没有任何一层统计 RunInfos 包装块的数量与位置。
+- 真实绿色语料没有 RunInfos 块；真实失败语料恰有一个块、六个 RunInfo。本层只钉容器基数与归属，不改基线 JSON。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化）
+
+- 在既有 ResultSummary/RunInfos 逐项检查之后，新增 $runInfoLayoutBlocks：只收集 ResultSummary 的直接子节点中 LocalName=RunInfos 的块。
+- $runInfoLayoutAnywhere 用 //*[local-name()=RunInfos] 统计整棵树；两者不等即 RED（RunInfos 出现在 ResultSummary 之外）。
+- 有 Failed/Error 行时必须恰好 1 个直接块；没有 Failed/Error 行时最多 1 个直接块。
+- 台阶行在 runInfos 行后追加 runInfoBlocks=<n> strayRunInfoBlocks=<n>；错误细节上限 12 条。
+- 头部文档与 SEMANTICS 各新增一条说明。
+
+### 负向对照（EXECUTED）
+
+- old=D:/mh-verify/r47/gate-prev.ps1（第 26 层，2,250 行，sha256 c40b83b59c48e293ddca3cea9c40bb98abd7c6b1e767e99c3eb23d6791163c0a），new=本层。
+- clean-green OLD=0 NEW=0，new ladder 两套件均 runInfoBlocks=0 strayRunInfoBlocks=0。
+- fail-with-runinfo OLD=0 NEW=0，new ladder MediaHub.Tests runInfoBlocks=1 strayRunInfoBlocks=0。
+- runinfos-extra-empty-block OLD=0 NEW=1，broken 点名 2 个 RunInfos 块但只有 1 个 Failed/Error 行。
+- runinfos-stray-deployment OLD=0 NEW=1，broken 点名整棵树 2 个 RunInfos 块但只有 1 个直接位于 ResultSummary 下。
+- 实现态 sha256 在矩阵前后一致；对照结束后 clean-green 复跑仍 OLD=0 NEW=0。
+
+### 真实语料
+
+- gate-corpus（1973 windows + 104 webdav，英文 UI）：新闸门 exit 0；两套件台阶行均 runInfoBlocks=0 strayRunInfoBlocks=0；combined tests=2077；只有基线增长 warning（1973 > 1959）。
+
+### 数据源与规模
+
+- windows/tools/check-test-suite-baseline.ps1 129,275 B / 2,250 行 → 131,885 B / 2,283 行（+2,610 B，+33/−0 行），0 个非 ASCII；sha256 45d6ff72ded3bed62bb41c0cbffefcb687f654c2de9d3cec6c6f17509f9cc95e。
+- 双 shell 语法：pwsh 7.6.10 与 Windows PowerShell 5.1.26100.10003 均 errors=0。
+- git diff --stat：1 file changed / +33 insertions / 0 deletions；git diff --check 干净。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+
+- 提交 8c1d5de896b851177d1f989250020ca4f6dc5e34（ci(windows): the failure log must fit in one RunInfos block (W6-113as)），1 file changed / +33/-0，非 force push 到 feature/windows-w6-113as-runinfos-singular。
+- exact-head windows-ci：44501175782（push）success；44501257430（pull_request）success。
+- 同 head Android CI：44501257547（pull_request）in_progress（本提交只动 windows/tools，android/core/feature/app 子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+- Draft PR 143（base main，stacked 在 #140 第 26 层之上）；G7 恒 DO_NOT_MERGE。
+
+### 锁
+
+- run-id w6-113-round7-20261119，owner lead，8 把资源锁（3 remote-ref + 5 worktree），本轮结束 release-plan 释放。
+
+### 边界
+
+- 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。
+
+## Round 47（W6-113at，2026-11-19）：每个失败日志项只能有一个 Text
+
+### 切片动机
+
+- 第 23 层把 ResultSummary/RunInfos 里的 RunInfo 条目与失败行逐项对齐，但读取 Text 时只取第一个非空 Text 后 `break`；第 27 层只钉容器数量与位置。
+- 一个 RunInfo 可以携带两个 Text（重复同一 testName，或第一个有文本、第二个为空），条目数量、timestamp、machine、outcome 全部保持不变，前二十七层仍 PASS。
+- 真实失败语料 D:/mh-verify/r41-art/test-results/windows-tests.trx 的 6 个 RunInfo 与 D:/mh-verify/r43/cases/fail-with-runinfo/windows-tests.trx 的 1 个 RunInfo 都只有一个 Text；本层只钉结构，不改基线 JSON。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化）
+
+- 在既有 ResultSummary/RunInfos 逐项检查之后、container layout 之前，新增 $runInfoTextProblems / $runInfoTextSingular / $runInfoTextChildren。
+- 对每个 RunInfo 的直接 ChildNodes 统计 LocalName=Text 的个数，必须恰为 1；0 个或 2 个及以上均 RED。
+- 错误文案以 `the RunInfo text layout ... does not give every failure log item exactly one Text element` 开头，broken 明细写出 `a RunInfo carries N Text child element(s)`，细节上限 12 条。
+- 台阶行在 runInfoBlocks 行后追加 `runInfoTexts=<singular>/<total>`。
+- 头部文档与 SEMANTICS 各新增一条说明。
+
+### 负向对照（EXECUTED）
+
+- old=D:/mh-verify/r48/gate-prev.ps1（第 27 层，2,283 行，sha256 45d6ff72ded3bed62bb41c0cbffefcb687f654c2de9d3cec6c6f17509f9cc95e），new=本层。
+- clean-green OLD=0 NEW=0，new ladder 两套件均 runInfoTexts=0/0。
+- fail-with-runinfo OLD=0 NEW=0，new ladder MediaHub.Tests runInfoTexts=1/1。
+- runinfo-text-duplicate OLD=0 NEW=1，broken 点名 `a RunInfo carries 2 Text child element(s)`。
+- runinfo-text-extra-empty OLD=0 NEW=1，broken 同样点名 2 个 Text 子元素。
+- 实现态 sha256 在矩阵前后一致；对照结束后 clean-green 复跑仍 OLD=0 NEW=0。
+
+### 真实语料
+
+- gate-corpus（1973 windows + 104 webdav，英文 UI）：新闸门 exit 0；两套件台阶行均 runInfoTexts=0/0；combined tests=2077；只有基线增长 warning（1973 > 1959）。
+
+### 数据源与规模
+
+- windows/tools/check-test-suite-baseline.ps1 131,885 B / 2,283 行 → 133,857 B / 2,312 行（+1,972 B，+29/−0 行），0 个非 ASCII；sha256 803d2f9c431a0b1b9dee768f84975b41c5a21fc1be251b23fddf00e3cad29493。
+- 双 shell 语法：pwsh 7.6.10 与 Windows PowerShell 5.1.26100.10003 均 errors=0。
+- git diff --stat：1 file changed / +29 insertions / 0 deletions；git diff --check 干净。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+
+- 提交 3cf422eb05a5f30519df4b1a393688ef794139b9（ci(windows): each failure log item must name itself exactly once (W6-113at)），1 file changed / +29/-0，非 force push 到 feature/windows-w6-113at-runinfo-text-singular。
+- exact-head windows-ci：44510242835（push）success；44510303586（pull_request）success。
+- 同 head Android CI：44510303772（pull_request）in_progress（CI_PENDING，19:03 取证）（本提交只动 windows/tools，android/core/feature/app 子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+- Draft PR 145（base main，stacked 在 #143 第 27 层之上）；G7 恒 DO_NOT_MERGE。
+
+### 锁
+
+- run-id w6-113-round8-20261119，owner lead，8 把资源锁（3 remote-ref + 5 worktree），本轮结束 release-plan 释放。
+
+### 边界
+
+- 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。
+## Round 48（W6-113au，2026-11-19）：失败日志行必须只命名一个测试
+
+### 切片动机
+
+- 第 23 层把 ResultSummary/RunInfos 里的 RunInfo 与 Failed/Error 行逐项对齐，但只用 `IndexOf(..., Ordinal)` 判断 testName 是否出现在 Text 的任意位置。
+- 第 28 层只钉每个 RunInfo 恰有一个直接 Text 子元素，不检查 Text 是否只命名一个测试。
+- 一行在测试名前加 PREFIX、后面加 EXTRA，或在 xUnit 外壳外再叠一层文本，条目数量、timestamp、machine、outcome 全部不变，前二十八层仍 PASS。
+- 真实失败语料 D:/mh-verify/r41-art/test-results/windows-tests.trx 的 6 个 RunInfo 文本为 `[xUnit.net 00:00:00.66]     <testName> [FAIL]`；按该外壳归一化后 6 个名称均与某个 Failed/Error 行的 testName 精确相等（exactRowHit=1），所以本层必须剥壳后比较，不能对原始 Text 直接 `-ceq`。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化）
+
+- 在既有 RunInfo Text layout 检查之后新增 RunInfo Text 身份检查：取每个 RunInfo 的第一个直接 Text 子元素，Trim 后用正则 `^\[xUnit\.net [0-9:.]+\]\s+(?<name>.+?)\s+\[FAIL\]$` 剥掉 xUnit 外壳；随后对 Failed/Error 行名列表用 `[string]::Equals(..., [StringComparison]::Ordinal)` 逐字比较。
+- 归一化后不等于任何 Failed/Error 行名称即 RED；错误文案以 `the RunInfo text identity ... does not name exactly one Failed/Error row` 开头，broken 明细为 `a RunInfo Text is not exactly one Failed/Error row name: '<name>'`，细节上限 12 条。
+- 台阶行在 `runInfoTexts` 后新增 `runInfoTextExact=<exact>/<failedRows>`。
+- 头部文档与 SEMANTICS 各新增一条说明。
+
+### 负向对照（EXECUTED）
+
+- old=D:/mh-verify/r49/gate-prev.ps1（第 28 层，2,312 行，sha256 803d2f9c431a0b1b9dee768f84975b41c5a21fc1be251b23fddf00e3cad29493），new=本层。
+- clean-green OLD=0 NEW=0，两套件 runInfoTextExact=0/0。
+- fail-with-runinfo OLD=0 NEW=0，MediaHub.Tests runInfoTextExact=1/1。
+- runinfo-text-prefix OLD=0 NEW=1，broken 点名 `PREFIX <failName>`。
+- runinfo-text-suffix OLD=0 NEW=1，broken 点名 `<failName> EXTRA`。
+- runinfo-text-outside OLD=0 NEW=1，broken 点名 `noise [xUnit.net 00:00:00.00]     <failName> [FAIL]`。
+- 实现态 sha256 在矩阵前后未变；对照结束后 clean-green 复跑仍 OLD=0 NEW=0。
+
+### 真实语料
+
+- gate-corpus（1973 windows + 104 webdav，英文 UI）：新闸门 exit 0；两套件台阶行均 `runInfoTextExact=0/0`；`combined tests=2077`；仅基线增长 warning（1973 > 1959），基线 JSON 未改。
+
+### 数据源与规模
+
+- windows/tools/check-test-suite-baseline.ps1 133,857 B / 2,312 行 → 136,513 B / 2,351 行（+2,656 B，+39/−0 行），0 个非 ASCII；sha256 b91c6aaa85c9aa31978d8952a476103737b5b0da2345137fd1ee9030da28cb58。
+- 双 shell 语法：pwsh 7.6.10 与 Windows PowerShell 5.1.26100.10003 均 errors=0。
+- git diff --stat：1 file changed / +39 insertions / 0 deletions；git diff --check 干净。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+
+- 提交 5780dc20e9cf87084e0f8ae5f5535f5d469e5cfc（ci(windows): a failure log line must name exactly one test (W6-113au)），1 file changed / +39/-0，非 force push 到 feature/windows-w6-113au-runinfo-text-exact。
+- exact-head windows-ci：44518473191（push）success；44518540460（pull_request）success。
+- 同 head Android CI：44518540327（pull_request）in_progress（本提交只动 windows/tools，android/core/feature/app 子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+- Draft PR #147（base main，stacked 在 #145 第 28 层之上）；G7 恒 DO_NOT_MERGE。
+
+### 锁
+
+- run-id w6-113-round9-20261119，owner lead，8 把资源锁（3 remote-ref + 5 worktree），本轮结束 release-plan 释放。
+
+### 边界
+
+- 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。
