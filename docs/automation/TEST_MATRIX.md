@@ -1857,3 +1857,17 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 **额外自洽反例（EXECUTED）**：新基线 `expected` 改为 1974 而 outcome 表仍 1973 -> exit 1（`outcome table adds up to 1973 but expected is 1974`）；基线字段与结果表必须自洽。
 
 **边界**：真机 / 两机 / Windows GUI `NOT_RUN`；`W6-P1-E2E` 仍 `BLOCKED`；Draft，`G7=DO_NOT_MERGE`。
+## 6.38 第三十二层口径：RunInfo 时间戳必须属于具名失败行的行窗（W6-113ay）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | 每个 `ResultSummary/RunInfos/RunInfo` 的 `timestamp` 与它 canonical Text 所命名的 Failed/Error 结果行 | 第 30 层只保证 Text 命名唯一行；第 31 层只保证元素归属唯一 `RunInfos` |
+| 通过条件 | `row.startTime - 1s <= RunInfo.timestamp <= row.endTime + 5s` | 真实 xUnit 2.9.3 写入器在行结束后 13–97 ms 写 RunInfo |
+| 台阶行 | `runInfoRowClock=<bound>/<items>` | 真实绿色语料两套件 `0/0`；真实失败 TRX `6/6` |
+| 负向对照 | 时间戳取 runFinish（最早结束行 + 约 7.47 s）或 runStart（最晚开始行 − 约 8.47 s）→ RED；clean-green 与 canonical RunInfo → GREEN | `D:/mh-verify/r53/results-all.json`：`oldAllZero=true`、两绿两红、每红恰好 1 条时钟行 |
+| 规模 | `check-test-suite-baseline.ps1` 2,423→2,474 行、141,834→145,306 B、+51/−0、sha256 `be062769...` | 双 shell PARSE-OK；纯 ASCII、无 BOM/CRLF |
+| 残留限制 | 只校验时间窗归属，不校验 timestamp 的时区/格式或 RunInfo 与结果行的机器名交叉；不证明 TRX 真实产生 | 仍需真实失败语料与真实 CI 作为下游证据 |
+
+**为什么前三十一层看不见**：第 29/30 层把 Text 归一化后只比较名字，第 31 层只数字元素位置；均不读 `RunInfo/@timestamp` 与具名结果行的 `startTime/endTime` 关系。
+
+**边界**：真机 / 两机 / Windows GUI `NOT_RUN`；`W6-P1-E2E` 仍 `BLOCKED`；Draft，`G7 = DO_NOT_MERGE`。

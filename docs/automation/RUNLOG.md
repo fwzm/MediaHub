@@ -1201,3 +1201,31 @@
 
 - 本轮 run-id `w6-113-round12-20261119`，8 把锁（3 remote-ref + 5 worktree，含 worktree:D:/mh-w6-r41）；收尾 `release-plan`，status count=0。
 - Windows GUI `GUI_UNVERIFIED`、两机 `NOT_RUN`；`W6-P1-E2E` 仍 `BLOCKED`（维护者 >=1200s 空闲窗口 + 真机）；`PR #39` 正文归档改写 `NOT_RUN`；未 merge/close/mark-ready、未写 main、未 force push。
+## Round 52（W6-113ay，2026-11-19）：失败日志时间戳必须落在它命名的结果行上
+
+### 动机
+
+- 第 29/30 层只校验 `RunInfo` 的 Text 是否 canonical 且是否精确命名一个 Failed/Error 行；第 31 层再校验 `RunInfo` 必须直接位于唯一 `ResultSummary/RunInfos` 下。它们都没有检查 `RunInfo/@timestamp` 是否属于它命名的那一行。
+- 因此，把 `RunInfo` 的 timestamp 从另一个失败行或另一次运行整体搬来，只要名字、机器、outcome 与整个 run 的 Times 窗口仍自洽，旧闸门仍会通过，而失败日志会指向错误的执行时刻。
+
+### 变更
+
+- `windows/tools/check-test-suite-baseline.ps1`：新增 `$failedRowSpans`（Failed/Error 行 `testName -> Start/End`）；按第 30 层 canonical 正则提取 RunInfo 名称；要求 `timestamp >= row.startTime - 1s` 且 `<= row.endTime + 5s`；新增台阶行 `runInfoRowClock=<bound>/<items>`；失败前缀 `the RunInfo row clock in ...`。
+- 文件 2,423 → 2,474 行、141,834 → 145,306 B，纯 ASCII、无 BOM/CRLF，sha256 `be0627691778cc7867ca1052ea6471cbd4e7554121b114e96cf1c3ecb3421daa`；`git diff --stat` 1 file changed / 51 insertions / 0 deletions；双 shell PARSE-OK。
+- 5 s 上界来自真实 xUnit 2.9.3 写入器：真实失败 TRX 的 6 个 RunInfo timestamp 都在具名行 end 之后 13–97 ms，而不是行内。
+
+### 验证（EXECUTED）
+
+- 真实绿色语料 `D:/mh-w6-r41/windows/artifacts/gate-corpus`（1973 windows + 104 webdav）：exit 0；两套件 `runInfoRowClock=0/0`、`runInfoTextCanonical=0/0`；`combined tests=2077`；仅既有虚拟列表提示；日志 `D:/mh-verify/r53/gate-real-r53.log`。
+- 真实失败 TRX `D:/mh-verify/r41-art/test-results/windows-tests.trx`（total=767，failed=6）：`runInfoRowClock=6/6`、`runInfoTextCanonical=6/6`；唯一失败为 `6 test(s) failed`，新闸门未误杀真实失败日志；日志 `D:/mh-verify/r53/gate-real-failing-r53.log`。
+- 负向矩阵（old=第 31 层 / new=第 32 层）：clean-green 与 fail-with-runinfo 均 OLD=0/NEW=0；`runinfo-row-time-after`（最早结束行 + runFinish，约 end+7.47 s）与 `runinfo-row-time-before`（最晚开始行 + runStart，约 start−8.47 s）均 OLD=0/NEW=1；`oldAllZero=true`、`eachRedExactlyOneClockRow=true`；结果 `D:/mh-verify/r53/results-all.json`。
+
+### 提交与 exact-head CI
+
+- 代码提交：`92a0bf1eac2247f18872fcdcd5c8907e93c6bf37`（`ci(windows): a failure log timestamp must sit on its own row (W6-113ay)`）。
+- 代码 head windows-ci `44572615891`（push）`success`、`44572841414`（pull_request）`success`；Android CI `44572841276` `success`。
+
+### 锁与边界
+
+- 本轮 run-id `w6-113-round13-20261119`，8 把锁（3 remote-ref + 5 worktree，含 worktree:D:/mh-w6-r41）；收尾 `release-plan`，status count=0。
+- Windows GUI `GUI_UNVERIFIED`、真机与两机 `NOT_RUN`；W6-P1-E2E 仍 `BLOCKED`（维护者 ≥1200 s 空闲窗口 + 真机）；PR #39 正文归档改写 `NOT_RUN`；Draft，`G7 = DO_NOT_MERGE`。

@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-20T00:12:00+08:00",
-  "updated_by": "lead-W6-113-r51",
+  "updated_at": "2026-11-20T01:38:00+08:00",
+  "updated_by": "lead-W6-113-r52",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -1125,6 +1125,24 @@
       "notes": "独立任务：只刷新基线 JSON，不改闸门逻辑；把已由真实绿色语料证明的 14 个新增 case 固定进基线，消除 4 条长期存在的基线增长 warning。无测试删除或降级；基线 JSON 新增 2 个类、4 个方法、Passed +14。",
       "next_action": "候选下一层：①RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用（需真实语料证明）；②Deployment 的 runDeploymentRoot 字段与 Deployment 记录一致性（已被现有 header 检查覆盖，需先复核）；③继续独立维护项/下一层结构不变量。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
       "closed_at": "2026-11-20T00:12:00+08:00"
+    },
+    {
+      "id": "W6-113ay",
+      "title": "第三十二层：RunInfo 时间戳必须属于具名失败行的行窗（W6-113ay）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r52",
+      "branch": "feature/windows-w6-113ay-runinfo-row-time",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,423 -> 2,474 lines, 141,834 -> 145,306 B, 51 insertions / 0 deletions, sha256 be0627691778cc7867ca1052ea6471cbd4e7554121b114e96cf1c3ecb3421daa; old sha256 16fcef0a631c44fa95179e42aa3c4900f01d50f60cb2af9033d03791544a53bf; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites runInfoRowClock=0/0 and runInfoTextCanonical=0/0; combined tests=2077; log D:/mh-verify/r53/gate-real-r53.log.",
+        "Real failing TRX (total=767, failed=6): runInfoRowClock=6/6 and runInfoTextCanonical=6/6; only final 6 test(s) failed; log D:/mh-verify/r53/gate-real-failing-r53.log.",
+        "Negative matrix: clean-green and fail-with-runinfo OLD=0/NEW=0; runinfo-row-time-after and runinfo-row-time-before OLD=0/NEW=1; oldAllZero=true, eachRedExactlyOneClockRow=true; results D:/mh-verify/r53/results-all.json.",
+        "Code commit 92a0bf1eac2247f18872fcdcd5c8907e93c6bf37 (ci(windows): a failure log timestamp must sit on its own row (W6-113ay)); windows-ci 44572615891 (push) success, 44572841414 (pull_request) success; Android CI 44572841276 success."
+      ],
+      "notes": "第三十二层：RunInfo timestamp 必须落在 canonical Text 命名的 Failed/Error 行自己的 [start-1s, end+5s] 时间窗；真实 xUnit 2.9.3 在行结束后 13-97ms 写 RunInfo，因此保留 5s 上界。第 29/30 层只校验名字，第 31 层只校验元素归属，均不读 timestamp 与结果行的时间关系。",
+      "next_action": "候选第 33 层：①RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用（需真实失败语料证明）；②Deployment 的 runDeploymentRoot 字段与 Deployment 记录一致性（需先复核是否已被 header 检查覆盖）；③继续独立维护项。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T01:38:00+08:00"
     }
   ]
 }
