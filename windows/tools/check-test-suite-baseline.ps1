@@ -223,6 +223,15 @@
 #   The gate now requires the name's date and time to match Times/@creation to
 #   the second; the ladder line records nameStamp=<0|1>.
 
+#   The console text is also a phase ledger: the host announces Discovering,
+#   Discovered, Starting and Finished for this suite, in that order, exactly once
+#   each. Layer 24 only asks whether the suite name appears somewhere in the
+#   text, so a StdOut copied from another suite and edited to mention this one
+#   can keep every count identical while the report no longer shows that this
+#   suite was discovered and run. The gate now requires one line per phase
+#   naming this suite, in that order, and the ladder line records
+#   phaseLedger=<n>/4 ordered=<0|1>.
+
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
 #   total    > baseline -> green + warning (please refresh the baseline)
@@ -258,6 +267,10 @@
 #     output is the host's record of what it ran, and a summary whose output block
 #     was dropped, copied from another suite, or left stale keeps every count
 #     identical.
+#   the ResultSummary/Output/StdOut phase lines (Discovering / Discovered /
+#     Starting / Finished) are missing, repeated, name another suite, or appear
+#     out of order -> red: the console text still names the suite somewhere, but
+#     no longer shows that this host discovered, started and finished it.
 #   the date and time embedded in TestRun/@name disagree with Times/@creation
 #     -> red: the run's two self-descriptions name different creation instants,
 #        even while every count and every row timing stays unchanged.
@@ -1679,6 +1692,40 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): the ResultSummary/Output/StdOut block in $($e.file) does not belong to this suite while the total was $total - the console output is the host's own record of what it ran, so a file whose output block was dropped, duplicated, blanked or copied from another suite can keep every count identical. broken: $($summaryOutputProblems -join ', '). A TRX whose console output contradicts its own suite was hand-merged or patched; regenerate it from a clean test run."
   }
 
+  # The console text is also a phase ledger: the test host announces its own
+  # discovery and execution of this suite, once per phase. Layer 24 only checks
+  # that the suite name appears somewhere in the text, so a StdOut copied from
+  # another suite and edited to mention this one can still pass. The four phase
+  # lines are read by their literal marker plus this suite's name, and must
+  # appear exactly once each, in the order the host emits them.
+  $summaryPhaseNames = @('Discovering', 'Discovered', 'Starting', 'Finished')
+  $summaryPhasePositions = @{}
+  $summaryPhaseProblems = @()
+  $summaryPhaseFound = 0
+  foreach ($phaseName in $summaryPhaseNames) {
+    $phasePattern = [regex]::Escape($phaseName) + ':[ \t]*' + [regex]::Escape([string]$e.suite)
+    $phaseMatches = [regex]::Matches($summaryStdOutText, $phasePattern)
+    if ($phaseMatches.Count -ne 1) {
+      $summaryPhaseProblems += "the StdOut text carries $($phaseMatches.Count) '$phaseName' line(s) naming this suite"
+    } else {
+      $summaryPhasePositions[$phaseName] = $phaseMatches[0].Index
+      $summaryPhaseFound++
+    }
+  }
+  $summaryPhaseOrdered = 0
+  if ($summaryPhaseProblems.Count -eq 0) {
+    if ($summaryPhasePositions['Discovering'] -lt $summaryPhasePositions['Discovered'] -and
+        $summaryPhasePositions['Discovered'] -lt $summaryPhasePositions['Starting'] -and
+        $summaryPhasePositions['Starting'] -lt $summaryPhasePositions['Finished']) {
+      $summaryPhaseOrdered = 1
+    } else {
+      $summaryPhaseProblems += 'the four phase lines are not in the order Discovering, Discovered, Starting, Finished'
+    }
+  }
+  if ($summaryPhaseProblems.Count -gt 0) {
+    throw "$($e.suite): the ResultSummary/Output/StdOut phase ledger in $($e.file) does not describe this suite's discovery and run while the total was $total - the console text can still name the suite while the lines that say it was discovered, started and finished are missing, repeated or out of order, and no count above reads them. broken: $($summaryPhaseProblems -join ', '). A TRX whose console output no longer describes its own phases was hand-merged or patched; regenerate it from a clean test run."
+  }
+
   # The verdict on top of the counters: ResultSummary/@outcome says how the whole
   # run ended, and no count above reads it. The rows and the buckets can agree with
   # each other while the verdict that summarises both is stale or invented - a file
@@ -1886,6 +1933,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): failureEvidence=$evidenceRows failed=$failedWithEvidence/$failedRows passed=$passedWithEvidence/$passedRows blankMessages=$blankFailureText duplicates=$duplicateEvidence"
   "$($e.suite): runInfos=$runInfoRows failedRows=$failedRows matched=$($matchedFailedNames.Count) passed=$runInfoForPassed unmatched=$runInfoUnmatched duplicateMatches=$runInfoDuplicates outside=$runInfoOutside blankText=$runInfoBlank wrongMachine=$runInfoWrongMachine badOutcome=$runInfoBadOutcome"
   "$($e.suite): summaryOutput=$summaryOutputBlocks stdout=$summaryStdOutBlocks nonBlank=$summaryOutputNonBlank suiteNamed=$summaryOutputNamesSuite"
+  "$($e.suite): phaseLedger=$summaryPhaseFound/4 ordered=$summaryPhaseOrdered"
   "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot nameStamp=$nameStampMatches bound rows=$boundRows header id collisions=$headerCollisions"
   "$($e.suite): assemblyDeclaration=$assemblyPairs storage/codeBase pairs=$($assemblyPairs - $assemblyPairLostCount) same file adapters=$($adapterValues.Count)"
   "$($e.suite): listVocabulary=$listKnown/$listCount canonical names=$listCanonical distinct names=$($listNames.Count - $listNameBlank - $listNameDuplicates.Count) unreferenced lists=$($unreferencedLists.Count)"
