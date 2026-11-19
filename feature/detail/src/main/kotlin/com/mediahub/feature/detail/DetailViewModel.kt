@@ -11,8 +11,10 @@ import com.mediahub.feature.detail.source.CanonicalSourceResolver
 import com.mediahub.feature.detail.source.SourceResolution
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
+import com.mediahub.model.MediaServer
 import com.mediahub.model.MediaType
 import com.mediahub.model.PageRequest
+import com.mediahub.model.ServerRefreshPolicy
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderHandle
@@ -22,6 +24,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 /**
@@ -58,7 +61,24 @@ class DetailViewModel @Inject constructor(
     private var episodeJob: Job? = null
     private var sourceJob: Job? = null
 
-    init { load() }
+    /** 上次成功取得的源快照；用于识别会影响连接的配置变更。 */
+    private var lastLoadedServer: MediaServer? = null
+
+    init {
+        observeServerChanges()
+        load()
+    }
+
+    private fun observeServerChanges() {
+        viewModelScope.launch {
+            serverStore.observeServers().collect { servers ->
+                val current = servers.firstOrNull { it.id == serverId } ?: return@collect
+                if (ServerRefreshPolicy.requiresReload(lastLoadedServer, current)) {
+                    load()
+                }
+            }
+        }
+    }
 
     fun load() {
         _uiState.value = DetailUiState.Loading
@@ -67,6 +87,7 @@ class DetailViewModel @Inject constructor(
             try {
                 val server = serverStore.getServer(serverId)
                     ?: throw ProviderException.NotFound(serverId, "媒体源")
+                lastLoadedServer = server
                 val h = registry.create(server)
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
                 handle = h

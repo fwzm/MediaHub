@@ -8,6 +8,7 @@ import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaLibrary
+import com.mediahub.model.MediaServer
 import com.mediahub.model.MediaFilter
 import com.mediahub.model.MediaFilterField
 import com.mediahub.model.MediaListQuery
@@ -15,6 +16,7 @@ import com.mediahub.model.MediaSort
 import com.mediahub.model.MediaQueryCapabilities
 import com.mediahub.model.MediaSortField
 import com.mediahub.model.PageRequest
+import com.mediahub.model.ServerRefreshPolicy
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -24,6 +26,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 /** 排序菜单展示顺序（用户口径）；VM 按 Provider 能力过滤后下发。 */
@@ -138,8 +141,23 @@ class LibraryViewModel @Inject constructor(
     /** 普通 load 协程 job，用于取消在途旧请求。 */
     private var loadJob: Job? = null
 
+    /** 上次成功取得的源快照；用于识别会影响连接的配置变更。 */
+    private var lastLoadedServer: MediaServer? = null
+
     init {
+        observeServerChanges()
         load()
+    }
+
+    private fun observeServerChanges() {
+        viewModelScope.launch {
+            serverStore.observeServers().collect { servers ->
+                val current = servers.firstOrNull { it.id == serverId } ?: return@collect
+                if (ServerRefreshPolicy.requiresReload(lastLoadedServer, current)) {
+                    load()
+                }
+            }
+        }
     }
 
     fun openFolder(folder: MediaItem) {
@@ -278,6 +296,7 @@ class LibraryViewModel @Inject constructor(
             try {
                 val server = serverStore.getServer(serverId)
                     ?: throw ProviderException.NotFound(serverId, "媒体源")
+                lastLoadedServer = server
                 val handle = registry.create(server)
                     ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
                 val page = PageRequest(limit = 200)
