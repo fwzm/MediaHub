@@ -6,7 +6,7 @@
 - 实现：core:model `PlaybackSourceOption`、core:common `PlayerSourceHandoff`、feature:detail `PlayerSourceOptions`、feature:player 线路面板/选择策略/起播位置策略、app `PlayerRouteBuilder`
 - 验证：RED 四组真实失败；聚焦 GREEN；8/8 负向对照恰好 1 红并从快照逐字节还原；全量门禁 BUILD SUCCESSFUL 13m23s / 547 tasks / exit 0；APK 已产出未安装
 - 真机验收：NOT_RUN（设备 123e243f 受 Room 6↔5 阻塞，禁清库）
-- PR：Draft（本分支，G7 = DO_NOT_MERGE）
+- PR：#148（Draft，G7 = DO_NOT_MERGE）
 
 ## 目标（type:goal）
 - 把详情页聚合出的多来源保留到播放阶段：DetailViewModel 在聚合完成后写入进程内 handoff
@@ -22,5 +22,5 @@
 ## 进度与下一步（type:progress）
 - 全量测试：core:common testDebugUnitTest 686 / testReleaseUnitTest 686（11 skipped each），feature:detail 44，feature:player 138，app 32；全部 0 failures / 0 errors
 - APK：`app/build/outputs/apk/debug/app-debug.apk` size=130596167，sha256=`3513751b9141f2d234e53ea9767ba5836d474be037e827aebd2beadee44ef5b3`
-- 下一步：push 分支、创建 Draft PR、用 40 位完整 SHA 查 exact-head CI（pending 不得当 PASS）
+- 下一步：用 40 位完整 SHA 查 #148 exact-head CI（pending 不得当 PASS）
 - 后续：真机验收仍受 Room 6↔5 阻塞；禁止 adb uninstall / pm clear / 清用户数据
