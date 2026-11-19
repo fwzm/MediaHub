@@ -205,6 +205,14 @@
 #   runInfos=<n> failedRows=<n> matched=<n> passed=<n> unmatched=<n> outside=<n>
 #   blankText=<n> wrongMachine=<n>.
 
+#   The failure log is also one ordered list, not a bag of individually valid
+#   items. Two items can be swapped, or the [xUnit.net ...] clock in one Text
+#   edited, while every item keeps its own name, machine, outcome, row window and
+#   canonical envelope; the log then no longer reads in the order the run
+#   produced it. The gate now requires both the Text clock and the item
+#   timestamp to be nondecreasing in list order; the ladder line records
+#   runInfoChronology=<in-order>/<items>.
+
 #   The summary also carries the runner's own console output: ResultSummary/Output/
 #   StdOut is what the test host printed while it discovered and ran this suite.
 #   Nothing above reads it, so a file whose output block was dropped, duplicated,
@@ -286,6 +294,11 @@
 #     (1 s before start through 5 s after end) -> red: the envelope and identity
 #     checks never compare the item clock to the row it names, so a timestamp
 #     moved from another failure keeps every item and name intact.
+#   the failure log no longer reads in chronological order - two RunInfo items
+#     swapped, or the [xUnit.net ...] clock in one Text edited, while every item
+#     keeps its own name, machine, outcome, row window and canonical envelope ->
+#     red: the log is one ordered list, and both its Text clock and its item
+#     timestamp must be nondecreasing.
 #   a ResultSummary/Output/StdOut block that is missing, duplicated, blank, or
 #     whose text does not name the suite the file belongs to -> red: the console
 #     output is the host's record of what it ran, and a summary whose output block
@@ -1814,6 +1827,50 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): the RunInfo row clock in $($e.file) does not belong to the row it names while the total was $total - the envelope check above proves only that the line spells one row name, so an item whose timestamp was moved from another failure or another run keeps every item, name, machine and outcome identical while the failure log points at the wrong execution. expected the item timestamp within 1 s before the named row's start and 5 s after its end. broken: $($runInfoClockProblems -join ', '). A TRX whose failure-log timestamp disagrees with its own result row was hand-merged or patched; regenerate it from a clean test run."
   }
 
+  # The row-clock check above reads each item on its own; it never asks whether
+  # the failure log still reads forward. Two items can be swapped, or one line's
+  # displayed clock edited, while every item keeps its own name, machine, outcome,
+  # row window and canonical envelope. The xUnit Text clock and the item timestamp
+  # are two views of the same event, so both must be nondecreasing in list order.
+  $runInfoChronologyPattern = '\A\[xUnit\.net (?<clock>[0-9]{2}:[0-5][0-9]:[0-5][0-9]\.[0-9]{2})\] {5}\S(?:.*\S)? \[FAIL\]\z'
+  $runInfoChronologyProblems = @()
+  $runInfoChronologyBound = 0
+  $previousRunInfoClock = $null
+  $previousRunInfoStamp = $null
+  $previousRunInfoClockText = ''
+  $previousRunInfoStampText = ''
+  foreach ($runInfo in @($runInfoNodes)) {
+    $runInfoRawText = ''
+    foreach ($runInfoChild in @($runInfo.ChildNodes)) {
+      if ([string]$runInfoChild.LocalName -eq 'Text') { $runInfoRawText = [string]$runInfoChild.InnerText; break }
+    }
+    $chronologyMatch = [regex]::Match($runInfoRawText, $runInfoChronologyPattern)
+    if (-not $chronologyMatch.Success) { continue }
+    $clockText = $chronologyMatch.Groups['clock'].Value
+    $clock = [TimeSpan]::Zero
+    if (-not [TimeSpan]::TryParseExact($clockText, 'hh\:mm\:ss\.ff', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.TimeSpanStyles]::None, [ref]$clock)) { continue }
+    $stamp = Convert-ToInstant ([string]$runInfo.timestamp)
+    if ($null -eq $stamp) { continue }
+    $chronologyProblem = ''
+    if ($null -ne $previousRunInfoClock -and $clock -lt $previousRunInfoClock) {
+      $chronologyProblem = "a RunInfo Text clock '$clockText' goes backwards after '$previousRunInfoClockText'"
+    } elseif ($null -ne $previousRunInfoStamp -and $stamp -lt $previousRunInfoStamp) {
+      $chronologyProblem = "a RunInfo timestamp '$([string]$runInfo.timestamp)' goes backwards after '$previousRunInfoStampText'"
+    }
+    if ($chronologyProblem -eq '') {
+      $runInfoChronologyBound++
+    } elseif ($runInfoChronologyProblems.Count -lt 12) {
+      $runInfoChronologyProblems += $chronologyProblem
+    }
+    $previousRunInfoClock = $clock
+    $previousRunInfoStamp = $stamp
+    $previousRunInfoClockText = $clockText
+    $previousRunInfoStampText = [string]$runInfo.timestamp
+  }
+  if ($runInfoChronologyProblems.Count -gt 0) {
+    throw "$($e.suite): the RunInfo chronology in $($e.file) does not read forward while the total was $total (runInfoChronology=$($runInfoChronologyBound)/$(@($runInfoNodes).Count)) - the row-clock check above reads every item on its own, so two swapped items or an edited Text clock keep every name, machine, outcome, row window and canonical envelope identical while the failure log stops reading in the order the run produced it. expected both the xUnit Text clock and the item timestamp to be nondecreasing in list order. broken: $($runInfoChronologyProblems -join ', '). A TRX whose failure log is out of order was hand-merged or patched; regenerate it from a clean test run."
+  }
+
   # ResultSummary/RunInfos is one container, not a bag of items. The layer above
   # counts the items wherever they sit, so two wrappers around one item, an empty
   # second wrapper, or a wrapper parked under Deployment all keep the item list
@@ -2156,6 +2213,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): runInfoTextExact=$runInfoTextExact/$failedRows"
   "$($e.suite): runInfoTextCanonical=$runInfoTextCanonical/$(@($runInfoNodes).Count)"
   "$($e.suite): runInfoRowClock=$runInfoRowClockBound/$(@($runInfoNodes).Count)"
+  "$($e.suite): runInfoChronology=$runInfoChronologyBound/$(@($runInfoNodes).Count)"
   "$($e.suite): summaryOutput=$summaryOutputBlocks stdout=$summaryStdOutBlocks nonBlank=$summaryOutputNonBlank suiteNamed=$summaryOutputNamesSuite"
   "$($e.suite): phaseLedger=$summaryPhaseFound/4 ordered=$summaryPhaseOrdered"
   "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot nameStamp=$nameStampMatches bound rows=$boundRows header id collisions=$headerCollisions"
