@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.IdGenerator
+import com.mediahub.core.common.ServerAddressAutoDetect
 import com.mediahub.core.common.ServerAddressNormalizer
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
@@ -240,28 +241,91 @@ class AddServerViewModel @Inject constructor(
             }
         }
         val versionAtRequest = state.addressVersion
-        val server = buildServer(descriptor) ?: return
+        val probeUrls: List<String?> = if (descriptor.serverType == ServerType.LOCAL) {
+            listOf(null)
+        } else {
+            ServerAddressAutoDetect.candidates(state.baseUrl, state.preferHttps, descriptor.serverType)
+                .map { it.url }
+        }
+        if (probeUrls.isEmpty()) {
+            _uiState.update {
+                it.copy(testResult = ConnectionStatus(ok = false, message = state.addressError ?: "服务器地址无效"))
+            }
+            return
+        }
         val generation = ++probeGeneration
         _uiState.update { it.copy(isTesting = true, testResult = null, error = null) }
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
-            fun publish(result: ConnectionStatus) {
+            fun publish(result: ConnectionStatus, adoptedUrl: String? = null) {
                 if (probeGeneration != generation) return
                 _uiState.update { current ->
                     if (current.selectedDescriptorId == descriptor.id &&
                         AddressTestResultPolicy.shouldApply(current.addressVersion, versionAtRequest)) {
-                        current.copy(testResult = result)
+                        if (adoptedUrl == null) {
+                            current.copy(testResult = result)
+                        } else {
+                            // 自动识别成功：把可用地址写回草稿；地址版本递增，后续保存/登录使用同一权威 URL。
+                            current.copy(
+                                baseUrl = adoptedUrl,
+                                resolvedUrl = adoptedUrl,
+                                preferHttps = adoptedUrl.startsWith("https://"),
+                                addressVersion = current.addressVersion + 1,
+                                testResult = result,
+                            )
+                        }
                     } else current
                 }
             }
+            var lastFailure: ConnectionStatus? = null
             try {
-                val handle = registry.create(server)
-                publish(handle?.provider?.testConnection()
-                    ?: ConnectionStatus(ok = false, message = "不支持的媒体源类型"))
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                publish(ConnectionStatus(ok = false, message = "连接测试失败，请重试",
-                    errorCode = ProviderException.ErrorCode.UNKNOWN))
+                for (probeUrl in probeUrls) {
+                    if (probeGeneration != generation ||
+                        _uiState.value.addressVersion != versionAtRequest
+                    ) return@launch
+                    val server = buildServer(descriptor, probeUrl)
+                    if (server == null) {
+                        lastFailure = ConnectionStatus(
+                            ok = false,
+                            message = _uiState.value.addressError ?: "服务器地址无效",
+                        )
+                        break
+                    }
+                    val status = try {
+                        val handle = registry.create(server)
+                        handle?.provider?.testConnection()
+                            ?: ConnectionStatus(ok = false, message = "不支持的媒体源类型")
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        ConnectionStatus(
+                            ok = false,
+                            message = "连接测试失败，请重试",
+                            errorCode = ProviderException.ErrorCode.UNKNOWN,
+                        )
+                    }
+                    if (status.ok) {
+                        val adopted = probeUrl?.takeIf { it != state.resolvedUrl }
+                        if (adopted != null) {
+                            publish(
+                                ConnectionStatus(
+                                    ok = true,
+                                    latencyMs = status.latencyMs,
+                                    message = "已识别可用地址：$adopted",
+                                ),
+                                adoptedUrl = adopted,
+                            )
+                        } else {
+                            publish(status)
+                        }
+                        return@launch
+                    }
+                    lastFailure = status
+                }
+                publish(lastFailure ?: ConnectionStatus(
+                    ok = false,
+                    message = "连接测试失败，请重试",
+                    errorCode = ProviderException.ErrorCode.UNKNOWN,
+                ))
             } finally {
                 if (probeGeneration == generation) {
                     _uiState.update { it.copy(isTesting = false) }
@@ -444,10 +508,10 @@ class AddServerViewModel @Inject constructor(
     }
 
     /** 网络类型地址非法时返回 null（调用方负责把 [AddServerUiState.addressError] 呈现给用户）。 */
-    private fun buildServer(descriptor: ProviderDescriptor): MediaServer? {
+    private fun buildServer(descriptor: ProviderDescriptor, urlOverride: String? = null): MediaServer? {
         val state = _uiState.value
         val url = if (descriptor.serverType == ServerType.LOCAL) localTree(state.baseUrl) ?: return null
-            else state.resolvedUrl ?: return null
+            else urlOverride ?: state.resolvedUrl ?: return null
         // Phase 1B-2.5：地址从单一 baseUrl 迁为线路列表；单线路时生成一条主线路。
         val endpoints = if (url.isBlank()) {
             emptyList()
