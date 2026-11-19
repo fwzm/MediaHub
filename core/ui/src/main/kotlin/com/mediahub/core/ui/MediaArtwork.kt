@@ -41,11 +41,12 @@ fun PosterImage(
     url: String?,
     contentDescription: String?,
     modifier: Modifier = Modifier,
+    aspectRatio: Float = POSTER_ASPECT,
 ) {
     MediaArtwork(
         url = url,
         contentDescription = contentDescription,
-        modifier = modifier.aspectRatio(POSTER_ASPECT),
+        modifier = modifier.aspectRatio(aspectRatio),
     )
 }
 

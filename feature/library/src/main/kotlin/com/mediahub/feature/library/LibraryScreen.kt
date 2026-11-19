@@ -56,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,6 +67,7 @@ import com.mediahub.core.ui.MediaHubAccentLine
 import com.mediahub.core.ui.MediaHubCard
 import com.mediahub.core.ui.MediaHubStatus
 import com.mediahub.core.ui.PosterImage
+import com.mediahub.core.ui.PosterLayoutPolicy
 import com.mediahub.core.ui.ThumbImage
 import com.mediahub.model.MediaFilter
 import com.mediahub.model.MediaFilterField
@@ -579,6 +581,7 @@ private fun FolderRow(item: MediaItem, onClick: () -> Unit) {
  */
 @Composable
 private fun PosterCell(item: MediaItem, onClick: () -> Unit) {
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
     val isThumbShape = item.type == MediaType.EPISODE || item.type == MediaType.VIDEO
     MediaHubCard(
         modifier = Modifier.fillMaxWidth(),
@@ -597,6 +600,7 @@ private fun PosterCell(item: MediaItem, onClick: () -> Unit) {
                     url = item.posterUrl,
                     contentDescription = item.title,
                     modifier = Modifier.fillMaxWidth(),
+                    aspectRatio = PosterLayoutPolicy.posterAspectRatio(screenWidthDp),
                 )
             }
             Text(

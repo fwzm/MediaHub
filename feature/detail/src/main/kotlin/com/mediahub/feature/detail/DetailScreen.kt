@@ -46,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -53,6 +54,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.BackdropImage
 import com.mediahub.core.ui.PosterImage
+import com.mediahub.core.ui.PosterLayoutPolicy
 import com.mediahub.core.ui.ThumbImage
 import com.mediahub.feature.detail.source.shouldShowSourceSelector
 import com.mediahub.feature.detail.source.sourceRows
@@ -191,6 +193,7 @@ fun DetailBody(
     onSwitchSource: ((serverId: String, itemId: String, title: String) -> Unit)? = null,
 ) {
     val item = detail.item
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
         Box(modifier = Modifier.fillMaxWidth()) {
             BackdropImage(
@@ -220,7 +223,8 @@ fun DetailBody(
                     PosterImage(
                         url = item.posterUrl,
                         contentDescription = item.title,
-                        modifier = Modifier.width(104.dp),
+                        modifier = Modifier.width(PosterLayoutPolicy.detailPosterWidth(screenWidthDp)),
+                        aspectRatio = PosterLayoutPolicy.posterAspectRatio(screenWidthDp),
                     )
                     Column(modifier = Modifier.weight(1f).padding(top = 24.dp)) {
                         Text(
