@@ -12,6 +12,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.mediahub.model.PlaybackEngineMode
+import com.mediahub.model.PlayerAspectRatio
 import com.mediahub.model.PlayerGestures
 import com.mediahub.model.PlayerVisualEffectsPreferences
 import com.mediahub.model.PlayerVisualPreset
@@ -61,6 +62,7 @@ class UserPreferencesStore internal constructor(
             writeGestures(prefs, updated.gestures)
             writePlayerVisualEffects(prefs, updated.playerVisualEffects)
             writeProfessionalInfo(prefs, updated.professionalInfo)
+            prefs[Keys.PLAYER_ASPECT_RATIO] = updated.playerAspectRatio.name
         }
     }
 
@@ -96,6 +98,9 @@ class UserPreferencesStore internal constructor(
             gestures = readGestures(prefs),
             playerVisualEffects = readPlayerVisualEffects(prefs),
             professionalInfo = readProfessionalInfo(prefs),
+            playerAspectRatio = prefs[Keys.PLAYER_ASPECT_RATIO]
+                ?.let { stored -> enumValueOrNull<PlayerAspectRatio>(stored) }
+                ?: PlayerAspectRatio.FIT,
         )
 
     private fun readSubtitleStyle(prefs: Preferences): SubtitleStyle =
@@ -231,5 +236,6 @@ class UserPreferencesStore internal constructor(
         val VISUAL_AUDIO_REACTIVE = booleanPreferencesKey("player_visual_effects_audio_reactive")
         val VISUAL_PERFORMANCE_MODE = stringPreferencesKey("player_visual_effects_performance_mode")
         val PROFESSIONAL_INFO_EXPERT_MODE = booleanPreferencesKey("player_professional_info_expert_mode")
+        val PLAYER_ASPECT_RATIO = stringPreferencesKey("player_aspect_ratio")
     }
 }
