@@ -30,11 +30,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mediahub.core.ui.AdaptiveLayoutPolicy
 import com.mediahub.core.ui.MediaHubAccentLine
 import com.mediahub.core.ui.MediaHubCard
 import com.mediahub.core.ui.MediaHubLabel
@@ -106,6 +108,9 @@ fun HomeContent(
     onOpenSearch: () -> Unit,
     onOpenItem: (PlaybackProgress) -> Unit,
 ) {
+    val continueWatchingCardWidth = AdaptiveLayoutPolicy.continueWatchingCardWidth(
+        LocalConfiguration.current.screenWidthDp,
+    )
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -169,7 +174,7 @@ fun HomeContent(
                             ContinueWatchingCard(
                                 progress = progress,
                                 onClick = { onOpenItem(progress) },
-                                modifier = Modifier.width(276.dp),
+                                modifier = Modifier.width(continueWatchingCardWidth),
                             )
                         }
                     }
