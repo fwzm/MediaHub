@@ -262,6 +262,10 @@
 #     Text, a timestamp outside Times, another machine, or an outcome that claims
 #     success - -> red: the failure log and the verdicts are two halves of the same
 #     report and no count above compares them
+#   a failure log split across more than one ResultSummary/RunInfos block, an
+#     empty RunInfos block beside the one that carries the items, or a RunInfos
+#     block outside ResultSummary -> red: the block is one container, and its
+#     placement is part of the summary's shape even when its item list is intact.
 #   a ResultSummary/Output/StdOut block that is missing, duplicated, blank, or
 #     whose text does not name the suite the file belongs to -> red: the console
 #     output is the host's record of what it ran, and a summary whose output block
@@ -331,6 +335,9 @@
 #   the schema namespace is not the TeamTest 2010 one, or Times records no creation
 #     or no queueing instant, or either instant cannot be read or carries no explicit
 #     UTC offset, or the run is queued before it is created -> red
+#   a failed run that does not carry exactly one ResultSummary/RunInfos container,
+#     a run without Failed/Error rows that carries more than one, or any RunInfos
+#     block outside ResultSummary -> red
 
 #   the row at position N of Results does not name the test that position N of
 #     TestEntries declares -> red. The two sections are emitted from one ordered
@@ -1652,6 +1659,31 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): the ResultSummary/RunInfos list in $($e.file) does not describe the Failed/Error rows one for one while the total was $total - the failure log and the verdicts are two halves of the same report, so a file whose log lost an item, kept a stale item, named a passing row, or moved an item outside the run window can keep every count and every ErrorInfo identical. broken: $($runInfoProblems -join ', '). A TRX whose failure log contradicts its own verdicts was hand-merged or patched; regenerate it from a clean test run."
   }
 
+  # ResultSummary/RunInfos is one container, not a bag of items. The layer above
+  # counts the items wherever they sit, so two wrappers around one item, an empty
+  # second wrapper, or a wrapper parked under Deployment all keep the item list
+  # intact. A failure log has one owner; a stray container means the summary was
+  # reassembled from more than one run.
+  $runInfoLayoutBlocks = @()
+  foreach ($summaryChild in @($xml.TestRun.ResultSummary.ChildNodes)) {
+    if ([string]$summaryChild.LocalName -eq 'RunInfos') { $runInfoLayoutBlocks += $summaryChild }
+  }
+  $runInfoLayoutCount = @($runInfoLayoutBlocks).Count
+  $runInfoLayoutAnywhere = @($xml.SelectNodes('//*[local-name()="RunInfos"]')).Count
+  $runInfoLayoutProblems = @()
+  if ($runInfoLayoutAnywhere -ne $runInfoLayoutCount) {
+    $runInfoLayoutProblems += "the summary carries $runInfoLayoutAnywhere RunInfos block(s) but only $runInfoLayoutCount directly under ResultSummary"
+  }
+  if ($failedRows -gt 0 -and $runInfoLayoutCount -ne 1) {
+    $runInfoLayoutProblems += "the summary declares $runInfoLayoutCount RunInfos block(s) for $failedRows Failed/Error row(s)"
+  }
+  if ($failedRows -eq 0 -and $runInfoLayoutCount -gt 1) {
+    $runInfoLayoutProblems += "the summary declares $runInfoLayoutCount RunInfos blocks although no row reports Failed/Error"
+  }
+  if ($runInfoLayoutProblems.Count -gt 0) {
+    throw "$($e.suite): the ResultSummary/RunInfos block layout in $($e.file) does not describe this suite's failure log while the total was $total - the items and the container that owns them are two halves of the same summary, so a file whose items were split across wrappers, whose empty second wrapper was left behind, or whose wrapper was moved outside ResultSummary can keep every count, every ErrorInfo and every RunInfo identical. broken: $($runInfoLayoutProblems -join ', '). A TRX whose failure log has no single owner was reassembled; regenerate it from a clean test run."
+  }
+
   # ResultSummary/Output/StdOut is the test host's own console text: what the
   # runner printed while it discovered and executed this suite. No check above
   # reads it, so a summary whose output was dropped, duplicated, blanked or
@@ -1932,6 +1964,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"
   "$($e.suite): failureEvidence=$evidenceRows failed=$failedWithEvidence/$failedRows passed=$passedWithEvidence/$passedRows blankMessages=$blankFailureText duplicates=$duplicateEvidence"
   "$($e.suite): runInfos=$runInfoRows failedRows=$failedRows matched=$($matchedFailedNames.Count) passed=$runInfoForPassed unmatched=$runInfoUnmatched duplicateMatches=$runInfoDuplicates outside=$runInfoOutside blankText=$runInfoBlank wrongMachine=$runInfoWrongMachine badOutcome=$runInfoBadOutcome"
+  "$($e.suite): runInfoBlocks=$runInfoLayoutCount strayRunInfoBlocks=$([int]$runInfoLayoutAnywhere - [int]$runInfoLayoutCount)"
   "$($e.suite): summaryOutput=$summaryOutputBlocks stdout=$summaryStdOutBlocks nonBlank=$summaryOutputNonBlank suiteNamed=$summaryOutputNamesSuite"
   "$($e.suite): phaseLedger=$summaryPhaseFound/4 ordered=$summaryPhaseOrdered"
   "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot nameStamp=$nameStampMatches bound rows=$boundRows header id collisions=$headerCollisions"
