@@ -91,11 +91,16 @@ class DetailViewModelTest {
         id: String, type: MediaType, seasonNumber: Int? = null,
         episodeNumber: Int? = null, runtimeMs: Long? = null,
         playedPercentage: Double? = null, playCount: Int = 0,
+        playbackPositionMs: Long = 0L,
     ): MediaItem = MediaItem(
         serverId = "srv", id = id, type = type, title = id,
         seasonNumber = seasonNumber, episodeNumber = episodeNumber,
         runtimeMs = runtimeMs,
-        userData = UserData(playedPercentage = playedPercentage, playCount = playCount),
+        userData = UserData(
+            playedPercentage = playedPercentage,
+            playCount = playCount,
+            playbackPositionMs = playbackPositionMs,
+        ),
     )
 
     private fun createViewModel(
@@ -445,6 +450,55 @@ class DetailViewModelTest {
         testDispatcher.scheduler.advanceUntilIdle()
         assertNull(vm.seriesState.value.episodesError)
         assertEquals(1, vm.seriesState.value.episodes.size)
+    }
+
+    @Test
+    fun defaultSeasonMarksCurrentEpisode() = runTest(testDispatcher) {
+        val seriesItem = makeItem("series-current-default", MediaType.SERIES)
+        val detail = MediaDetail(item = seriesItem)
+        val seasons = listOf(
+            makeItem("s1", MediaType.SEASON, seasonNumber = 1),
+            makeItem("s2", MediaType.SEASON, seasonNumber = 2),
+        )
+        val libraryItems = mapOf(
+            "series-current-default" to seasons,
+            "s1" to listOf(
+                makeItem("e1", MediaType.EPISODE, seasonNumber = 1, episodeNumber = 1, playedPercentage = 42.0),
+                makeItem("e2", MediaType.EPISODE, seasonNumber = 1, episodeNumber = 2, playedPercentage = 100.0),
+            ),
+            "s2" to listOf(
+                makeItem("e3", MediaType.EPISODE, seasonNumber = 2, episodeNumber = 1, playedPercentage = 50.0),
+            ),
+        )
+        val vm = createViewModel(detail, libraryItems = libraryItems)
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertEquals("s1", vm.seriesState.value.selectedSeasonId)
+        assertEquals("e1", vm.seriesState.value.currentEpisodeId)
+    }
+
+    @Test
+    fun selectsSeasonContainingInProgressEpisode() = runTest(testDispatcher) {
+        val seriesItem = makeItem("series-resume", MediaType.SERIES)
+        val detail = MediaDetail(item = seriesItem)
+        val seasons = listOf(
+            makeItem("s1", MediaType.SEASON, seasonNumber = 1),
+            makeItem("s2", MediaType.SEASON, seasonNumber = 2),
+        )
+        val libraryItems = mapOf(
+            "series-resume" to seasons,
+            "s1" to listOf(
+                makeItem("e1", MediaType.EPISODE, seasonNumber = 1, episodeNumber = 1, playedPercentage = 100.0),
+            ),
+            "s2" to listOf(
+                makeItem("e3", MediaType.EPISODE, seasonNumber = 2, episodeNumber = 1, playedPercentage = 72.0),
+                makeItem("e4", MediaType.EPISODE, seasonNumber = 2, episodeNumber = 2, playedPercentage = 10.0),
+            ),
+        )
+        val vm = createViewModel(detail, libraryItems = libraryItems)
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertEquals("s2", vm.seriesState.value.selectedSeasonId)
+        assertEquals("e3", vm.seriesState.value.currentEpisodeId)
+        assertEquals(2, vm.seriesState.value.episodes.size)
     }
 
     @Test

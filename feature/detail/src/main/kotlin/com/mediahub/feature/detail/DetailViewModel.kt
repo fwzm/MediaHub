@@ -56,11 +56,15 @@ class DetailViewModel @Inject constructor(
 
     private var handle: ProviderHandle? = null
     private var episodeJob: Job? = null
+    private var resumeJob: Job? = null
     private var sourceJob: Job? = null
 
     init { load() }
 
     fun load() {
+        resumeJob?.cancel()
+        resumeJob = null
+        episodeJob?.cancel()
         _uiState.value = DetailUiState.Loading
         _favoriteState.value = null
         viewModelScope.launch {
@@ -109,6 +113,7 @@ class DetailViewModel @Inject constructor(
                     selectedSeasonId = defaultSeason?.id,
                 )
                 defaultSeason?.let { loadEpisodesForSeason(it.id) }
+                startResumeScan(library, seasons, defaultSeason?.id)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 _seriesState.value = _seriesState.value.copy(
@@ -121,11 +126,19 @@ class DetailViewModel @Inject constructor(
 
     fun selectSeason(seasonId: String) {
         if (_seriesState.value.selectedSeasonId == seasonId) return
-        _seriesState.value = _seriesState.value.copy(selectedSeasonId = seasonId)
+        resumeJob?.cancel()
+        resumeJob = null
+        _seriesState.value = _seriesState.value.copy(
+            selectedSeasonId = seasonId,
+            currentEpisodeId = null,
+            episodes = emptyList(),
+        )
         loadEpisodesForSeason(seasonId)
     }
 
     fun retryEpisodes() {
+        resumeJob?.cancel()
+        resumeJob = null
         _seriesState.value.selectedSeasonId?.let { loadEpisodesForSeason(it) }
     }
 
@@ -137,12 +150,19 @@ class DetailViewModel @Inject constructor(
             val requestedSeasonId = seasonId
             try {
                 val result = library.getItems(seasonId, PageRequest(limit = 200))
+                val episodes = result.items.filter { it.type == MediaType.EPISODE }
+                val currentEpisodeId = DetailResumePolicy.currentEpisodeId(episodes)
                 // 并发安全：只有当前仍选中的季才更新
                 if (_seriesState.value.selectedSeasonId == requestedSeasonId) {
                     _seriesState.value = _seriesState.value.copy(
-                        episodes = result.items.filter { it.type == MediaType.EPISODE },
+                        episodes = episodes,
                         episodesLoading = false,
+                        currentEpisodeId = currentEpisodeId,
                     )
+                    if (currentEpisodeId != null) {
+                        resumeJob?.cancel()
+                        resumeJob = null
+                    }
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -151,6 +171,59 @@ class DetailViewModel @Inject constructor(
                         episodesLoading = false,
                         episodesError = userMessage(e),
                     )
+                }
+            }
+        }
+    }
+
+    /**
+     * #13：默认季之外可能才有“正在观看”的剧集。先立即展示默认季，再按季顺序
+     * 后台扫描；只有用户仍停留在默认季且尚未发现当前集时才允许切换，避免覆盖
+     * 用户主动选择或与默认季加载竞态。
+     */
+    private fun startResumeScan(
+        library: com.mediahub.provider.api.MediaLibraryProvider,
+        seasons: List<MediaItem>,
+        defaultSeasonId: String?,
+    ) {
+        resumeJob?.cancel()
+        if (defaultSeasonId == null || seasons.isEmpty()) return
+        resumeJob = viewModelScope.launch {
+            episodeJob?.join()
+            if (_seriesState.value.selectedSeasonId != defaultSeasonId ||
+                _seriesState.value.currentEpisodeId != null
+            ) {
+                return@launch
+            }
+            for (season in seasons) {
+                if (season.id == defaultSeasonId) continue
+                if (_seriesState.value.selectedSeasonId != defaultSeasonId ||
+                    _seriesState.value.currentEpisodeId != null
+                ) {
+                    return@launch
+                }
+                val episodes = try {
+                    library.getItems(season.id, PageRequest(limit = 200))
+                        .items.filter { it.type == MediaType.EPISODE }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    logger.w(LogTag.UI, "详情页继续观看扫描失败 seasonId=" + season.id, e)
+                    continue
+                }
+                val currentEpisodeId = DetailResumePolicy.currentEpisodeId(episodes)
+                if (currentEpisodeId != null) {
+                    if (_seriesState.value.selectedSeasonId == defaultSeasonId &&
+                        _seriesState.value.currentEpisodeId == null
+                    ) {
+                        _seriesState.value = _seriesState.value.copy(
+                            selectedSeasonId = season.id,
+                            episodes = episodes,
+                            episodesLoading = false,
+                            episodesError = null,
+                            currentEpisodeId = currentEpisodeId,
+                        )
+                    }
+                    return@launch
                 }
             }
         }
@@ -230,6 +303,8 @@ data class SeriesBrowseState(
     val seasons: List<MediaItem> = emptyList(),
     val selectedSeasonId: String? = null,
     val episodes: List<MediaItem> = emptyList(),
+    /** #13：正在观看的剧集 id；用于详情页高亮并滚动定位。 */
+    val currentEpisodeId: String? = null,
     val seasonsLoading: Boolean = false,
     val episodesLoading: Boolean = false,
     val seasonsError: String? = null,

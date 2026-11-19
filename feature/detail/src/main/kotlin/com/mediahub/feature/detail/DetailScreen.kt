@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +47,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -191,7 +194,23 @@ fun DetailBody(
     onSwitchSource: ((serverId: String, itemId: String, title: String) -> Unit)? = null,
 ) {
     val item = detail.item
-    Column(modifier = modifier.verticalScroll(rememberScrollState())) {
+    val scrollState = rememberScrollState()
+    var currentEpisodeOffset by remember { mutableStateOf<Int?>(null) }
+    var scrolledEpisodeId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(seriesState.currentEpisodeId, currentEpisodeOffset) {
+        val currentId = seriesState.currentEpisodeId
+        if (currentId == null) {
+            scrolledEpisodeId = null
+            currentEpisodeOffset = null
+            return@LaunchedEffect
+        }
+        val offset = currentEpisodeOffset
+        if (offset != null && scrolledEpisodeId != currentId) {
+            scrollState.animateScrollTo((offset - 72).coerceAtLeast(0))
+            scrolledEpisodeId = currentId
+        }
+    }
+    Column(modifier = modifier.verticalScroll(scrollState)) {
         Box(modifier = Modifier.fillMaxWidth()) {
             BackdropImage(
                 url = item.backdropUrl ?: item.posterUrl,
@@ -420,9 +439,14 @@ fun DetailBody(
                     }
                 } else {
                     seriesState.episodes.forEach { ep ->
+                        val isCurrent = ep.id == seriesState.currentEpisodeId
                         EpisodeRow(
                             episode = ep,
                             onClick = { onOpenItem?.invoke(ep) },
+                            isCurrent = isCurrent,
+                            onCurrentPositioned = { y ->
+                                if (isCurrent) currentEpisodeOffset = y
+                            },
                         )
                     }
                 }
@@ -455,12 +479,31 @@ fun DetailBody(
 private fun EpisodeRow(
     episode: MediaItem,
     onClick: () -> Unit,
+    isCurrent: Boolean = false,
+    onCurrentPositioned: (Int) -> Unit = {},
 ) {
+    val rowModifier = Modifier
+        .fillMaxWidth()
+        .background(
+            if (isCurrent) {
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.18f)
+            } else {
+                Color.Transparent
+            },
+        )
+        .then(
+            if (isCurrent) {
+                Modifier.onGloballyPositioned {
+                    onCurrentPositioned(it.positionInParent().y.roundToInt())
+                }
+            } else {
+                Modifier
+            },
+        )
+        .clickable(onClick = onClick)
+        .padding(horizontal = 16.dp, vertical = 8.dp)
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = rowModifier,
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -501,6 +544,11 @@ private fun EpisodeRow(
                 val pct = episode.userData?.playedPercentage
                 val isPlayed = episode.playCount > 0 || (pct != null && pct >= 95.0)
                 when {
+                    isCurrent -> Text(
+                        if (pct != null && pct > 0) "继续 · 进度 ${pct.roundToInt()}%" else "继续",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
                     isPlayed -> Text("已看", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                     pct != null && pct > 0 -> Text("进度 " + pct.roundToInt().toString() + "%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
