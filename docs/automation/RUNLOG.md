@@ -1290,3 +1290,32 @@
 
 - 本轮 run-id `w6-113-round15-20261119`，8 把锁（3 remote-ref + 5 worktree，含 worktree:D:/mh-w6-r41）；收尾 `release-plan`，status count=0。
 - Windows GUI `GUI_UNVERIFIED`、真机与两机 `NOT_RUN`；W6-P1-E2E 仍 `BLOCKED`（维护者 ≥1200 s 空闲窗口 + 真机）；PR #39 正文归档改写 `NOT_RUN`；Draft，`G7 = DO_NOT_MERGE`。
+## Round 55（W6-113bb，2026-11-19）：phase 时钟必须落在运行窗口内
+
+### 动机
+
+第 34 层的 phaseClock 只读四个 `StdOut` phase 行之间的相对顺序，以及 `Finished` 与最后一条 RunInfo 的关系；`TestRun/Times` 的绝对运行窗口没有参与判定。真实绿色 `windows/artifacts/gate-corpus` 的 windows 套件 duration 为 `8.6177s`、Finished 为 `7.88`；WebDav duration `5.3812s`、Finished `4.69`；真实失败 TRX duration `7.8839s`、Finished `7.33`。把 `Finished` 改成 `00:00:09.99` 时旧层仍全绿，但它已经跑出自己声明的运行窗口。
+
+### 变更
+
+- `windows/tools/check-test-suite-baseline.ps1`：2,613 → 2,637 行，154,515 → 156,156 B，`+29 / -5`，sha256 `e48317d9d00dcc1daa72537845b9e67939d4d524f0a492f3ea3f28dba0d602d9`（父层 `e960021ab6dd3ec410457ad0ace976a301b0a4e883ee914ae455cac250634d01`）。
+- 新增 `$summaryPhaseWithinRun` / `$summaryPhaseRunDuration`；`[DateTimeOffset]::Parse` 读 `Times.start` / `Times.finish`，逐个 phase 比较；越界时记 `runs past the run window`、`withinRun=0`。
+- 台阶行：`phaseClock=<found>/4 ordered=<0|1> finishedAfterRunInfo=<0|1> withinRun=<0|1>`；throw 消息同带 `withinRun`，expected 增加 `every phase clock at or before Times.finish - Times.start`。
+- 双 shell PARSE-OK（pwsh 7.6.10、Windows PowerShell 5.1.26100.10003）；纯 ASCII、无 BOM/CRLF；`git diff --check` exit 0。
+
+### 验证（EXECUTED）
+
+- 真实绿色 gate-corpus：exit 0；两个套件均 `phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1`；`combined tests=2077`；日志 `D:/mh-verify/r56/gate-real-r56.log`。
+- 真实失败 TRX（total=767，failed=6）：exit 1；`phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1`、`runInfoChronology=6/6`；唯一 throw `MediaHub.Tests: 6 test(s) failed`；日志 `D:/mh-verify/r56/gate-real-failing-r56.log`。
+- 负向矩阵：clean-real / clean-two-errors / clean-green / fail-with-runinfo 旧新均 exit 0 且 `withinRun=1`；`bad-finished-beyond-window` 旧 exit 0、新 exit 1、`withinRun=0`，恰好 1 条 `runs past the run window`；`oldAllZero=true`、`cleanOk=true`、`redOk=true`；结果 `D:/mh-verify/r56/results-all.json`。
+- 夹具：从 `D:/mh-verify/r54/cases/clean-two-errors` 复制到 `D:/mh-verify/r56/cases/bad-finished-beyond-window`，把 `[xUnit.net 00:00:07.88]   Finished:` 恰好替换 1 次为 `00:00:09.99`，文件仍 2,698,040 B。
+
+### 提交与 exact-head CI
+
+- 代码提交 `497562a7a2b7bdfcb784ebedc504d4012e49615c`（`ci(windows): a phase clock must fit inside the run window (W6-113bb)`）；Draft PR #172，base main，stacked on #168，head `497562a7`，G7 DO_NOT_MERGE。
+- 代码 head CI：windows-ci `44622315539`（push）`success`、`44622330127`（pull_request）`success`；Android CI `44622330132` `success`。
+
+### 锁与边界
+
+- CLAIM run-id `w6-113-round16-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
+- W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。

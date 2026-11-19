@@ -1899,3 +1899,17 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 **为什么前三十三层看不见**：第 24 层 phase 检查只读名称/位置，第 29–33 层只处理 RunInfo 的名称、归属、行窗与相邻顺序；没有任何一层读取 phase 行自身的时钟，也没有把 `Finished` 与最后一条失败日志的时钟钉在一起。
 
 **边界**：真机 / 两机 / Windows GUI `NOT_RUN`；`W6-P1-E2E` 仍 `BLOCKED`；Draft，`G7 = DO_NOT_MERGE`。
+## 6.41 第三十五层口径：phase 时钟必须落在运行窗口内（W6-113bb）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | `TestRun/Times.start` / `finish` 与四个 `StdOut` phase 行 | 第 34 层 phaseClock 块 |
+| 通过条件 | 每个 phase clock ≤ `Times.finish - Times.start` | 真实三份语料 |
+| 台阶行 | `phaseClock=<found>/4 ordered=<0或1> finishedAfterRunInfo=<0或1> withinRun=<0或1>` | `gate-real-r56.log` |
+| 负向对照 | `Finished` 7.88→9.99；旧层 0，新层 1，恰好 1 条 window 问题 | `results-all.json` |
+| 规模 | 2,613→2,637 行；154,515→156,156 B；+29/−5 | sha256 e48317d9... |
+| 残留限制 | phase clock 仍只与 `Times` 窗口互证，不证明绝对墙钟/NTP 对齐；RunInfo 与 xUnit clock 有 ~+0.48s 常量偏移 | 真实语料观察 |
+
+**为什么第三十四层看不见**：第 34 层只比较 phase 时钟彼此和 `Finished` 与最后一条 RunInfo；修改 `Finished` 到 9.99 时所有相对关系仍成立，但已经超出 `Times.finish - Times.start` 的 8.6177s。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。

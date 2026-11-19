@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-20T04:54:00+08:00",
-  "updated_by": "lead-W6-113-r54",
+  "updated_at": "2026-11-20T06:25:00+08:00",
+  "updated_by": "lead-W6-113-r55",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -1179,6 +1179,24 @@
       "notes": "第三十四层：StdOut 四个 phase 行必须各带 canonical [xUnit.net hh:mm:ss.ff] 时钟、非递减，且 Finished 不早于最后一条 RunInfo canonical Text 时钟；第 24 层只读名称/位置，第 29-33 层只处理 RunInfo。",
       "next_action": "候选第 35 层：继续从真实失败语料侦察可证的结构不变量；候选① RunInfo 与 ErrorInfo/StackTrace 文本交叉引用已因真实语料不含测试名而不可行，候选② Deployment/runDeploymentRoot 已由 header 检查覆盖。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
       "closed_at": "2026-11-20T04:54:00+08:00"
+    },
+    {
+      "id": "W6-113bb",
+      "title": "第三十五层：phase 时钟必须落在运行窗口内（W6-113bb）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r55",
+      "branch": "feature/windows-w6-113bb-phase-window",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,613 -> 2,637 lines, 154,515 -> 156,156 B, 29 insertions / 5 deletions, sha256 e48317d9d00dcc1daa72537845b9e67939d4d524f0a492f3ea3f28dba0d602d9; old sha256 e960021ab6dd3ec410457ad0ace976a301b0a4e883ee914ae455cac250634d01; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1; combined tests=2077; log D:/mh-verify/r56/gate-real-r56.log.",
+        "Real failing TRX (total=767, failed=6): phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1, runInfoChronology=6/6; only final 6 test(s) failed; log D:/mh-verify/r56/gate-real-failing-r56.log.",
+        "Negative matrix 5 cases: clean-real, clean-two-errors, clean-green, fail-with-runinfo OLD=0/NEW=0; bad-finished-beyond-window OLD=0/NEW=1 with withinRun=0 and exactly one run-window problem; oldAllZero=true; results D:/mh-verify/r56/results-all.json.",
+        "Code commit 497562a7a2b7bdfcb784ebedc504d4012e49615c (ci(windows): a phase clock must fit inside the run window (W6-113bb)); windows-ci 44622315539 (push) success, 44622330127 (pull_request) success; Android CI 44622330132 success."
+      ],
+      "notes": "第三十五层：StdOut 四个 phase 行的 canonical [xUnit.net hh:mm:ss.ff] 时钟必须 <= TestRun/Times.finish - Times.start；第 34 层只比较 phase 时钟彼此与最后 RunInfo，未读绝对运行窗口。",
+      "next_action": "候选第 36 层：继续从真实失败语料侦察可证结构不变量；RunInfo Text 时钟与 TRX @timestamp 存在约 +0.48s 常量偏移，不能直接按 Times.start 对齐；RunInfo/ErrorInfo 文本交叉引用仍不可行。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T06:25:00+08:00"
     }
   ]
 }
