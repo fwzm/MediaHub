@@ -930,3 +930,52 @@
 
 ### 边界
 - 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。
+## Round 46（W6-113as，2026-11-19）：失败日志必须装在一个 RunInfos 容器里
+
+### 切片动机
+
+- 第 23 层把 ResultSummary 下所有 RunInfos 里的 RunInfo 扁平收集起来，逐项核对失败行；它读的是“条目”，没有读“容器”。
+- 同一个 RunInfo 被拆进两个 RunInfos 包装、旁边留一个空包装，或把一份 RunInfos 放到 Deployment 下，条目列表仍可完整，旧层仍 PASS；前二十六层没有任何一层统计 RunInfos 包装块的数量与位置。
+- 真实绿色语料没有 RunInfos 块；真实失败语料恰有一个块、六个 RunInfo。本层只钉容器基数与归属，不改基线 JSON。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化）
+
+- 在既有 ResultSummary/RunInfos 逐项检查之后，新增 $runInfoLayoutBlocks：只收集 ResultSummary 的直接子节点中 LocalName=RunInfos 的块。
+- $runInfoLayoutAnywhere 用 //*[local-name()=RunInfos] 统计整棵树；两者不等即 RED（RunInfos 出现在 ResultSummary 之外）。
+- 有 Failed/Error 行时必须恰好 1 个直接块；没有 Failed/Error 行时最多 1 个直接块。
+- 台阶行在 runInfos 行后追加 runInfoBlocks=<n> strayRunInfoBlocks=<n>；错误细节上限 12 条。
+- 头部文档与 SEMANTICS 各新增一条说明。
+
+### 负向对照（EXECUTED）
+
+- old=D:/mh-verify/r47/gate-prev.ps1（第 26 层，2,250 行，sha256 c40b83b59c48e293ddca3cea9c40bb98abd7c6b1e767e99c3eb23d6791163c0a），new=本层。
+- clean-green OLD=0 NEW=0，new ladder 两套件均 runInfoBlocks=0 strayRunInfoBlocks=0。
+- fail-with-runinfo OLD=0 NEW=0，new ladder MediaHub.Tests runInfoBlocks=1 strayRunInfoBlocks=0。
+- runinfos-extra-empty-block OLD=0 NEW=1，broken 点名 2 个 RunInfos 块但只有 1 个 Failed/Error 行。
+- runinfos-stray-deployment OLD=0 NEW=1，broken 点名整棵树 2 个 RunInfos 块但只有 1 个直接位于 ResultSummary 下。
+- 实现态 sha256 在矩阵前后一致；对照结束后 clean-green 复跑仍 OLD=0 NEW=0。
+
+### 真实语料
+
+- gate-corpus（1973 windows + 104 webdav，英文 UI）：新闸门 exit 0；两套件台阶行均 runInfoBlocks=0 strayRunInfoBlocks=0；combined tests=2077；只有基线增长 warning（1973 > 1959）。
+
+### 数据源与规模
+
+- windows/tools/check-test-suite-baseline.ps1 129,275 B / 2,250 行 → 131,885 B / 2,283 行（+2,610 B，+33/−0 行），0 个非 ASCII；sha256 45d6ff72ded3bed62bb41c0cbffefcb687f654c2de9d3cec6c6f17509f9cc95e。
+- 双 shell 语法：pwsh 7.6.10 与 Windows PowerShell 5.1.26100.10003 均 errors=0。
+- git diff --stat：1 file changed / +33 insertions / 0 deletions；git diff --check 干净。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+
+- 提交 8c1d5de896b851177d1f989250020ca4f6dc5e34（ci(windows): the failure log must fit in one RunInfos block (W6-113as)），1 file changed / +33/-0，非 force push 到 feature/windows-w6-113as-runinfos-singular。
+- exact-head windows-ci：44501175782（push）success；44501257430（pull_request）success。
+- 同 head Android CI：44501257547（pull_request）in_progress（本提交只动 windows/tools，android/core/feature/app 子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+- Draft PR 143（base main，stacked 在 #140 第 26 层之上）；G7 恒 DO_NOT_MERGE。
+
+### 锁
+
+- run-id w6-113-round7-20261119，owner lead，8 把资源锁（3 remote-ref + 5 worktree），本轮结束 release-plan 释放。
+
+### 边界
+
+- 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。

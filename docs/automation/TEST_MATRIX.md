@@ -1620,3 +1620,47 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 
 ### exact-head CI 验收
 - 代码 head bad8b42a9210aa1d895f2ed84d86e1af3184639d：windows-ci 44491834447（push）success / 44491896251（pull_request）success；同 head Android CI 44491896189 = in_progress（CI_PENDING，17:07 取证）（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+## 6.32 第二十七层口径：失败日志必须装在一个 RunInfos 容器里（W6-113as）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| 有 Failed/Error 行时，ResultSummary 下必须恰有 1 个 RunInfos 块 | ResultSummary 的直接子节点 | RED |
+| 没有 Failed/Error 行时，ResultSummary 下最多 1 个 RunInfos 块 | ResultSummary 的直接子节点 | RED |
+| 整份 TRX 中任何 RunInfos 块都不得出现在 ResultSummary 之外 | //*[local-name()=RunInfos] | RED |
+| 台阶行记录 runInfoBlocks=<n> strayRunInfoBlocks=<n> | ladder | 仅记录 |
+
+### 为什么前二十六层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 23 层 | 把所有直接 ResultSummary/RunInfos 里的 RunInfo 扁平收集并逐项核对 | 容器数量、空包装、RunInfos 的放置位置 |
+| 第 24 层 | Output/StdOut 存在、非空、出现套件名、四条阶段行 | RunInfos 包装块 |
+| 第 25 层 | TestRun/@name 与 Times/@creation 秒级一致 | RunInfos 包装块 |
+| 第 26 层 | StdOut 的 Discovering/Discovered/Starting/Finished 阶段账本 | RunInfos 包装块 |
+| 全层 | — | 失败日志的单一容器 |
+
+### 依据（EXECUTED）
+
+- 真实绿色语料 D:/mh-w6-r41/windows/artifacts/gate-corpus：新闸门 exit 0，两套件 runInfoBlocks=0 strayRunInfoBlocks=0，combined tests=2077，只有基线增长 warning。
+- 四例矩阵：clean-green 与 fail-with-runinfo 均 OLD=0 NEW=0；runinfos-extra-empty-block 与 runinfos-stray-deployment 均 OLD=0 NEW=1，且分别点名“2 RunInfos block(s) for 1 Failed/Error row(s)”与“2 RunInfos block(s) but only 1 directly under ResultSummary”。
+
+### 数据源与规模
+
+- check-test-suite-baseline.ps1 129,275 → 131,885 B，2,250 → 2,283 行（+2,610 B，+33/-0 行），0 非 ASCII，sha256 45d6ff72ded3bed62bb41c0cbffefcb687f654c2de9d3cec6c6f17509f9cc95e。
+- 台阶行：runInfos=... 之后追加 runInfoBlocks=<n> strayRunInfoBlocks=<n>。
+
+### 负向对照
+
+- 四例矩阵全按预期；实现态 sha256 在对照前后一致，矩阵后 clean-green 复跑仍绿；旧层在两个变异上保持 PASS，证明新层不是旧层的重复。
+
+### 残留限制
+
+- 只统计 RunInfos 包装块的数量与位置；不比较不同 RunInfos 块之间的内容合并语义。
+- 允许没有失败行时存在一个空 RunInfos 块，避免误伤未来 producer 的空容器。
+- 不核对 RunInfos 与 Output/StdOut 的文本交叉引用；英文 UI 语料仍是前提。
+
+### exact-head CI 验收
+
+- 代码 head 8c1d5de896b851177d1f989250020ca4f6dc5e34：windows-ci 44501175782（push）success / 44501257430（pull_request）success；同 head Android CI 44501257547 = in_progress（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。

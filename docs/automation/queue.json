@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-19T17:10:00+08:00",
-  "updated_by": "lead-W6-113-r45",
+  "updated_at": "2026-11-19T18:15:00+08:00",
+  "updated_by": "lead-W6-113-r46",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -999,6 +999,27 @@
       "notes": "第 26 层收的是 ResultSummary/Output/StdOut 的阶段账本：runner 的控制台记录必须分别出现 Discovering、Discovered、Starting、Finished 四行，每行命名本套件且严格按该顺序。前二十五层只检查 StdOut 存在、非空和任意位置出现套件名，这四条阶段行在脚本里引用计数为 0。基线 JSON 与 updater 未改，无迁移。",
       "next_action": "候选下一层：①ErrorInfo/StackTrace 文本与 RunInfo Text 的交叉引用；②RunInfos 多条/空块与 runDeploymentRoot 的边界；③Times/@creation|@queuing 与 ResultSummary 的窗口自洽；另列独立任务刷新基线（1973 vs 1959）。",
       "closed_at": "2026-11-19T17:10:00+08:00"
+    },
+    {
+      "id": "W6-113as",
+      "title": "第二十七层：失败日志必须装在一个 RunInfos 容器里（ResultSummary/RunInfos block cardinality）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r46",
+      "branch": "feature/windows-w6-113as-runinfos-singular",
+      "evidence": [
+        "check-test-suite-baseline.ps1 129,275 -> 131,885 B (+33 lines, 2,283 lines, sha256 45d6ff72ded3bed62bb41c0cbffefcb687f654c2de9d3cec6c6f17509f9cc95e, pure ASCII), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-27 invariant: a run with Failed/Error rows carries exactly one ResultSummary/RunInfos container, a run without those rows carries at most one, and any RunInfos outside ResultSummary is RED; the ladder records runInfoBlocks=<n> strayRunInfoBlocks=<n>; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI): D:/mh-w6-r41/windows/artifacts/gate-corpus exit 0; both suites runInfoBlocks=0 strayRunInfoBlocks=0; combined tests=2077; growth warnings only (1973 > baseline 1959).",
+        "Negative controls: 4 cases at D:/mh-verify/r47; clean-green OLD=0 NEW=0 and fail-with-runinfo OLD=0 NEW=0 (MediaHub.Tests runInfoBlocks=1); runinfos-extra-empty-block OLD=0 NEW=1 naming 2 RunInfos blocks for 1 Failed/Error row; runinfos-stray-deployment OLD=0 NEW=1 naming 2 blocks but only 1 directly under ResultSummary; implementation sha256 45d6ff72... unchanged across the matrix and clean-green re-run after the matrix still OLD=0 NEW=0.",
+        "Commit 8c1d5de896b851177d1f989250020ca4f6dc5e34 (ci(windows): the failure log must fit in one RunInfos block (W6-113as)), 1 file changed / +33 insertions / 0 deletions, non-force push to feature/windows-w6-113as-runinfos-singular; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44501175782 (push) = success and 44501257430 (pull_request) = success; the runs printed runInfoBlocks=0 strayRunInfoBlocks=0 for both suites.",
+        "Android CI 44501257547 = in_progress at the code head; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001.",
+        "Draft PR #143 (base main, stacked on #140) carries the layer text; G7 remains DO_NOT_MERGE. Baseline JSON and updater were not changed, so there is no migration."
+      ],
+      "notes": "第 27 层收的是 ResultSummary/RunInfos 的容器基数：有 Failed/Error 行时必须恰好一个直接 RunInfos 块，没有失败行时最多一个，整棵树中任何 RunInfos 出现在 ResultSummary 之外即 RED。第 23 层只扁平读取条目，前二十六层没有统计包装块数量与位置。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①ResultSummary/Output/StdOut 与 RunInfos 的文本交叉引用（需真实语料证明）；②RunInfos 的 RunInfo 只允许包含一个 Text 子元素；③独立任务刷新基线（1973 vs 1959）。",
+      "closed_at": "2026-11-19T18:15:00+08:00"
     }
   ]
 }
