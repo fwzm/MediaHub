@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-19T21:25:00+08:00",
-  "updated_by": "lead-W6-113-r49",
+  "updated_at": "2026-11-19T22:50:00+08:00",
+  "updated_by": "lead-W6-113-r50",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -1085,6 +1085,28 @@
       "notes": "第 30 层收的是 RunInfo Text 的整行外壳：必须是 xUnit 2.9.3 写入器的 [xUnit.net hh:mm:ss.ff] + 恰好 5 个 ASCII 空格 + 非空白测试名 + 恰好 1 个空格 + [FAIL]，整行锚定。第 29 层只剥壳比较名字，裸名、4/6 空格、tab、1 位小数、秒 60、[FAIL] 前双空格、尾随换行都能通过。基线 JSON 与 updater 未改，无迁移。",
       "next_action": "候选下一层：①RunInfos 与 runDeploymentRoot/Deployment 的层次边界；②RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用（需真实语料证明）；③独立任务刷新基线（1973 vs 1959）。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
       "closed_at": "2026-11-19T21:25:00+08:00"
+    },
+    {
+      "id": "W6-113aw",
+      "title": "第三十一层：失败日志条目与 Deployment 必须各归其主（RunInfo/Deployment ownership）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r50",
+      "branch": "feature/windows-w6-113aw-runinfo-deployment-boundary",
+      "evidence": [
+        "check-test-suite-baseline.ps1 138,932 -> 141,834 B (+40 lines, 2,423 lines, sha256 16fcef0a631c44fa95179e42aa3c4900f01d50f60cb2af9033d03791544a53bf, 0 non-ASCII, no BOM/CRLF), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-31 invariant: every RunInfo must be a direct child of the unique ResultSummary/RunInfos block; every Deployment must be a direct child of TestSettings; a RunInfo parked under Deployment/TestSettings or nested in another RunInfo, and a second Deployment under ResultSummary/RunInfos, are RED; ladder records runInfoBoundary=<direct>/<all> and deploymentBoundary=<direct>/<all>; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI): D:/mh-w6-r41/windows/artifacts/gate-corpus exit 0; both suites runInfoBoundary=0/0, deploymentBoundary=1/1, runInfoTexts/Exact/Canonical=0/0; combined tests=2077; growth warnings only (1973 > baseline 1959).",
+        "Real failed corpus D:/mh-verify/r41-art/test-results/windows-tests.trx: runInfoAny=6 runInfoOwner=6, deploymentAny=1 deploymentOwner=1.",
+        "Negative controls: 7 cases at D:/mh-verify/r51; clean-green OLD=0 NEW=0 and fail-with-runinfo OLD=0 NEW=0 (runInfoBoundary=1/1, deploymentBoundary=1/1); runinfo-under-deployment, runinfo-nested-in-runinfo, runinfo-under-testsettings, deployment-under-summary and deployment-under-runinfos all OLD=0 NEW=1; oldAllZero=true; each red case reports exactly one broken owner row; implementation sha256 16fcef0a... unchanged across the matrix.",
+        "Commit 7e9cef7933bc105bc03a95ef978ea037148072f6 (ci(windows): a failure log item must stay under its own block (W6-113aw)), 1 file changed / +40 insertions / 0 deletions, non-force push to feature/windows-w6-113aw-runinfo-deployment-boundary; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44541458120 (push) = success and 44541577847 (pull_request) = success.",
+        "Android CI 44541577966 = success at the code head; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001.",
+        "Draft PR #154 (base main, stacked on #151) carries the layer text; G7 remains DO_NOT_MERGE. Baseline JSON and updater were not changed, so there is no migration."
+      ],
+      "notes": "第 31 层收的是每类节点的归属：所有 RunInfo 必须直接挂在唯一 ResultSummary/RunInfos 下，所有 Deployment 必须直接挂在 TestSettings 下；把 RunInfo 放到 Deployment/TestSettings、嵌套进 RunInfo，或把额外 Deployment 放到 ResultSummary/RunInfos，都会让报告出现两个 owner。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用（需真实语料证明）；②Deployment 的 runDeploymentRoot 字段与 Deployment 记录的一致性；③独立任务刷新基线（1973 vs 1959）。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-19T22:50:00+08:00"
     }
   ]
 }

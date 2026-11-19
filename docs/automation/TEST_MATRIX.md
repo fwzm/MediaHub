@@ -1794,3 +1794,48 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 ### exact-head CI 验收
 
 - 代码 head 27ec4f5f7f8995899a5e4cc36998e2490abfdd0a：windows-ci 44530232205（push）success / 44530355825（pull_request）success；同 head Android CI 44530355822 = in_progress。
+## 6.36 第三十一层口径：失败日志条目与 Deployment 必须各归其主（W6-113aw）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| 所有 RunInfo 必须是唯一 ResultSummary/RunInfos 的直接子元素 | ResultSummary/RunInfos | RED |
+| RunInfo 出现在 Deployment、TestSettings 或其他位置 | 整棵 XML | RED |
+| 所有 Deployment 必须是唯一 TestSettings 的直接子元素 | TestSettings | RED |
+| 多余 Deployment 出现在 ResultSummary/RunInfos | 整棵 XML | RED |
+| 台阶行记录 runInfoBoundary=<direct>/<all> 与 deploymentBoundary=<direct>/<all> | ladder | 仅记录 |
+
+### 为什么前三十层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 27 层 | ResultSummary/RunInfos 容器数量 | 容器外或嵌套的 RunInfo 元素 |
+| 第 30 层 | 唯一 RunInfos 的直接子 RunInfo 的 Text 外壳 | Deployment 内 / TestSettings 内的额外 RunInfo |
+| 全层 | — | Deployment 元素是否只有一个合法 owner |
+
+### 依据（EXECUTED）
+
+- 真实绿色语料 D:/mh-w6-r41/windows/artifacts/gate-corpus：新闸门 exit 0，两套件 runInfoBoundary=0/0、deploymentBoundary=1/1，combined tests=2077，只有基线增长 warning。
+- 真实失败语料 D:/mh-verify/r41-art/test-results/windows-tests.trx：runInfoAny=6 runInfoOwner=6，deploymentAny=1 deploymentOwner=1。
+- 七例矩阵：clean-green 与 fail-with-runinfo 均 OLD=0 NEW=0；5 个变异例均 OLD=0 NEW=1，且每例恰好 1 条 broken。
+
+### 数据源与规模
+
+- check-test-suite-baseline.ps1 138,932 → 141,834 B，2,383 → 2,423 行（+2,902 B，+40/-0 行），0 非 ASCII，sha256 16fcef0a631c44fa95179e42aa3c4900f01d50f60cb2af9033d03791544a53bf。
+- 台阶行：runInfoTextCanonical=... 之后追加 runInfoBoundary=<n>/<n>、deploymentBoundary=<n>/<n>。
+
+### 负向对照
+
+- 七例矩阵全按预期；实现态 sha256 在对照前后一致；旧层在 5 个变异上保持 PASS，证明新层不是旧层的重复。
+- 变异覆盖：RunInfo 放 Deployment、RunInfo 嵌套 RunInfo、RunInfo 放 TestSettings、Deployment 放 ResultSummary、Deployment 放 RunInfos。
+
+### 残留限制
+
+- 只认证每类节点的归属；不比较 RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用。
+- 不改变基线 JSON 与 updater。
+- 不验证 Deployment 的 runDeploymentRoot 字段语义。
+
+### exact-head CI 验收
+
+- 代码 head 7e9cef7933bc105bc03a95ef978ea037148072f6：windows-ci 44541458120（push）success / 44541577847（pull_request）success；同 head Android CI 44541577966 = success。

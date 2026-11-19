@@ -1127,3 +1127,49 @@
 ### 边界
 
 - 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。
+## Round 50（W6-113aw，2026-11-19）：失败日志条目与 Deployment 必须各归其主
+
+### 切片动机
+
+- 第 27 层只数 `ResultSummary/RunInfos` 容器（`$runInfoLayoutAnywhere` 与 `$runInfoLayoutCount`），不数 `RunInfo` 元素总数；第 30 层只读唯一 `RunInfos` 的直接子 `RunInfo`。因此把 `RunInfo` 塞到 `Deployment` 下、把 `RunInfo` 嵌套进另一个 `RunInfo`、或在 `ResultSummary` / `RunInfos` 内再放一个 `Deployment`，旧三十层仍 PASS，但报告出现两个 owner。
+- 真实失败语料 D:/mh-verify/r41-art/test-results/windows-tests.trx 实测：`runInfoAny=6 runInfoOwner=6 deploymentAny=1 deploymentOwner=1`，说明正常 TRX 满足“各归其主”。
+- 第 31 层把“数量对”收紧为“每个条目只能有一个合法 owner”，只读 TRX 结构，不改基线 JSON。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化）
+
+- 新增 ownership 检查：所有 `RunInfo` 必须是唯一 `ResultSummary/RunInfos` 的直接子元素；所有 `Deployment` 必须是唯一 `TestSettings` 的直接子元素。
+- 判据：`$runInfoAnywhere -ne $runInfoOwnerCount` 或 `$deploymentAnywhere -ne $deploymentOwnerCount` 即 RED；broken 行分别为 `the file carries N RunInfo item(s) but only M directly under the ResultSummary/RunInfos block` 与 `the file carries N Deployment element(s) but only M directly under TestSettings`，细节上限 12；throw 前缀 `the failure-log/deployment ownership ...`。
+- 台阶行新增 `runInfoBoundary=<direct>/<all>` 与 `deploymentBoundary=<direct>/<all>`；头注释两处与 SEMANTICS 各补一条。
+
+### 负向对照（EXECUTED）
+
+- old=D:/mh-verify/r51/gate-prev.ps1（第 30 层，2,383 行，sha256 eaf8151e5469621ff56cffed262d14c80be2f59116fedc516a328f7f58f4177a），new=本层。
+- clean-green OLD=0 NEW=0；fail-with-runinfo OLD=0 NEW=0（`runInfoBoundary=1/1`、`deploymentBoundary=1/1`）。
+- 5 个变异例 OLD=0 NEW=1：runinfo-under-deployment、runinfo-nested-in-runinfo、runinfo-under-testsettings、deployment-under-summary、deployment-under-runinfos。
+- `oldAllZero=true`；每例完整日志仅 1 条 broken 且仅 1 条 `the file carries`（`eachRedExactlyOneOwnerRow=true`）；矩阵完成后实现态 sha256 未变。
+
+### 真实语料
+
+- gate-corpus（1973 windows + 104 webdav，英文 UI）：新闸门 exit 0；两套件 `runInfoBoundary=0/0`、`deploymentBoundary=1/1`，`runInfoTexts/Exact/Canonical=0/0`；`combined tests=2077`；仅基线增长 warning（1973 > 1959），baseline JSON 未改。
+- 真实失败语料 D:/mh-verify/r41-art/test-results/windows-tests.trx：`runInfoAny=6 runInfoOwner=6 deploymentAny=1 deploymentOwner=1`。
+
+### 数据源与规模
+
+- windows/tools/check-test-suite-baseline.ps1 138,932 B / 2,383 行 → 141,834 B / 2,423 行（+2,902 B，+40/−0 行），0 个非 ASCII；sha256 16fcef0a631c44fa95179e42aa3c4900f01d50f60cb2af9033d03791544a53bf。
+- 双 shell 语法：pwsh 7.6.10 与 Windows PowerShell 5.1.26100.10003 均 errors=0。
+- git diff --stat：1 file changed / +40 insertions / 0 deletions；git diff --check 干净。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+
+- 提交 7e9cef7933bc105bc03a95ef978ea037148072f6（ci(windows): a failure log item must stay under its own block (W6-113aw)），1 file changed / +40/-0，非 force push 到 feature/windows-w6-113aw-runinfo-deployment-boundary。
+- exact-head windows-ci：44541458120（push）success；44541577847（pull_request）success。
+- 同 head Android CI：44541577966（pull_request）success。
+- Draft PR #154（base main，stacked 在 #151 第 30 层之上）；G7 恒 DO_NOT_MERGE。
+
+### 锁
+
+- run-id w6-113-round11-20261119，owner lead，8 把资源锁（3 remote-ref + 5 worktree），本轮结束 release-plan 释放。
+
+### 边界
+
+- 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。
