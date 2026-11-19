@@ -94,6 +94,12 @@
     <string name="player_info_bitrate_cap">Bitrate cap</string>
     <string name="player_info_actual_engine">Actual engine</string>
     <string name="player_info_actual_decoder">Actual decoder</string>
+    <string name="player_info_actual_renderer">Actual renderer</string>
+    <string name="player_info_actual_video_codec">Observed video codec</string>
+    <string name="player_info_actual_audio_codec">Observed audio codec</string>
+    <string name="player_info_actual_bitrate">Observed bitrate</string>
+    <string name="player_info_actual_frame_rate">Observed frame rate</string>
+    <string name="player_info_hwdec_backend">Hardware decoding backend</string>
     <string name="player_info_actual_resolution">Actual resolution</string>
     <string name="player_info_audio_output">Current audio track format</string>
     <string name="player_info_audio_track_count">Audio tracks</string>

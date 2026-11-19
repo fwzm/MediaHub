@@ -9,6 +9,7 @@ import com.mediahub.model.ProfessionalInfoPreferences
 import com.mediahub.model.SubtitleTrack
 import com.mediahub.model.UserPreferences
 import com.mediahub.player.engine.EngineKind
+import com.mediahub.player.engine.PlaybackObservedInfo
 import com.mediahub.player.engine.PlaybackUiState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -265,5 +266,73 @@ class PlayerInfoPanelStateTest {
         assertEquals(unknown, formatPlayerInfoResolution(1920, 0, unknown))
         assertEquals(unknown, formatPlayerInfoResolution(0, 1080, unknown))
         assertEquals("1920×1080", formatPlayerInfoResolution(1920, 1080, unknown))
+    }
+
+    @Test
+    fun `runtime observation reports decoder renderer codec bitrate and frame rate`() {
+        val sections = buildPlayerInfoSections(
+            inputs = PlayerInfoPanelInputs(
+                source = fullSource(),
+                launchContainer = null,
+                preferences = UserPreferences(),
+                engineKind = EngineKind.MEDIA3,
+                uiState = fullUiState().copy(
+                    observed = PlaybackObservedInfo(
+                        videoCodec = "avc1.640028",
+                        audioCodec = "mp4a.40.2",
+                        videoBitrateBps = 12_000_000L,
+                        audioBitrateBps = 192_000L,
+                        frameRate = 23.976f,
+                        videoDecoder = "c2.qti.avc.decoder",
+                        hwdec = "mediacodec",
+                        renderer = "SurfaceView",
+                    ),
+                ),
+            ),
+            labels = labels,
+        )
+        val runtime = sections[2].rows.associateBy { it.label }
+        assertEquals("c2.qti.avc.decoder", runtime.getValue(labels.actualDecoder).value)
+        assertEquals("mediacodec", runtime.getValue(labels.hwdecBackend).value)
+        assertEquals("SurfaceView", runtime.getValue(labels.actualRenderer).value)
+        assertEquals("avc1.640028", runtime.getValue(labels.actualVideoCodec).value)
+        assertEquals("mp4a.40.2", runtime.getValue(labels.actualAudioCodec).value)
+        assertEquals("12.0 Mbps", runtime.getValue(labels.actualBitrate).value)
+        assertEquals("24.0 fps", runtime.getValue(labels.actualFrameRate).value)
+
+        // 源声明段仍是「源参数」，运行观测段写实测，两段不互相覆盖
+        val source = sections[0].rows.associateBy { it.label }
+        assertEquals("h264", source.getValue(labels.videoCodec).value)
+        assertEquals("8.0 Mbps", source.getValue(labels.bitrate).value)
+    }
+
+    @Test
+    fun `runtime observation falls back to unknown when the engine reported nothing`() {
+        val sections = buildPlayerInfoSections(
+            inputs = PlayerInfoPanelInputs(
+                source = fullSource(),
+                launchContainer = null,
+                preferences = UserPreferences(),
+                engineKind = EngineKind.MEDIA3,
+                uiState = fullUiState(),
+            ),
+            labels = labels,
+        )
+        val runtime = sections[2].rows.associateBy { it.label }
+        assertEquals(labels.unknown, runtime.getValue(labels.actualDecoder).value)
+        assertEquals(labels.unknown, runtime.getValue(labels.hwdecBackend).value)
+        assertEquals(labels.unknown, runtime.getValue(labels.actualRenderer).value)
+        assertEquals(labels.unknown, runtime.getValue(labels.actualVideoCodec).value)
+        assertEquals(labels.unknown, runtime.getValue(labels.actualAudioCodec).value)
+        assertEquals(labels.unknown, runtime.getValue(labels.actualBitrate).value)
+        assertEquals(labels.unknown, runtime.getValue(labels.actualFrameRate).value)
+    }
+
+    @Test
+    fun `frame rate formatter only claims known positive values`() {
+        val unknown = labels.unknown
+        assertEquals(unknown, formatPlayerInfoFrameRate(null, unknown))
+        assertEquals(unknown, formatPlayerInfoFrameRate(0f, unknown))
+        assertEquals("59.9 fps", formatPlayerInfoFrameRate(59.94f, unknown))
     }
 }

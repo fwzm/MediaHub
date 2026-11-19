@@ -91,6 +91,12 @@ data class PlayerInfoLabels(
     val bitrateCap: String = "码率上限",
     val actualEngine: String = "实际内核",
     val actualDecoder: String = "实际解码器",
+    val actualRenderer: String = "实际渲染器",
+    val actualVideoCodec: String = "实际视频编码",
+    val actualAudioCodec: String = "实际音频编码",
+    val actualBitrate: String = "实际码率",
+    val actualFrameRate: String = "实际帧率",
+    val hwdecBackend: String = "硬解后端",
     val actualResolution: String = "实际分辨率",
     val audioOutput: String = "当前音轨格式",
     val audioTrackCount: String = "音轨",
@@ -154,6 +160,12 @@ fun rememberPlayerInfoLabels(): PlayerInfoLabels = PlayerInfoLabels(
     bitrateCap = stringResource(R.string.player_info_bitrate_cap),
     actualEngine = stringResource(R.string.player_info_actual_engine),
     actualDecoder = stringResource(R.string.player_info_actual_decoder),
+    actualRenderer = stringResource(R.string.player_info_actual_renderer),
+    actualVideoCodec = stringResource(R.string.player_info_actual_video_codec),
+    actualAudioCodec = stringResource(R.string.player_info_actual_audio_codec),
+    actualBitrate = stringResource(R.string.player_info_actual_bitrate),
+    actualFrameRate = stringResource(R.string.player_info_actual_frame_rate),
+    hwdecBackend = stringResource(R.string.player_info_hwdec_backend),
     actualResolution = stringResource(R.string.player_info_actual_resolution),
     audioOutput = stringResource(R.string.player_info_audio_output),
     audioTrackCount = stringResource(R.string.player_info_audio_track_count),
@@ -181,6 +193,10 @@ fun formatPlayerInfoBitrate(bps: Long?, unknown: String): String = when {
     bps >= 1_000_000 -> "%.1f Mbps".format(bps / 1_000_000.0)
     else -> "%.0f kbps".format(bps / 1_000.0)
 }
+
+/** 帧率展示：null/非正值=未知；保留 1 位小数（23.976 → 24.0 fps），用固定 Locale 保证跨环境稳定。 */
+fun formatPlayerInfoFrameRate(fps: Float?, unknown: String): String =
+    if (fps != null && fps > 0f) String.format(java.util.Locale.US, "%.1f fps", fps) else unknown
 
 /** 分辨率展示：宽高都 >0 才输出 "W×H"，否则未知。 */
 fun formatPlayerInfoResolution(width: Int?, height: Int?, unknown: String): String =
@@ -215,7 +231,7 @@ fun buildPlayerInfoSections(
                 value = formatPlayerInfoResolution(source?.width, source?.height, unknown),
                 primary = true,
             ),
-            // 模型层（PlaybackSource/MediaStream/MediaItem）均无帧率字段：恒为未知。
+            // 源参数段只陈述源声明：模型层无帧率字段 → 未知；实测帧率在「运行观测」段。
             PlayerInfoRow(label = labels.frameRate, value = unknown),
             PlayerInfoRow(label = labels.hdr, value = labels.hdrName(source?.hdrType ?: HdrType.NONE)),
             PlayerInfoRow(
@@ -258,13 +274,22 @@ fun buildPlayerInfoSections(
                 value = inputs.engineKind?.name ?: unknown,
                 primary = true,
             ),
-            // PlaybackUiState 未暴露实际解码器名：写未知，不伪造（后续引擎侧观测补齐）。
-            PlayerInfoRow(label = labels.actualDecoder, value = unknown),
+            // 引擎侧真实观测（observed）。未观测到 → 未知，绝不拿配置/源声明冒充观测。
+            PlayerInfoRow(
+                label = labels.actualDecoder,
+                value = ui.observed.videoDecoder ?: ui.observed.audioDecoder ?: unknown,
+            ),
+            PlayerInfoRow(label = labels.hwdecBackend, value = ui.observed.hwdec ?: unknown),
+            PlayerInfoRow(label = labels.actualRenderer, value = ui.observed.renderer ?: unknown),
             PlayerInfoRow(
                 label = labels.actualResolution,
                 value = formatPlayerInfoResolution(ui.videoWidth, ui.videoHeight, unknown),
                 primary = true,
             ),
+            PlayerInfoRow(label = labels.actualVideoCodec, value = ui.observed.videoCodec ?: unknown),
+            PlayerInfoRow(label = labels.actualAudioCodec, value = ui.observed.audioCodec ?: unknown),
+            PlayerInfoRow(label = labels.actualBitrate, value = formatPlayerInfoBitrate(ui.observed.videoBitrateBps, unknown)),
+            PlayerInfoRow(label = labels.actualFrameRate, value = formatPlayerInfoFrameRate(ui.observed.frameRate, unknown)),
             PlayerInfoRow(
                 label = labels.audioOutput,
                 value = ui.audioFormatMime?.takeIf { it.isNotBlank() }?.let { prettyCodecName(it) ?: it } ?: unknown,
