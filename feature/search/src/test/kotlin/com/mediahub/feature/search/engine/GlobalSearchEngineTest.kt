@@ -60,6 +60,35 @@ class GlobalSearchEngineTest {
         assertEquals(0, invoked)
     }
 
+    @Test
+    fun `search reports per-server hasMore`() = runTest {
+        val engine = GlobalSearchEngine()
+        val more = target("s1", "予初") { _, _ ->
+            PagedResult(items = listOf(item("a1")), totalCount = 100, hasMore = true)
+        }
+
+        val final = engine.search(listOf(more), "q").toList().last()
+
+        assertTrue(final.hasMore)
+        assertEquals(true, final.hasMoreByServer["s1"])
+        assertEquals(1, final.nextOffsetByServer["s1"])
+    }
+
+    @Test
+    fun `search forwards offset to provider`() = runTest {
+        val engine = GlobalSearchEngine()
+        var seen: PageRequest? = null
+        val t = target("s1", "予初") { _, page ->
+            seen = page
+            PagedResult(items = emptyList(), hasMore = false)
+        }
+
+        engine.search(listOf(t), "q", pageSize = 7, offset = 21).toList()
+
+        assertEquals(21, seen?.offset)
+        assertEquals(7, seen?.limit)
+    }
+
     // ---- Partial success：单服失败不吞其它结果 ----
 
     @Test
