@@ -1,8 +1,10 @@
 package com.mediahub.feature.player
 
+import com.mediahub.core.ui.effects.PlayerVisualPalette
 import com.mediahub.core.ui.effects.RendererBackend
 import com.mediahub.core.ui.effects.SpectrumFrame
 import com.mediahub.core.ui.effects.VisualPalette
+import com.mediahub.core.ui.effects.contrastRatio
 import com.mediahub.model.PlayerVisualEffectsPreferences
 import com.mediahub.model.PlayerVisualPreset
 import com.mediahub.model.UserPreferences
@@ -112,6 +114,29 @@ class PlaybackVisualUiStateTest {
         assertEquals(0f, state.spectrum.mid, 0f)
         assertEquals(0f, state.spectrum.treble, 0f)
         assertEquals(1f, state.spectrum.amplitude, 0f)
+    }
+
+    @Test
+    fun `chrome palette is fixed dark and never follows artwork`() {
+        val artwork = VisualPalette(
+            background = 0xFFF2E9DA.toInt(),
+            primary = 0xFFFFF1A8.toInt(),
+            secondary = 0xFFF7D9C4.toInt(),
+            accent = 0xFFFFC857.toInt(),
+        )
+        val followed = resolve(artwork = artwork)
+        val plain = resolve()
+
+        assertEquals(PlayerVisualPalette.Dark, followed.chromePalette)
+        assertEquals(PlayerVisualPalette.Dark, plain.chromePalette)
+        assertEquals(artwork, followed.sourcePalette)
+        assertTrue(contrastRatio(followed.chromePalette.onSurface, followed.chromePalette.surface) >= 4.5f)
+        assertTrue(
+            contrastRatio(
+                followed.chromePalette.onSurfaceVariant,
+                followed.chromePalette.surfaceVariant,
+            ) >= 4.5f,
+        )
     }
 
     private fun resolve(

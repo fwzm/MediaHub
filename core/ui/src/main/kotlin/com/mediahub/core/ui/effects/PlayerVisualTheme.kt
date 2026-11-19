@@ -24,6 +24,19 @@ data class PlayerVisualPalette(
     val onAccent: Color,
 ) {
     companion object {
+        /**
+         * Fixed cinema-dark chrome theme. Playback controls must not inherit artwork colors:
+         * pale artwork used to wash out control tint and destabilize text contrast.
+         */
+        val Dark: PlayerVisualPalette = from(
+            VisualPalette(
+                background = 0xFF0B0D12.toInt(),
+                primary = 0xFFD6E2FF.toInt(),
+                secondary = 0xFFB9C3D6.toInt(),
+                accent = 0xFF9CC7FF.toInt(),
+            ),
+        )
+
         fun from(source: VisualPalette): PlayerVisualPalette {
             val background = Color(source.background).opaque()
             val rawPrimary = Color(source.primary).opaque()

@@ -78,7 +78,8 @@ object PlaybackVisualStateResolver {
                 frameDecision = frameDecision,
             ),
             sourcePalette = sourcePalette,
-            chromePalette = PlayerVisualPalette.from(sourcePalette),
+            // Chrome is a fixed dark theme; artwork colors only drive the shader palette.
+            chromePalette = PlayerVisualPalette.Dark,
             spectrum = spectrum,
             audioReactiveAvailable = audioSpectrum != null,
             rendererBackend = rendererBackend,
