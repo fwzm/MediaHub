@@ -1113,82 +1113,6 @@ internal fun PlayerSeekBar(
     }
 }
 
-@Composable
-private fun GestureSeekIndicator(preview: GestureSeekPreview, modifier: Modifier = Modifier) {
-    val sign = if (preview.deltaMs >= 0) "+" else "-"
-    val absSeconds = kotlin.math.abs(preview.deltaMs) / 1000
-    val deltaText = "$sign%d:%02d".format(absSeconds / 60, absSeconds % 60)
-    Text(
-        text = stringResource(R.string.player_gesture_seek, deltaText, formatTime(preview.targetPositionMs)),
-        color = Color.White,
-        style = MaterialTheme.typography.titleMedium,
-        modifier = modifier
-            .background(Color.Black.copy(alpha = 0.65f))
-            .padding(horizontal = 20.dp, vertical = 10.dp),
-    )
-}
-
-/** 长按临时倍速/rewind 指示（U3-B revision）：居中显示当前档位。 */
-@Composable
-private fun GestureSpeedIndicator(preview: GestureSpeedPreview, modifier: Modifier = Modifier) {
-    val text = stringResource(
-        if (preview.isRewind) R.string.player_gesture_rewinding else R.string.player_gesture_speed,
-        preview.speed,
-    )
-    Text(
-        text = text,
-        color = Color.White,
-        style = MaterialTheme.typography.titleMedium,
-        modifier = modifier
-            .background(Color.Black.copy(alpha = 0.65f))
-            .padding(horizontal = 20.dp, vertical = 10.dp),
-    )
-}
-
-/** 竖向亮度/音量指示器（U3-C）：窄长圆角胶囊，半透明黑底。 */
-@Composable
-private fun GestureLevelIndicator(preview: GestureLevelPreview, modifier: Modifier = Modifier) {
-    val icon = if (preview.kind == PlayerLevelKind.BRIGHTNESS) Icons.Default.LightMode else Icons.Default.VolumeUp
-    Column(
-        modifier = modifier
-            .padding(horizontal = 32.dp)
-            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(28.dp))
-            .padding(horizontal = 14.dp, vertical = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Icon(
-            icon,
-            contentDescription = stringResource(
-                if (preview.kind == PlayerLevelKind.BRIGHTNESS) R.string.player_brightness else R.string.player_volume,
-            ),
-            tint = Color.White,
-            modifier = Modifier.size(24.dp),
-        )
-        Box(
-            modifier = Modifier
-                .width(6.dp)
-                .height(140.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(Color.White.copy(alpha = 0.25f)),
-        ) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .fillMaxHeight(preview.fraction.coerceIn(0.02f, 1f))
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Color.White),
-            )
-        }
-        Text(
-            stringResource(R.string.player_level_percent, (preview.fraction * 100).roundToInt()),
-            color = Color.White,
-            style = MaterialTheme.typography.labelSmall,
-        )
-    }
-}
-
 /** 读取系统亮度（Android 12+ 优先 display info，fallback Settings.System），返回 0..1。 */
 private fun readSystemBrightness(context: Context): Float {
     return try {
@@ -1198,7 +1122,7 @@ private fun readSystemBrightness(context: Context): Float {
     }
 }
 
-private fun formatTime(ms: Long): String {
+internal fun formatTime(ms: Long): String {
     val totalSeconds = ms / 1000
     val h = totalSeconds / 3600
     val m = (totalSeconds % 3600) / 60
