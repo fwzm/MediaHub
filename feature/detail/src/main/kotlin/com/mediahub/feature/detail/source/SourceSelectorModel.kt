@@ -40,7 +40,13 @@ fun sourceRows(occurrences: List<CanonicalSourceOccurrence>): List<SourceRow> {
             serverId = occ.serverId,
             itemId = occ.item.id,
             title = occ.item.title,
-            label = if (copies > 1) "${occ.serverName} · 副本$idx" else occ.serverName,
+            label = buildString {
+                append(occ.serverName)
+                occ.endpointName?.trim()?.takeIf { it.isNotEmpty() }?.let { line ->
+                    append(" · ").append(line)
+                }
+                if (copies > 1) append(" · 副本").append(idx)
+            },
             isActive = occ.isActive,
         )
     }

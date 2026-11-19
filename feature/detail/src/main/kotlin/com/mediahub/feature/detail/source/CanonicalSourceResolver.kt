@@ -9,6 +9,7 @@ import com.mediahub.model.CanonicalKeyPolicy
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
 import com.mediahub.model.PageRequest
+import com.mediahub.model.activeEndpoint
 import com.mediahub.provider.api.MediaIdentityLookupProvider
 import com.mediahub.provider.api.MediaProviderRegistry
 import javax.inject.Inject
@@ -30,6 +31,8 @@ import kotlinx.coroutines.withTimeout
 data class CanonicalSourceOccurrence(
     val serverId: String,
     val serverName: String,
+    /** 当前生效的 ServerEndpoint.name；用于在来源选择器中区分同服务器的多条线路。 */
+    val endpointName: String? = null,
     val item: MediaItem,
     val isActive: Boolean,
 )
@@ -87,9 +90,15 @@ class CanonicalSourceResolver @Inject constructor(
         }
 
         val targets = lookupTargets()
+        val activeTarget = targets.firstOrNull { it.serverId == activeServerId }
         // seed 占据首位的稳定顺序：active → 服务器配置序内按发现序
         val found = mutableListOf(
-            FoundSource(activeServerId, activeOccurrenceName(targets, activeServerId), seed),
+            FoundSource(
+                serverId = activeServerId,
+                serverName = activeTarget?.serverName ?: activeServerId,
+                endpointName = activeTarget?.endpointName,
+                item = seed,
+            ),
         )
         val occurrenceKeys = mutableSetOf(SeedKey(activeServerId, seed.id))
         val knownKeys = seedKeys.toMutableSet()
@@ -125,7 +134,7 @@ class CanonicalSourceResolver @Inject constructor(
                         break@outer
                     }
                     occurrenceKeys += key
-                    found += FoundSource(server.serverId, server.serverName, item)
+                    found += FoundSource(server.serverId, server.serverName, server.endpointName, item)
                     knownKeys.addAll(itemKeys)
                     mutated = true
                 }
@@ -143,6 +152,7 @@ class CanonicalSourceResolver @Inject constructor(
             CanonicalSourceOccurrence(
                 serverId = source.serverId,
                 serverName = source.serverName,
+                endpointName = source.endpointName,
                 item = source.item,
                 isActive = idx == 0,
             )
@@ -161,18 +171,21 @@ class CanonicalSourceResolver @Inject constructor(
     private data class FoundSource(
         val serverId: String,
         val serverName: String,
+        val endpointName: String?,
         val item: MediaItem,
     )
 
     private data class LookupTarget(
         val serverId: String,
         val serverName: String,
+        val endpointName: String?,
         val lookup: MediaIdentityLookupProvider,
     )
 
     private data class ServerLookup(
         val serverId: String,
         val serverName: String,
+        val endpointName: String?,
         val items: List<MediaItem>,
         val hasMore: Boolean,
     )
@@ -187,11 +200,9 @@ class CanonicalSourceResolver @Inject constructor(
                 .onFailure { logger.w(LogTag.UI, "创建 ProviderHandle 失败 server=${server.name}", it) }
                 .getOrNull()
             val lookup = handle?.identityLookup ?: return@mapNotNull null
-            LookupTarget(server.id, server.name, lookup)
+            val endpointName = server.endpoints.activeEndpoint()?.name?.trim()?.takeIf { it.isNotEmpty() }
+            LookupTarget(server.id, server.name, endpointName, lookup)
         }
-
-    private fun activeOccurrenceName(targets: List<LookupTarget>, activeServerId: String): String =
-        targets.firstOrNull { it.serverId == activeServerId }?.serverName ?: activeServerId
 
     /** 一轮查询：并发 ≤ 4、per-server timeout 8s；单服务器失败降级为空贡献。 */
     private suspend fun lookupAll(
@@ -208,7 +219,13 @@ class CanonicalSourceResolver @Inject constructor(
                                 keys,
                                 PageRequest(offset = 0, limit = LOOKUP_PAGE_LIMIT),
                             )
-                            ServerLookup(target.serverId, target.serverName, result.items, result.hasMore)
+                            ServerLookup(
+                                target.serverId,
+                                target.serverName,
+                                target.endpointName,
+                                result.items,
+                                result.hasMore,
+                            )
                         }
                     } catch (e: TimeoutCancellationException) {
                         // per-server 超时 = 该服务器本轮空贡献（partial），不是整体取消

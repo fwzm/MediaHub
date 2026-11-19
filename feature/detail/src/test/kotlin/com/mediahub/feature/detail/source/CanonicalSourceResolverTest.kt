@@ -10,6 +10,7 @@ import com.mediahub.model.MediaServer
 import com.mediahub.model.MediaType
 import com.mediahub.model.PageRequest
 import com.mediahub.model.PagedResult
+import com.mediahub.model.ServerEndpoint
 import com.mediahub.model.ServerType
 import com.mediahub.provider.api.AuthMethod
 import com.mediahub.provider.api.ConnectionStatus
@@ -114,6 +115,13 @@ class CanonicalSourceResolverTest {
     private fun server(id: String, name: String) = MediaServer(
         id = id, name = name, type = ServerType.EMBY,
         baseUrl = "http://localhost", createdAtEpochMs = 0,
+    ).copy(
+        endpoints = listOf(
+            ServerEndpoint(
+                id = "$id-ep0", serverId = id, name = "$name-线路",
+                url = "http://localhost", isPrimary = true, enabled = true,
+            ),
+        ),
     )
 
     private fun handle(serverId: String, lookup: FakeIdentityLookup?) = ProviderHandle(
@@ -190,6 +198,24 @@ class CanonicalSourceResolverTest {
         val page = lookupB.pages.single()
         assertEquals(0, page.offset)
         assertEquals(64, page.limit)
+    }
+
+    // ---- 3b：occurrence 携带各服务器 active endpoint 的线路名 ----
+
+    @Test
+    fun `occurrences carry active endpoint name per server`() = runTest {
+        val lookupB = FakeIdentityLookup().apply {
+            respond = { listOf(item("srv-b", "b1", ExternalIds(tmdb = "1"))) }
+        }
+        val result = resolver(
+            "srv-a" to handle("srv-a", FakeIdentityLookup()),
+            "srv-b" to handle("srv-b", lookupB),
+        ).resolve(
+            seed = item("srv-a", "a1", ExternalIds(tmdb = "1")),
+            activeServerId = "srv-a",
+        ) as SourceResolution.Completed
+
+        assertEquals(listOf("A-线路", "B-线路"), result.occurrences.map { it.endpointName })
     }
 
     // ---- 4：有界传递闭包——B 的 aliases 把 C 拉进 component（多轮 frontier） ----

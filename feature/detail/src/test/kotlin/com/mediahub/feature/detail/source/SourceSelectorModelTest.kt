@@ -17,9 +17,15 @@ class SourceSelectorModelTest {
         title = "Fargo", year = 2014, externalIds = ExternalIds(tmdb = "1"),
     )
 
-    private fun occ(serverId: String, serverName: String, id: String, active: Boolean = false) =
+    private fun occ(
+        serverId: String,
+        serverName: String,
+        id: String,
+        active: Boolean = false,
+        endpointName: String? = null,
+    ) =
         CanonicalSourceOccurrence(
-            serverId = serverId, serverName = serverName,
+            serverId = serverId, serverName = serverName, endpointName = endpointName,
             item = item(serverId, id), isActive = active,
         )
 
@@ -73,6 +79,23 @@ class SourceSelectorModelTest {
         // 行携带各自 itemId/serverId，切换路由可直达目标 occurrence
         assertEquals(listOf("a1", "a1-dup", "b1"), rows.map { it.itemId })
         assertEquals(listOf("s1", "s1", "s2"), rows.map { it.serverId })
+    }
+
+    // ---- 线路：active endpoint 名称进入标签，同服副本仍按 1 基序号 ----
+
+    @Test
+    fun `endpoint names distinguish lines of the same server`() {
+        val rows = sourceRows(
+            listOf(
+                occ("s1", "予初", "a1", active = true, endpointName = "主线路"),
+                occ("s1", "予初", "a1-dup", endpointName = "备用线路"),
+                occ("s2", "墨云阁", "b1", endpointName = "默认线路"),
+            ),
+        )
+        assertEquals(
+            listOf("予初 · 主线路 · 副本1", "予初 · 备用线路 · 副本2", "墨云阁 · 默认线路"),
+            rows.map { it.label },
+        )
     }
 
     // ---- 评审 P2-2 回归：truncation 提示与 selector gate 解耦 ----

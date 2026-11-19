@@ -168,6 +168,7 @@ fun HomeContent(
                         items(continueWatching, key = { "${it.serverId}/${it.itemId}" }) { progress ->
                             ContinueWatchingCard(
                                 progress = progress,
+                                lineName = continueWatchingLineName(servers, progress.serverId),
                                 onClick = { onOpenItem(progress) },
                                 modifier = Modifier.width(276.dp),
                             )
@@ -232,6 +233,7 @@ fun HomeContent(
 @Composable
 private fun ContinueWatchingCard(
     progress: PlaybackProgress,
+    lineName: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -274,6 +276,16 @@ private fun ContinueWatchingCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (lineName != null) {
+                    Text(
+                        text = lineName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.78f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
                 Row(
                     modifier = Modifier.padding(top = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
