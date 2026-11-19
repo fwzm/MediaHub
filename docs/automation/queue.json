@@ -1,6 +1,6 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "",
+  "updated_at": "2026-11-20T00:12:00+08:00",
   "updated_by": "lead-W6-113-r51",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
@@ -1124,7 +1124,7 @@
       ],
       "notes": "独立任务：只刷新基线 JSON，不改闸门逻辑；把已由真实绿色语料证明的 14 个新增 case 固定进基线，消除 4 条长期存在的基线增长 warning。无测试删除或降级；基线 JSON 新增 2 个类、4 个方法、Passed +14。",
       "next_action": "候选下一层：①RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用（需真实语料证明）；②Deployment 的 runDeploymentRoot 字段与 Deployment 记录一致性（已被现有 header 检查覆盖，需先复核）；③继续独立维护项/下一层结构不变量。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
-      "closed_at": ""
+      "closed_at": "2026-11-20T00:12:00+08:00"
     }
   ]
 }
