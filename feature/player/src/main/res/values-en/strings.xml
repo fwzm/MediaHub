@@ -20,6 +20,8 @@
     <string name="player_time_progress_unknown">%1$s / --:--</string>
     <string name="player_pause">Pause</string>
     <string name="player_play">Play</string>
+    <string name="player_seek_back_10">Rewind 10 seconds</string>
+    <string name="player_seek_forward_10">Forward 10 seconds</string>
     <string name="player_playback_speed">%1$.2f×</string>
     <string name="player_gesture_seek">%1$s → %2$s</string>
     <string name="player_gesture_rewinding">↺ Rewinding at %1$.2f×</string>
