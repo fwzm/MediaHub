@@ -282,6 +282,10 @@
 #     element outside TestSettings -> red: the block counts only see containers,
 #     so a parked item or a second deployment record keeps every count and its
 #     own text intact while the report assigns the run to two owners.
+#   a RunInfo timestamp that falls outside the named row's own start/end window
+#     (1 s before start through 5 s after end) -> red: the envelope and identity
+#     checks never compare the item clock to the row it names, so a timestamp
+#     moved from another failure keeps every item and name intact.
 #   a ResultSummary/Output/StdOut block that is missing, duplicated, blank, or
 #     whose text does not name the suite the file belongs to -> red: the console
 #     output is the host's record of what it ran, and a summary whose output block
@@ -368,6 +372,9 @@
 #     element outside TestSettings -> red (the block counts above only count the
 #     containers, so a parked item still leaves every count and its own Text
 #     intact while the report has two owners for the same run).
+#   a RunInfo timestamp that falls outside the named row's own start/end window
+#     (1 s before start through 5 s after end) -> red (the line can still name
+#     the right row while its clock belongs to a different execution).
 
 #   the row at position N of Results does not name the test that position N of
 #     TestEntries declares -> red. The two sections are emitted from one ordered
@@ -1764,6 +1771,49 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): the RunInfo text envelope in $($e.file) is not the line the xUnit writer emits while the total was $total - the identity check above strips any line that resembles the envelope, so a bare name, a hand-written timestamp, a tab or a wider gap, or trailing text still names the right test while the failure log stops being the writer's own line. expected '[xUnit.net hh:mm:ss.ff]     <test name> [FAIL]' with five spaces after the bracket and one before [FAIL]. broken: $($runInfoEnvelopeProblems -join ', '). A TRX whose failure log line is not the writer's canonical envelope was hand-merged or patched; regenerate it from a clean test run."
   }
 
+  # The canonical envelope check above proves each RunInfo line names exactly one
+  # failed row, but it never reads the item's timestamp against that row's own
+  # clock. A log item moved onto another failure, or kept from another run, still
+  # names the right test and stays inside the run-wide window while its timestamp
+  # points at a different execution. The writer emits the item immediately after
+  # the test ends: allow one second before the row starts and five seconds after.
+  $failedRowSpans = @{}
+  foreach ($fr in @($xml.TestRun.Results.UnitTestResult)) {
+    $fo = [string]$fr.outcome
+    if ($fo -ne 'Failed' -and $fo -ne 'Error') { continue }
+    $fn = [string]$fr.testName
+    if ([string]::IsNullOrWhiteSpace($fn)) { continue }
+    $fs = Convert-ToInstant ([string]$fr.startTime)
+    $fe = Convert-ToInstant ([string]$fr.endTime)
+    if ($null -ne $fs -and $null -ne $fe) {
+      $failedRowSpans[$fn] = [pscustomobject]@{ Start = $fs; End = $fe }
+    }
+  }
+  $runInfoClockPattern = '\A\[xUnit\.net [0-9]{2}:[0-5][0-9]:[0-5][0-9]\.[0-9]{2}\] {5}(?<name>\S(?:.*\S)?) \[FAIL\]\z'
+  $runInfoClockProblems = @()
+  $runInfoRowClockBound = 0
+  foreach ($runInfo in @($runInfoNodes)) {
+    $runInfoRawText = ''
+    foreach ($runInfoChild in @($runInfo.ChildNodes)) {
+      if ([string]$runInfoChild.LocalName -eq 'Text') { $runInfoRawText = [string]$runInfoChild.InnerText; break }
+    }
+    $clockMatch = [regex]::Match($runInfoRawText, $runInfoClockPattern)
+    if (-not $clockMatch.Success) { continue }
+    $clockName = $clockMatch.Groups['name'].Value
+    if (-not $failedRowSpans.ContainsKey($clockName)) { continue }
+    $span = $failedRowSpans[$clockName]
+    $stamp = Convert-ToInstant ([string]$runInfo.timestamp)
+    if ($null -eq $stamp) { continue }
+    if ($stamp -ge $span.Start.AddSeconds(-1) -and $stamp -le $span.End.AddSeconds(5)) {
+      $runInfoRowClockBound++
+    } elseif ($runInfoClockProblems.Count -lt 12) {
+      $runInfoClockProblems += "a RunInfo for '$clockName' is timestamped outside that row's own run window ('$([string]$runInfo.timestamp)' vs $($span.Start.ToString('o'))..$($span.End.ToString('o')))"
+    }
+  }
+  if ($runInfoClockProblems.Count -gt 0) {
+    throw "$($e.suite): the RunInfo row clock in $($e.file) does not belong to the row it names while the total was $total - the envelope check above proves only that the line spells one row name, so an item whose timestamp was moved from another failure or another run keeps every item, name, machine and outcome identical while the failure log points at the wrong execution. expected the item timestamp within 1 s before the named row's start and 5 s after its end. broken: $($runInfoClockProblems -join ', '). A TRX whose failure-log timestamp disagrees with its own result row was hand-merged or patched; regenerate it from a clean test run."
+  }
+
   # ResultSummary/RunInfos is one container, not a bag of items. The layer above
   # counts the items wherever they sit, so two wrappers around one item, an empty
   # second wrapper, or a wrapper parked under Deployment all keep the item list
@@ -2105,6 +2155,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): runInfoTexts=$runInfoTextSingular/$(@($runInfoNodes).Count)"
   "$($e.suite): runInfoTextExact=$runInfoTextExact/$failedRows"
   "$($e.suite): runInfoTextCanonical=$runInfoTextCanonical/$(@($runInfoNodes).Count)"
+  "$($e.suite): runInfoRowClock=$runInfoRowClockBound/$(@($runInfoNodes).Count)"
   "$($e.suite): summaryOutput=$summaryOutputBlocks stdout=$summaryStdOutBlocks nonBlank=$summaryOutputNonBlank suiteNamed=$summaryOutputNamesSuite"
   "$($e.suite): phaseLedger=$summaryPhaseFound/4 ordered=$summaryPhaseOrdered"
   "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot nameStamp=$nameStampMatches bound rows=$boundRows header id collisions=$headerCollisions"
