@@ -592,6 +592,30 @@ class PlayerViewModelSubtitleCenterTest {
         }
     }
 
+    @Test
+    fun `imported subtitle is prepared before engine load`() = runTest(dispatcher) {
+        val engine = RecordingEngine()
+        val resolver = object : ImportedSubtitleResolver(org.robolectric.RuntimeEnvironment.getApplication()) {
+            override suspend fun prepare(subtitle: DiscoveredSubtitle): DiscoveredSubtitle =
+                subtitle.copy(uri = "file:///cache/normalized.srt")
+        }
+        val vm = buildVm(engine, Discovery(), MemoryStore(), importedResolver = resolver)
+        try {
+            runCurrent(); runCurrent()
+            val candidate = DiscoveredSubtitle(
+                id = "content://docs/9/imported.srt", name = "imported", fileName = "imported.srt",
+                extension = "srt", language = null, uri = "content://docs/9/imported.srt",
+            )
+            vm.selectExternalSubtitle(candidate)
+            runCurrent()
+            assertEquals("file:///cache/normalized.srt", engine.loaded.single().uri)
+            assertEquals(candidate.id, engine.loaded.single().id)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
     // ---- 无发现能力的数据源：状态安静为空 ----
 
     @Test
@@ -903,6 +927,7 @@ class PlayerViewModelSubtitleCenterTest {
         memory.entries[SubtitleMemoryKeys.forItem(videoItem)] = SubtitleMemoryEntry(
             SubtitleMemoryKeys.forItem(videoItem), "srv-1", candidate.id, 500L, 0L)
         val resolver = object : ImportedSubtitleResolver(org.robolectric.RuntimeEnvironment.getApplication()) {
+            override val ioDispatcher = dispatcher
             override suspend fun resolve(id: String): DiscoveredSubtitle? = candidate.takeIf { it.id == id }
         }
         val engine = RecordingEngine()
