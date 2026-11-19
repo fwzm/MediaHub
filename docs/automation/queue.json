@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-19T19:10:00+08:00",
-  "updated_by": "lead-W6-113-r47",
+  "updated_at": "2026-11-19T20:10:00+08:00",
+  "updated_by": "lead-W6-113-r48",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -1041,6 +1041,28 @@
       "notes": "第 28 层收的是 ResultSummary/RunInfos/RunInfo 的 Text 子元素基数：每个失败日志项必须恰有一个直接 Text 子元素；0 个或 2 个及以上均 RED。第 23 层读取第一个 Text 后 break，前二十七层没有统计 Text 兄弟节点。基线 JSON 与 updater 未改，无迁移。",
       "next_action": "候选下一层：①RunInfo Text 必须与对应失败行 testName 完全相等（当前只做子串匹配）；②RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用（需真实语料证明）；③独立任务刷新基线（1973 vs 1959）。",
       "closed_at": "2026-11-19T19:10:00+08:00"
+    },
+    {
+      "id": "W6-113au",
+      "title": "第二十九层：失败日志行必须只命名一个测试（RunInfo Text exact test name）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r48",
+      "branch": "feature/windows-w6-113au-runinfo-text-exact",
+      "evidence": [
+        "check-test-suite-baseline.ps1 133,857 -> 136,513 B (+39 lines, 2,351 lines, sha256 b91c6aaa85c9aa31978d8952a476103737b5b0da2345137fd1ee9030da28cb58, pure ASCII), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-29 invariant: every ResultSummary/RunInfos/RunInfo first direct Text child must name exactly one Failed/Error row after stripping the writer xUnit.net timestamp prefix and [FAIL] suffix; any other text is RED; ladder records runInfoTextExact=<n>/<failedRows>; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI): D:/mh-w6-r41/windows/artifacts/gate-corpus exit 0; both suites runInfoTextExact=0/0; combined tests=2077; growth warnings only (1973 > baseline 1959).",
+        "Real failed corpus D:/mh-verify/r41-art/test-results/windows-tests.trx: 6 Failed/Error rows and 6 RunInfos; the writer envelope [xUnit.net 00:00:00.66]     <testName> [FAIL] normalizes to names that exactly equal the corresponding row testName 6/6 (exactRowHit=1).",
+        "Negative controls: 5 cases at D:/mh-verify/r49; clean-green OLD=0 NEW=0 and fail-with-runinfo OLD=0 NEW=0 (MediaHub.Tests runInfoTextExact=1/1); runinfo-text-prefix, runinfo-text-suffix and runinfo-text-outside all OLD=0 NEW=1, each naming the normalized prefixed/suffixed/outside text; implementation sha256 b91c6aaa... unchanged across the matrix and clean-green re-run after the matrix still OLD=0 NEW=0.",
+        "Commit 5780dc20e9cf87084e0f8ae5f5535f5d469e5cfc (ci(windows): a failure log line must name exactly one test (W6-113au)), 1 file changed / +39 insertions / 0 deletions, non-force push to feature/windows-w6-113au-runinfo-text-exact; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44518473191 (push) = success and 44518540460 (pull_request) = success; the runs printed runInfoTextExact=0/0 for both suites.",
+        "Android CI 44518540327 = in_progress at the code head; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001.",
+        "Draft PR #147 (base main, stacked on #145) carries the layer text; G7 remains DO_NOT_MERGE. Baseline JSON and updater were not changed, so there is no migration."
+      ],
+      "notes": "第 29 层收的是 RunInfo Text 与失败行 testName 的逐字身份：先剥掉 xUnit 写入器的 [xUnit.net <时间>] 前缀和 [FAIL] 后缀，再与 Failed/Error 行名做 Ordinal 精确比较；额外前缀、后缀或外壳外噪声均 RED。第 23 层只做 IndexOf 子串匹配，第 28 层只钉 Text 子元素数量。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①RunInfo Text 的 xUnit 外壳格式（时间戳精度/空白）必须是 writer 唯一形态；②RunInfos 与 runDeploymentRoot/Deployment 的层次边界；③独立任务刷新基线（1973 vs 1959）。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-19T20:10:00+08:00"
     }
   ]
 }

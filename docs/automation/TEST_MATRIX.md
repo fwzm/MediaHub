@@ -1706,3 +1706,46 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 ### exact-head CI 验收
 
 - 代码 head 3cf422eb05a5f30519df4b1a393688ef794139b9：windows-ci 44510242835（push）success / 44510303586（pull_request）success；同 head Android CI 44510303772 = in_progress（CI_PENDING，19:03 取证）（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+## 6.34 第二十九层口径：失败日志行必须只命名一个测试（W6-113au）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| 每个 RunInfo 的第一个直接 Text 子元素必须只命名一个 Failed/Error 行 | ResultSummary/RunInfos/RunInfo | RED |
+| 文本先剥离 `[xUnit.net <时间>]` 前缀与 `[FAIL]` 后缀，再与 testName 逐字比较 | 同上 | RED |
+| 归一化后为空、包含额外文本或不在失败行列表中均拒绝 | 同上 | RED |
+| 台阶行记录 runInfoTextExact=<exact>/<failedRows> | ladder | 仅记录 |
+
+### 为什么前二十八层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 23 层 | 把 RunInfos 条目与失败行逐项对齐，用 `IndexOf(..., Ordinal)` 做子串匹配 | 测试名前后的多余文本、外层噪声 |
+| 第 28 层 | 每个 RunInfo 的直接 Text 子元素数量 | Text 内容是否只命名一个测试 |
+| 全层 | — | 失败日志行与 testName 的逐字身份 |
+
+### 依据（EXECUTED）
+
+- 真实绿色语料 D:/mh-w6-r41/windows/artifacts/gate-corpus：新闸门 exit 0，两套件 runInfoTextExact=0/0，combined tests=2077，只有基线增长 warning。
+- 真实失败语料 D:/mh-verify/r41-art/test-results/windows-tests.trx：6 个 RunInfo 的 xUnit 外壳归一化后 6/6 与 Failed/Error 行 testName 精确相等（exactRowHit=1）。
+- 五例矩阵：clean-green 与 fail-with-runinfo 均 OLD=0 NEW=0；runinfo-text-prefix、runinfo-text-suffix、runinfo-text-outside 均 OLD=0 NEW=1。
+
+### 数据源与规模
+
+- check-test-suite-baseline.ps1 133,857 → 136,513 B，2,312 → 2,351 行（+2,656 B，+39/-0 行），0 非 ASCII，sha256 b91c6aaa85c9aa31978d8952a476103737b5b0da2345137fd1ee9030da28cb58。
+- 台阶行：runInfoTexts=... 之后追加 runInfoTextExact=<n>/<n>。
+
+### 负向对照
+
+- 五例矩阵全按预期；实现态 sha256 在对照前后一致，矩阵后 clean-green 复跑仍绿；旧层在三个变异上保持 PASS，证明新层不是旧层的重复。
+
+### 残留限制
+
+- 只比较 RunInfo Text 与 Failed/Error 行 testName；不比较 ErrorInfo Message/StackTrace 的内容。
+- xUnit 外壳按已知 writer 格式归一化；其他 writer 的包装格式仍未覆盖。
+- 不改变基线 JSON 与 updater。
+
+### exact-head CI 验收
+
+- 代码 head 5780dc20e9cf87084e0f8ae5f5535f5d469e5cfc：windows-ci 44518473191（push）success / 44518540460（pull_request）success；同 head Android CI 44518540327 = in_progress（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
