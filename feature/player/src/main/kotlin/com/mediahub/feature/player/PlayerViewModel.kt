@@ -375,6 +375,13 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    /** 切换并记忆画面比例；只改显示约束，不重建播放内核、不改音轨。 */
+    fun updatePlayerAspectRatio(mode: com.mediahub.model.PlayerAspectRatio) {
+        viewModelScope.launch {
+            userPreferencesRepository.update { it.copy(playerAspectRatio = mode) }
+        }
+    }
+
     /** 内嵌字幕轨手动选择：标记本会话手动优先，迟到的发现/记忆不再覆盖。 */
     fun onEmbeddedSubtitleSelected(selection: TrackSelection?) {
         if (stopped) return

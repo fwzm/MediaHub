@@ -237,6 +237,7 @@ fun PlayerRoute(
 
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
+    var showAspectRatioDialog by remember { mutableStateOf(false) }
     var showVisualEffectsSettings by remember { mutableStateOf(false) }
     var showInfoPanel by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -427,27 +428,46 @@ fun PlayerRoute(
                     }
                 },
         ) {
-        // 视频渲染 Surface（Media3/mpv 统一走 attachSurface）
-        AndroidView(
-            factory = { context ->
-                SurfaceView(context).apply {
-                    holder.addCallback(object : SurfaceHolder.Callback {
-                        override fun surfaceCreated(holder: SurfaceHolder) {
-                            viewModel.engine.attachSurface(holder.surface)
-                        }
-                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
-                        override fun surfaceDestroyed(holder: SurfaceHolder) {
-                            viewModel.engine.attachSurface(null)
-                        }
-                    })
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    )
-                }
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
+        // 视频渲染 Surface（Media3/mpv 统一走 attachSurface）；按 #9 的画面比例居中适配。
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val surfaceAspectRatio = PlayerAspectRatioPolicy.surfaceAspectRatio(
+                mode = preferences.playerAspectRatio,
+                videoWidth = engineState.videoWidth,
+                videoHeight = engineState.videoHeight,
+            )
+            val fittedSize = PlayerAspectRatioPolicy.fitSize(
+                containerWidth = maxWidth.value,
+                containerHeight = maxHeight.value,
+                aspectRatio = surfaceAspectRatio,
+            )
+            val surfaceModifier = if (fittedSize != null) {
+                Modifier
+                    .size(fittedSize.first.dp, fittedSize.second.dp)
+                    .align(Alignment.Center)
+            } else {
+                Modifier.fillMaxSize()
+            }
+            AndroidView(
+                factory = { context ->
+                    SurfaceView(context).apply {
+                        holder.addCallback(object : SurfaceHolder.Callback {
+                            override fun surfaceCreated(holder: SurfaceHolder) {
+                                viewModel.engine.attachSurface(holder.surface)
+                            }
+                            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
+                            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                                viewModel.engine.attachSurface(null)
+                            }
+                        })
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                    }
+                },
+                modifier = surfaceModifier,
+            )
+        }
 
         // 只画左右窄边与底部 controls chrome；中心视频和字幕安全区没有 shader 像素。
         PlayerVisualOverlay(
@@ -571,6 +591,7 @@ fun PlayerRoute(
                         onShowInfo = { showInfoPanel = true },
                         onShowAudio = { showAudioDialog = true },
                         onShowSubtitle = { showSubtitleDialog = true },
+                        onShowAspectRatio = { showAspectRatioDialog = true },
                     )
                 }
 
@@ -764,6 +785,18 @@ fun PlayerRoute(
             )
         }
     }
+    if (showAspectRatioDialog) {
+        PlayerVisualTheme(palette = visualState.chromePalette) {
+            PlayerAspectRatioSheet(
+                selected = preferences.playerAspectRatio,
+                onDismiss = { showAspectRatioDialog = false },
+                onSelect = { ratio ->
+                    viewModel.updatePlayerAspectRatio(ratio)
+                    showAspectRatioDialog = false
+                },
+            )
+        }
+    }
 }
 
 private fun AudioBandLevels.toSpectrumFrame(): SpectrumFrame = SpectrumFrame(
@@ -828,6 +861,7 @@ private fun PlayerControls(
     onShowInfo: () -> Unit,
     onShowAudio: () -> Unit,
     onShowSubtitle: () -> Unit,
+    onShowAspectRatio: () -> Unit,
 ) {
     val seekBarColors = SliderDefaults.colors(
         thumbColor = MaterialTheme.colorScheme.primary,
@@ -883,6 +917,9 @@ private fun PlayerControls(
                 }
                 TextButton(onClick = onShowSubtitle) {
                     Text(stringResource(R.string.player_subtitles), color = MaterialTheme.colorScheme.primary)
+                }
+                TextButton(onClick = onShowAspectRatio) {
+                    Text(stringResource(R.string.player_aspect_ratio), color = MaterialTheme.colorScheme.primary)
                 }
             }
             if (serverDisplayName != null) {

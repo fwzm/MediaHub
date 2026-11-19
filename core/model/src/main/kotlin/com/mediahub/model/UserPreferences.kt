@@ -29,6 +29,8 @@ data class UserPreferences(
     val playerVisualEffects: PlayerVisualEffectsPreferences = PlayerVisualEffectsPreferences.Default,
     /** 播放专业信息面板（默认专业）：expertMode 只控制面板信息密度，不影响播放本身。 */
     val professionalInfo: ProfessionalInfoPreferences = ProfessionalInfoPreferences.Default,
+    /** 画面比例（#9）：跨影片记忆；默认按视频原始比例适应屏幕。 */
+    val playerAspectRatio: PlayerAspectRatio = PlayerAspectRatio.FIT,
 )
 
 /**

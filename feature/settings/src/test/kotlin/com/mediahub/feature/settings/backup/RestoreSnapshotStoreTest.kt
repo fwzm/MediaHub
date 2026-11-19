@@ -87,7 +87,8 @@ class RestoreSnapshotStoreTest {
             true, false, false, SubtitleStyle(1, 2, 2, 3, 1.2f, 0.2f, false),
             PlayerGestures(false, true, 15, true, 20, false, 0.1f, 6f, false, 3f),
             PlayerVisualEffectsPreferences(false, PlayerVisualPreset.SPECTRUM, 0.8f, false, false, VisualPerformanceMode.HIGH),
-            ProfessionalInfoPreferences(expertMode = false))
+            ProfessionalInfoPreferences(expertMode = false),
+            playerAspectRatio = PlayerAspectRatio.RATIO_4_3)
         val images = RestoreImages(BackupSnapshot(listOf(server), listOf(progress)),
             BackupSnapshot(listOf(this.server("empty")), listOf(PlaybackProgress("empty", "nulls", 0, 0, true, 0)),
                 listOf(SubtitleMemoryEntity("empty|movie|s:12", "empty", "content://private.fixture/sub", -1200, 15))),

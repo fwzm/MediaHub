@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import com.mediahub.model.PlaybackEngineMode
+import com.mediahub.model.PlayerAspectRatio
 import com.mediahub.model.PlayerVisualEffectsPreferences
 import com.mediahub.model.PlayerVisualPreset
 import com.mediahub.model.UserPreferences
@@ -63,6 +64,16 @@ class UserPreferencesStoreTest {
         assertEquals(UserPreferences(), preferences)
         assertEquals(PlayerVisualEffectsPreferences.Default, preferences.playerVisualEffects)
         assertTrue(preferences.playerVisualEffects.isEffectivelyEnabled)
+    }
+
+    @Test
+    fun `aspect ratio defaults to fit and survives a store round trip`() = runBlocking {
+        assertEquals(PlayerAspectRatio.FIT, store.flow.first().playerAspectRatio)
+
+        store.update { current -> current.copy(playerAspectRatio = PlayerAspectRatio.RATIO_4_3) }
+
+        val recreatedStore = UserPreferencesStore(dataStore)
+        assertEquals(PlayerAspectRatio.RATIO_4_3, recreatedStore.flow.first().playerAspectRatio)
     }
 
     @Test
