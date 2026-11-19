@@ -14,6 +14,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.common.NavArgCodec
+import com.mediahub.model.PlaybackLaunchSnapshot
 import com.mediahub.feature.detail.DetailRoute
 import com.mediahub.feature.home.HomeRoute
 import com.mediahub.feature.library.LibraryRoute
@@ -202,14 +203,7 @@ fun MediaHubNavHost() {
                 title = entry.arguments?.getString("title").orEmpty(),
                 onBack = { navController.popBackStack() },
                 onPlay = { serverId, itemId, snapshot ->
-                    navController.navigate(
-                        "player/" + serverId + "/" + NavArgCodec.encode(itemId) +
-                            "?title=" + Uri.encode(snapshot.title) +
-                            "&type=" + Uri.encode(snapshot.type?.name.orEmpty()) +
-                            "&runtime=" + (snapshot.runtimeMs?.toString().orEmpty()) +
-                            "&poster=" + Uri.encode(snapshot.posterUrl.orEmpty()) +
-                            "&container=" + Uri.encode(snapshot.container.orEmpty())
-                    )
+                    navController.navigate(PlayerRouteBuilder.build(serverId, itemId, snapshot))
                 },
                 onOpenItem = { item ->
                     val srvId = entry.arguments?.getString("serverId").orEmpty()
@@ -232,7 +226,7 @@ fun MediaHubNavHost() {
         }
 
         composable(
-            route = "player/{serverId}/{itemId}?title={title}&type={type}&runtime={runtime}&poster={poster}&container={container}",
+            route = PlayerRouteBuilder.PATTERN,
             arguments = listOf(
                 navArgument("serverId") { type = NavType.StringType },
                 navArgument("itemId") { type = NavType.StringType },
@@ -241,9 +235,29 @@ fun MediaHubNavHost() {
                 navArgument("runtime") { type = NavType.StringType; defaultValue = "" },
                 navArgument("poster") { type = NavType.StringType; defaultValue = "" },
                 navArgument("container") { type = NavType.StringType; defaultValue = "" },
+                navArgument("start") { type = NavType.StringType; defaultValue = "" },
             ),
         ) {
-            PlayerRoute(onBack = { navController.popBackStack() })
+            PlayerRoute(
+                onBack = { navController.popBackStack() },
+                onSwitchSource = { option, positionMs ->
+                    // 线路切换与详情页换源一致：替换当前 player entry，Back 仍回详情页。
+                    val currentDestId = navController.currentDestination?.id
+                    val snapshot = PlaybackLaunchSnapshot(
+                        itemId = option.itemId,
+                        type = option.type,
+                        title = option.title,
+                        runtimeMs = option.runtimeMs,
+                        posterUrl = option.posterUrl,
+                        container = option.container,
+                    )
+                    navController.navigate(
+                        PlayerRouteBuilder.build(option.serverId, option.itemId, snapshot, positionMs)
+                    ) {
+                        currentDestId?.let { popUpTo(it) { inclusive = true } }
+                    }
+                },
+            )
         }
     }
 }

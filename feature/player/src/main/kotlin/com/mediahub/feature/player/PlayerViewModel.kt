@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.NavArgCodec
+import com.mediahub.core.common.PlayerSourceHandoff
 import com.mediahub.core.database.prefs.UserPreferencesRepository
 import com.mediahub.core.database.repository.SubtitleMemoryEntry
 import com.mediahub.core.database.repository.SubtitleMemoryKeys
@@ -19,6 +20,7 @@ import com.mediahub.model.MediaType
 import com.mediahub.model.MediaTypeGuesser
 import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.PlaybackSource
+import com.mediahub.model.PlaybackSourceOption
 import com.mediahub.model.PlayerVisualEffectsPreferences
 import com.mediahub.model.ProfessionalInfoPreferences
 import com.mediahub.model.SubtitleStyle
@@ -165,6 +167,9 @@ class PlayerViewModel @Inject constructor(
     private var launchRuntime: String = savedStateHandle["runtime"] ?: ""
     private var launchPoster: String = savedStateHandle["poster"] ?: ""
     private var launchContainer: String = savedStateHandle["container"] ?: ""
+    // 线路切换时的显式起播位置（来自 player route 的 start 参数）。
+    // 只在初始播放生效；自动连播到下一集前必须清空，否则会把上一集的位置套到新一集。
+    private var launchStartMs: Long? = savedStateHandle.get<String>("start")?.toLongOrNull()
 
     /** 启动快照携带的容器（详情页直传；可能为空串=未提供）。 */
     val launchContainerOrNull: String?
@@ -522,6 +527,11 @@ class PlayerViewModel @Inject constructor(
     private val _serverIcon = MutableStateFlow<String?>(null)
     val serverIcon: StateFlow<String?> = _serverIcon.asStateFlow()
 
+    private val _sourceOptions = MutableStateFlow<List<PlaybackSourceOption>>(emptyList())
+    val sourceOptions: StateFlow<List<PlaybackSourceOption>> = _sourceOptions.asStateFlow()
+    val currentServerId: String get() = serverId
+    val currentItemId: String get() = itemId
+
     private val _artworkPalette = MutableStateFlow<VisualPalette?>(null)
     val artworkPalette: StateFlow<VisualPalette?> = _artworkPalette.asStateFlow()
     private var artworkUrl: String? = null
@@ -623,6 +633,8 @@ class PlayerViewModel @Inject constructor(
         resolveJob = viewModelScope.launch {
             _resolveState.value = ResolveState.Resolving
             _playbackSource.value = null
+            // 详情页聚合出的线路（进程内交接）；换集/无快照时自然回落为空。
+            _sourceOptions.value = PlayerSourceHandoff.snapshotFor(serverId, itemId)?.options.orEmpty()
             val trace = PlaybackStartupTrace(
                 traceId = PlaybackStartupTrace.newTraceId(),
                 serverId = serverId,
@@ -675,11 +687,13 @@ class PlayerViewModel @Inject constructor(
                 if (stopped || resolveGeneration.get() != generation) return@launch
                 updateArtworkPalette(item.posterUrl ?: item.backdropUrl)
                 val resume = progressStore.getResume(serverId, itemId)
+                // 线路切换携带的显式位置优先于续播记忆（0 也是有效位置）。
+                val startPositionMs = PlaybackStartPolicy.startPositionMs(launchStartMs, resume)
                 coroutineContext.ensureActive()
                 if (stopped || resolveGeneration.get() != generation) return@launch
                 val source = playbackProvider.resolvePlayback(
                     item,
-                    PlaybackOptions(startPositionMs = resume, enableDirectPlay = true),
+                    PlaybackOptions(startPositionMs = startPositionMs, enableDirectPlay = true),
                 )
                 coroutineContext.ensureActive()
                 if (stopped || resolveGeneration.get() != generation) return@launch
@@ -694,7 +708,7 @@ class PlayerViewModel @Inject constructor(
                         itemId = itemId,
                         itemTitle = item.title.ifBlank { itemTitle },
                         source = source,
-                        resumePositionMs = resume,
+                        resumePositionMs = startPositionMs,
                         itemType = item.type,
                         posterUrl = item.posterUrl,
                         trace = trace,
@@ -816,6 +830,7 @@ class PlayerViewModel @Inject constructor(
         launchRuntime = ""
         launchPoster = ""
         launchContainer = ""
+        launchStartMs = null
         resolveInternal(autoplay = true)
     }
 

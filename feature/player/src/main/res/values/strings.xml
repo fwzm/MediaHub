@@ -11,6 +11,7 @@
     <string name="player_audio_unsupported">未检测到音频输出，该格式可能不被当前设备支持，可尝试其他音轨</string>
     <string name="player_audio_unsupported_codec">未检测到音频输出（音轨 %1$s），该格式可能不被当前设备支持，可尝试其他音轨</string>
     <string name="player_audio_tracks">音轨</string>
+    <string name="player_sources">线路</string>
     <string name="player_subtitles">字幕</string>
     <string name="player_diagnostic_http">HTTP %1$d</string>
     <string name="player_diagnostic_first_byte">首包 %1$d 毫秒</string>

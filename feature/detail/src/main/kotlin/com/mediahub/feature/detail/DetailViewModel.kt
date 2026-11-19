@@ -4,11 +4,13 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.NavArgCodec
+import com.mediahub.core.common.PlayerSourceHandoff
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.logging.LogTag
 import com.mediahub.feature.detail.source.CanonicalSourceResolver
 import com.mediahub.feature.detail.source.SourceResolution
+import com.mediahub.feature.detail.source.playbackSourceOptions
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
@@ -209,7 +211,17 @@ class DetailViewModel @Inject constructor(
             _sourceState.value = SourceResolutionState.Resolving
             _sourceState.value = when (val resolution = sourceResolver.resolve(item, serverId)) {
                 is SourceResolution.Idle -> SourceResolutionState.Idle
-                is SourceResolution.Completed -> SourceResolutionState.Resolved(resolution)
+                is SourceResolution.Completed -> {
+                    // ADR-038: canonical occurrences never travel through navigation args.
+                    // Hand the playable lines to the process-local player handoff instead.
+                    PlayerSourceHandoff.publish(
+                        serverId = serverId,
+                        itemId = item.id,
+                        options = playbackSourceOptions(resolution),
+                        truncated = resolution.truncated,
+                    )
+                    SourceResolutionState.Resolved(resolution)
+                }
             }
         }
     }
