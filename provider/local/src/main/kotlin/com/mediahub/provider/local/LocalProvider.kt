@@ -170,6 +170,7 @@ class LocalProvider(
             parentId = parentFile?.absolutePath,
             sizeBytes = if (isDir) null else length().takeIf { it > 0 },
             container = extension.lowercase().takeIf { it.isNotBlank() && !isDir },
+            posterUrl = LocalPoster.forItem(mediaType, absoluteFile.toURI().toString()),
             libraryId = LOCAL_LIBRARY_ID,
         )
     }
