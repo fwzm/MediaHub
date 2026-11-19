@@ -5,18 +5,22 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mediahub.core.ui.ServerIcon
 import com.mediahub.model.MediaServer
 import com.mediahub.provider.api.AuthSessionErrorKind
 import com.mediahub.provider.api.AuthSessionState
+
+internal const val SERVER_CARD_ICON_TAG = "server_card_icon"
 
 /**
  * 媒体源卡片（首页"媒体库"与详情共用）。
@@ -42,16 +46,13 @@ fun ServerCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Surface(
-                    shape = MaterialTheme.shapes.medium,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                ) {
-                    Text(
-                        text = server.type.label,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
+                ServerIcon(
+                    icon = server.icon,
+                    label = server.displayName,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .testTag(SERVER_CARD_ICON_TAG),
+                )
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = server.displayName,
@@ -60,7 +61,10 @@ fun ServerCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = server.baseUrl.ifBlank { "本地存储" },
+                        text = buildString {
+                            append(server.type.label)
+                            server.baseUrl.takeIf { it.isNotBlank() }?.let { append(" · ").append(it) }
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,

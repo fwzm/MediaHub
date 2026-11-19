@@ -886,25 +886,11 @@ private fun PlayerControls(
                 }
             }
             if (serverDisplayName != null) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                PlayerServerIdentity(
+                    displayName = serverDisplayName,
+                    icon = serverIcon,
                     modifier = Modifier.padding(bottom = 4.dp),
-                ) {
-                    if (!serverIcon.isNullOrBlank()) {
-                        Text(
-                            text = serverIcon,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                    }
-                    Text(
-                        text = serverDisplayName,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
-                    )
-                }
+                )
             }
             // 播放诊断（U4-E）：引擎/协议/首包/缓冲
             if (diagnostics != null && diagnostics!!.engine != null) {
