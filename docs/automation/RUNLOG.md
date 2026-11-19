@@ -737,3 +737,36 @@
 
 ### 锁
 - run-id w6-r40-t5n8q3，owner lead，ttl 5400，三把资源：branch:feature/cross-device-source-sync、ref:origin/feature/cross-device-source-sync、worktree:D:/mh-w6；本轮结束全部释放。
+
+## Round 41（W6-113an，2026-11-19）：失败证据必须与自己的 verdict 一致
+
+### 切片动机
+- 第 15 层已经让 Counters 的每个非零桶与结果行分布逐桶相等（check 脚本 :1385 起），第 21 层钉住了两侧行的位置对应；失败的「证据」维度此前零引用：脚本里 ErrorInfo / StackTrace / RunInfos / StdOut 的引用计数都是 0。
+- 真实失败语料（artifact 44120750161 的 windows-tests.trx，767 行、6 个 Failed）显示：ErrorInfo 只出现在 Failed 行，Passed 行 761 条全部没有；6 条 RunInfo 的 outcome 均为 Error 且 Text 含 [FAIL]，时间戳都落在 [start, finish] 内。这使「证据与 verdict 一致」成为可断言的稳定结构。
+- 三个既有 next_action 候选的实际处置：①（inconclusive/inProgress/pending 桶）已被第 15 层桶表覆盖；②（duration 与 startTime/endTime 算术自洽）经实测 0/767 相等，不能作为不变量；③（TestSettings/@name 与 Deployment 目录名派生）已由头部层覆盖。因此第 22 层改读 ErrorInfo。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化、updater 未改 ⇒ 无迁移）
+- 行循环内收集 Output/ErrorInfo：Passed 行携带证据 → RED；Failed/Error 行没有 ErrorInfo → RED；Message 为空白 → RED；同一个 Output 内多个 ErrorInfo → RED；问题细节上限 12 条。
+- 文本读取必须按 local name 遍历 ChildNodes。PowerShell 的 XML adapter 把带默认命名空间的 Message 子元素压平成 System.String，取该字符串的 .InnerText 得到空串；探针输出 messageType=System.String、messageInnerText=[]，而 XPath 取到的同一节点 InnerText 为 'boom: Error 42'。
+- throw 排在 counterMismatch 之后，旧文案优先；台阶行在 counters 行后追加 failureEvidence=<rows> failed=<with>/<failed> passed=<with>/<passed> blankMessages=<n> duplicates=<n>；头部文档与 SEMANTICS 各加一条。
+
+### 负向对照（EXECUTED）
+- 七例矩阵（同一套语料、同一基线，old=main 闸门，new=本层闸门）：clean-green OLD=0 NEW=0；error-with-evidence OLD=0 NEW=0（台阶行 failureEvidence=1 failed=1/1 passed=0/1972）；passed-with-evidence、passed-with-duplicate-evidence、error-with-blank-message、error-without-evidence、error-with-duplicate-evidence 五个变异全部 OLD=0 NEW=1。
+- 五个 RED 的 new.log 各自点名具体缺陷：Passed 携带证据、Passed 携带 2 个 ErrorInfo、Error 的 Message 空白、Error 完全没有 ErrorInfo、Error 携带 2 个 ErrorInfo。
+- 实现态快照 sha256 26428d0621b8f7e81792da727da1f94e911bbb1e9528381c41d12866a4b632e6 在全部对照前后一致；对照结束后 clean-green 再跑仍 OLD=0 NEW=0。
+
+### 真实语料
+- 本机 dotnet test：MediaHub.Tests 1973 passed / 0 failed / 0 skipped，exit 0；MediaHub.WebDav.Tests 104 / 0 / 0，exit 0。
+- 新闸门 -ResultsDir ./artifacts/gate-corpus exit 0；台阶行 MediaHub.Tests: failureEvidence=0 failed=0/0 passed=0/1973 blankMessages=0 duplicates=0、MediaHub.WebDav.Tests: failureEvidence=0 failed=0/0 passed=0/104 blankMessages=0 duplicates=0；combined tests=2077；只有增长 warning（1973 > 基线 1959，新类 ArtworkDiskCacheTests +10、MpvSubtitleStyleTests +2、PlaylistStoreTests +2）。
+- 语料必须用英文 UI 生成：默认中文 UI 下 VSTest 写出「列表中未列出的结果 / 所有已加载的结果」，会触发第 20 层的 listVocabulary 判据；环境变量 DOTNET_CLI_UI_LANGUAGE=en-US、VSLANG=1033 可固定英文。
+
+### 数据源与规模
+- windows/tools/check-test-suite-baseline.ps1 109,291 B / 1,913 行 → 113,800 B / 1,987 行（+4,509 B / +75 行），0 个非 ASCII；sha256 26428d0621b8f7e81792da727da1f94e911bbb1e9528381c41d12866a4b632e6。
+- 双 shell 语法：pwsh 7.6.10 与 Windows PowerShell 5.1.26100.10003 均 errors=0。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+- 提交 1762cd35f40d529f443cdaaaea848f4ac79a1246（ci(windows): the failure evidence must agree with the verdict (W6-113an)），1 file changed / +75 insertions / 0 deletions，非 force push。
+- exact-head windows-ci：44465809330（push 事件）= success，44465888575（pull_request 事件）= success；两 run 的台阶行都出现 `MediaHub.Tests: failureEvidence=0 failed=0/0 passed=0/1973 blankMessages=0 duplicates=0` 与 webdav `…/104`，licence `check-licence-surface  checks=57 failed=0 warnings=0 skipped=0`；同 head Android CI 44465888544 = success（本提交只动 `windows/tools`，android/core/feature/app 子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+
+### 锁
+- run-id w6-113-round2-20261119，owner lead，8 把资源锁（3 remote-ref + 5 worktree），本轮结束 release-plan 释放。
