@@ -1319,3 +1319,32 @@
 
 - CLAIM run-id `w6-113-round16-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
 - W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。
+## Round 56（W6-113bc，2026-11-19）：失败日志的时钟与时间戳必须描述同一次运行
+
+### 动机
+
+第 35 层的 phaseClock/withinRun 只保证 phase 行的相对时钟落在 `Times` 窗口内；RunInfo 一侧仍只看单项行窗、canonical 形状和列表顺序。真实 xUnit 写入器在失败测试结束后立刻写 RunInfo，所以 `timestamp - Times.start - Text clock` 在一次运行内应为常量：真实失败 TRX 的 6 项为 `0.4897 / 0.4793 / 0.4789 / 0.4840 / 0.4830 / 0.4796` 秒（最大差 10.8 ms），`clean-two-errors` 的 2 项为 `-0.0008 / 0.0020` 秒。只把第二项 timestamp 后移 250 ms，旧层仍全绿。
+
+### 变更
+
+- `windows/tools/check-test-suite-baseline.ps1`：2,637 → 2,702 行，156,156 → 160,608 B，`+65 / -0`，sha256 `90bdf991f8c4caf5c501ece6fc683aab30be604e80316fc5244d0233efcf1548`（父层 `e48317d9d00dcc1daa72537845b9e67939d4d524f0a492f3ea3f28dba0d602d9`）。
+- 新增 `$runInfoOffsetProblems` / `$runInfoOffsetBound`：逐项解析 canonical Text clock 与 `@timestamp`，以第一个有效项的 `timestamp - Times.start - clock` 为基准，允许 100 ms；越界记 `has offset ... against ...`；台阶行新增 `runInfoOffset=<bound>/<items>`。
+- throw 前缀 `the RunInfo clock/timestamp offset in ...`；expected 增加 `every RunInfo timestamp to sit within 100 ms of Times.start + its own xUnit Text clock`；顶部注释与 SEMANTICS 已同步。
+- 双 shell PARSE-OK（pwsh 7.6.10、Windows PowerShell 5.1.26100.10003）；纯 ASCII、无 BOM/CRLF；`git diff --check` exit 0。
+
+### 验证（EXECUTED）
+
+- 真实绿色 gate-corpus：exit 0；两个套件 `runInfoOffset=0/0`，`phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1`，`combined tests=2077`；日志 `D:/mh-verify/r57/gate-real-r57.log`。
+- 真实失败 TRX（total=767，failed=6）：exit 1；`runInfoOffset=6/6`、`runInfoChronology=6/6`，唯一 throw `MediaHub.Tests: 6 test(s) failed`；日志 `D:/mh-verify/r57/gate-real-failing-r57.log`。
+- 5 例矩阵：clean-real / clean-two-errors / clean-green / fail-with-runinfo 旧新均 exit 0，offset 分别为 0/0、2/2、0/0、1/1；`bad-runinfo-offset` 旧 0、新 1、`runInfoOffset=1/2`、恰好 1 条 `has offset` 问题；`cleanOk=true`、`redOk=true`、`oldAllZero=true`；结果 `D:/mh-verify/r57/results-all.json`。
+- 夹具：从 `D:/mh-verify/r54/cases/clean-two-errors` 复制到 `D:/mh-verify/r57/cases/bad-runinfo-offset`，只把第二个 RunInfo 的 timestamp `2026-11-19T13:17:42.8361570+08:00` 改为 `...43.0861570+08:00`（+250 ms），文件仍 2,698,040 B。
+
+### 提交与 exact-head CI
+
+- 代码提交 `11a11c3a2b8dc8c3c59c85abc7930fc676971409`（`ci(windows): the failure-log clock and timestamp must describe one run (W6-113bc)`）；Draft PR #176，base main，stacked on #172，G7 DO_NOT_MERGE。
+- 代码 head CI：windows-ci `44634075916`（push）`success`、`44634139804`（pull_request）`success`；Android CI `44634139760` `success`。
+
+### 锁与边界
+
+- CLAIM run-id `w6-113-round17-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
+- W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。

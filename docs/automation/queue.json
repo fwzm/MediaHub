@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-20T06:25:00+08:00",
-  "updated_by": "lead-W6-113-r55",
+  "updated_at": "2026-11-20T07:55:00+08:00",
+  "updated_by": "lead-W6-113-r56",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -1197,6 +1197,24 @@
       "notes": "第三十五层：StdOut 四个 phase 行的 canonical [xUnit.net hh:mm:ss.ff] 时钟必须 <= TestRun/Times.finish - Times.start；第 34 层只比较 phase 时钟彼此与最后 RunInfo，未读绝对运行窗口。",
       "next_action": "候选第 36 层：继续从真实失败语料侦察可证结构不变量；RunInfo Text 时钟与 TRX @timestamp 存在约 +0.48s 常量偏移，不能直接按 Times.start 对齐；RunInfo/ErrorInfo 文本交叉引用仍不可行。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
       "closed_at": "2026-11-20T06:25:00+08:00"
+    },
+    {
+      "id": "W6-113bc",
+      "title": "第三十六层：RunInfo 时钟与时间戳必须描述同一次运行（W6-113bc）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r56",
+      "branch": "feature/windows-w6-113bc-runinfo-offset",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,637 -> 2,702 lines, 156,156 -> 160,608 B, 65 insertions / 0 deletions, sha256 90bdf991f8c4caf5c501ece6fc683aab30be604e80316fc5244d0233efcf1548; old sha256 e48317d9d00dcc1daa72537845b9e67939d4d524f0a492f3ea3f28dba0d602d9; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites runInfoOffset=0/0 and phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1; combined tests=2077; log D:/mh-verify/r57/gate-real-r57.log.",
+        "Real failing TRX (total=767, failed=6): runInfoOffset=6/6 (offsets 0.4897/0.4793/0.4789/0.4840/0.4830/0.4796 s, max spread 10.8 ms), runInfoChronology=6/6; only final 6 test(s) failed; log D:/mh-verify/r57/gate-real-failing-r57.log.",
+        "Negative matrix 5 cases: clean-real 0/0, clean-two-errors 2/2, clean-green 0/0, fail-with-runinfo 1/1 (all OLD=0/NEW=0); bad-runinfo-offset OLD=0/NEW=1 with runInfoOffset=1/2 and exactly one has-offset problem; oldAllZero=true; results D:/mh-verify/r57/results-all.json.",
+        "Code commit 11a11c3a2b8dc8c3c59c85abc7930fc676971409 (ci(windows): the failure-log clock and timestamp must describe one run (W6-113bc)); windows-ci 44634075916 (push) success, 44634139804 (pull_request) success; Android CI 44634139760 success."
+      ],
+      "notes": "第三十六层：每项 RunInfo 的 canonical Text clock 与 @timestamp 是同一事件的两个视图；timestamp - Times.start - Text clock 在一次运行内必须落在首项 100 ms 内。第 35 层只检查 phase 窗口；第 33 层只检查顺序。",
+      "next_action": "候选第 37 层：继续从真实失败语料侦察可证结构不变量；现有 offset 检查在只有 1 项 RunInfo 时无跨项对照；RunInfo/ErrorInfo 文本交叉引用仍不可行；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T07:55:00+08:00"
     }
   ]
 }

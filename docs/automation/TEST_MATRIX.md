@@ -1913,3 +1913,17 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 **为什么第三十四层看不见**：第 34 层只比较 phase 时钟彼此和 `Finished` 与最后一条 RunInfo；修改 `Finished` 到 9.99 时所有相对关系仍成立，但已经超出 `Times.finish - Times.start` 的 8.6177s。
 
 **边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+## 6.42 第三十六层口径：RunInfo 时钟与时间戳必须描述同一次运行（W6-113bc）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | 每项 RunInfo 的 canonical Text clock、`@timestamp` 与 `Times.start` | 第 36 层 offset 块 |
+| 通过条件 | 所有 `timestamp - Times.start - Text clock` 落在首项 100 ms 内 | 真实 6 项最大差 10.8 ms；clean 2 项 2.8 ms |
+| 台阶行 | `runInfoOffset=<bound>/<items>` | `gate-real-r57.log` |
+| 负向对照 | 第二项 timestamp +250 ms；旧层 0，新层 1，`runInfoOffset=1/2`，恰好 1 条 offset 问题 | `results-all.json` |
+| 规模 | 2,637→2,702 行；156,156→160,608 B；+65/−0 | sha256 90bdf991... |
+| 残留限制 | 只证明两项描述同一运行，不证明绝对墙钟/NTP 对齐；一次运行仅 1 项时无跨项对照 | 真实语料观察 |
+
+**为什么第三十五层看不见**：第 35 层只比较 phase 相对时钟与 `Times` 窗口，RunInfo 的 Text clock 和 timestamp 各自都能通过行窗、顺序和 canonical 检查；把第二项 timestamp 后移 250 ms 时，两者不再描述同一瞬间，但旧层仍全绿。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
