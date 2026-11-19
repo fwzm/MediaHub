@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English overrides; shown only when the user's interface language is English. -->
+<resources>
+    <string name="home_press_back_again_to_exit">Press back again to exit</string>
+</resources>
