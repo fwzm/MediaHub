@@ -29,6 +29,8 @@ data class UserPreferences(
     val playerVisualEffects: PlayerVisualEffectsPreferences = PlayerVisualEffectsPreferences.Default,
     /** 播放专业信息面板（默认专业）：expertMode 只控制面板信息密度，不影响播放本身。 */
     val professionalInfo: ProfessionalInfoPreferences = ProfessionalInfoPreferences.Default,
+    /** 播放器覆盖层是否显示播放/暂停按钮；关闭后仍可用手势/媒体键控制。 */
+    val showPlayerPlayButton: Boolean = true,
 )
 
 /**
