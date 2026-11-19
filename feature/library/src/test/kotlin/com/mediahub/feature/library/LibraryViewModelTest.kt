@@ -11,6 +11,7 @@ import com.mediahub.model.MediaLibrary
 import com.mediahub.model.MediaServer
 import com.mediahub.model.MediaType
 import com.mediahub.model.PageRequest
+import com.mediahub.model.ServerEndpoint
 import com.mediahub.model.PagedResult
 import com.mediahub.model.ServerType
 import com.mediahub.model.Season
@@ -28,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -108,6 +110,12 @@ class LibraryViewModelTest {
     private class FakeServerStore(val server: MediaServer) : ServerStore {
         override fun observeServers(): Flow<List<MediaServer>> = flowOf(listOf(server))
         override suspend fun getServer(id: String): MediaServer? = if (id == server.id) server else null
+    }
+
+    private class MutableServerStore(initial: MediaServer) : ServerStore {
+        val servers = MutableStateFlow(listOf(initial))
+        override fun observeServers(): Flow<List<MediaServer>> = servers
+        override suspend fun getServer(id: String): MediaServer? = servers.value.firstOrNull { it.id == id }
     }
 
     private val noOpLogger = object : Logger {
@@ -192,6 +200,58 @@ class LibraryViewModelTest {
         vm.goToParent()
         advanceUntilIdle()
         assertEquals(listOf("view1", "series-1", "view1"), library.requestedItemsParentIds)
+    }
+
+    // ---- Server config refresh (audit #43) ----
+
+    private fun createReloadVm(store: ServerStore, library: FakeLibrary): LibraryViewModel = LibraryViewModel(
+        SavedStateHandle(mapOf("serverId" to "srv-1", "libraryId" to "view1", "name" to "电影")),
+        store, FakeRegistry(library), noOpLogger,
+    )
+
+    @Test
+    fun `server endpoint change reloads library`() = runTest {
+        val library = FakeLibrary()
+        val store = MutableServerStore(server())
+        val vm = createReloadVm(store, library)
+        advanceUntilIdle()
+        assertEquals(1, library.requestedItemsParentIds.size)
+
+        val editedEndpoint: ServerEndpoint = server().endpoints.single().copy(url = "http://new-host")
+        store.servers.value = listOf(server().copy(endpoints = listOf(editedEndpoint)))
+        advanceUntilIdle()
+
+        assertEquals(2, library.requestedItemsParentIds.size)
+        assertTrue(vm.uiState.value is LibraryUiState.Content)
+    }
+
+    @Test
+    fun `server display name change does not reload library`() = runTest {
+        val library = FakeLibrary()
+        val store = MutableServerStore(server())
+        createReloadVm(store, library)
+        advanceUntilIdle()
+        assertEquals(1, library.requestedItemsParentIds.size)
+
+        store.servers.value = listOf(server().copy(name = "Renamed"))
+        advanceUntilIdle()
+
+        assertEquals(1, library.requestedItemsParentIds.size)
+    }
+
+    @Test
+    fun `endpoint quality update does not reload library`() = runTest {
+        val library = FakeLibrary()
+        val store = MutableServerStore(server())
+        createReloadVm(store, library)
+        advanceUntilIdle()
+        assertEquals(1, library.requestedItemsParentIds.size)
+
+        val measured: ServerEndpoint = server().endpoints.single().copy(lastApiLatencyMs = 42L)
+        store.servers.value = listOf(server().copy(endpoints = listOf(measured)))
+        advanceUntilIdle()
+
+        assertEquals(1, library.requestedItemsParentIds.size)
     }
 
     // ---- Pagination (1B-3.2) ----

@@ -28,6 +28,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -87,6 +88,21 @@ class DetailViewModelTest {
         override suspend fun getServer(id: String): MediaServer? = testServer
     }
 
+    private class MutableServerStore(initial: MediaServer) : ServerStore {
+        val servers = MutableStateFlow(listOf(initial))
+        override fun observeServers(): Flow<List<MediaServer>> = servers
+        override suspend fun getServer(id: String): MediaServer? = servers.value.firstOrNull { it.id == id }
+    }
+
+    private class CountingDetailProvider(private val detail: MediaDetail) : MediaDetailProvider {
+        var calls = 0
+            private set
+        override suspend fun getItemDetail(itemId: String): MediaDetail {
+            calls++
+            return detail
+        }
+    }
+
     private fun makeItem(
         id: String, type: MediaType, seasonNumber: Int? = null,
         episodeNumber: Int? = null, runtimeMs: Long? = null,
@@ -104,6 +120,8 @@ class DetailViewModelTest {
         libraryProvider: MediaLibraryProvider? = null,
         libraryNull: Boolean = false,
         identityLookup: com.mediahub.provider.api.MediaIdentityLookupProvider? = null,
+        serverStore: ServerStore = fakeServerStore(),
+        detailProviderOverride: MediaDetailProvider? = null,
     ): DetailViewModel {
         val savedStateHandle = SavedStateHandle(mapOf("serverId" to "srv", "itemId" to "dGVzdA"))
         val lib = when {
@@ -119,7 +137,7 @@ class DetailViewModelTest {
                 override suspend fun getEpisodes(seasonId: String) = error("legacy")
             }
         }
-        val detailProvider = object : MediaDetailProvider {
+        val resolvedDetailProvider = detailProviderOverride ?: object : MediaDetailProvider {
             override suspend fun getItemDetail(itemId: String) = detail
         }
         val registry = object : MediaProviderRegistry {
@@ -129,7 +147,7 @@ class DetailViewModelTest {
             override fun create(server: MediaServer): ProviderHandle {
                 return ProviderHandle(
                     provider = fakeProvider(),
-                    detail = detailProvider,
+                    detail = resolvedDetailProvider,
                     library = lib,
                     identityLookup = identityLookup,
                 )
@@ -137,9 +155,9 @@ class DetailViewModelTest {
         }
         return DetailViewModel(
             savedStateHandle,
-            fakeServerStore(),
+            serverStore,
             registry,
-            CanonicalSourceResolver(fakeServerStore(), registry, FakeLogger()),
+            CanonicalSourceResolver(serverStore, registry, FakeLogger()),
             FakeLogger(),
         )
     }
@@ -475,5 +493,39 @@ class DetailViewModelTest {
         testDispatcher.scheduler.advanceUntilIdle()
         assertNull(vm.seriesState.value.episodesError)
         assertTrue(vm.seriesState.value.episodes.isEmpty())
+    }
+
+    // ---- Server config refresh (audit #43) ----
+
+    @Test
+    fun `server endpoint change reloads detail`() = runTest(testDispatcher) {
+        val detail = MediaDetail(item = makeItem("m1", MediaType.MOVIE))
+        val store = MutableServerStore(testServer)
+        val provider = CountingDetailProvider(detail)
+        val vm = createViewModel(detail, serverStore = store, detailProviderOverride = provider)
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertEquals(1, provider.calls)
+
+        val editedEndpoint = testServer.endpoints.single().copy(url = "https://new.example.com")
+        store.servers.value = listOf(testServer.copy(endpoints = listOf(editedEndpoint)))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(2, provider.calls)
+        assertTrue(vm.uiState.value is DetailUiState.Content)
+    }
+
+    @Test
+    fun `server display name change does not reload detail`() = runTest(testDispatcher) {
+        val detail = MediaDetail(item = makeItem("m1", MediaType.MOVIE))
+        val store = MutableServerStore(testServer)
+        val provider = CountingDetailProvider(detail)
+        createViewModel(detail, serverStore = store, detailProviderOverride = provider)
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertEquals(1, provider.calls)
+
+        store.servers.value = listOf(testServer.copy(name = "Renamed"))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(1, provider.calls)
     }
 }
