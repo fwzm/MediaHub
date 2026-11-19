@@ -449,13 +449,14 @@ class PlayerViewModel @Inject constructor(
                 _subtitleCenter.update { it.copy(notice = "不支持的字幕格式：.${subtitle.extension}") }
                 return false
             }
+        val prepared = importedSubtitleResolver?.prepare(subtitle) ?: subtitle
         val accepted = engine.loadExternalSubtitle(
             ExternalSubtitle(
-                id = subtitle.id,
-                name = subtitle.name,
-                uri = subtitle.uri,
+                id = prepared.id,
+                name = prepared.name,
+                uri = prepared.uri,
                 mimeType = mimeType,
-                language = subtitle.language,
+                language = prepared.language,
             ),
         )
         // 引擎提交完成即可被新会话的 rebuild/stop 重置；此后每一步（UI 更新、
