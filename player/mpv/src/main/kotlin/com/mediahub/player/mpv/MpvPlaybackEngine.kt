@@ -18,6 +18,7 @@ import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackEvent
 import com.mediahub.player.engine.PlaybackEventMessage
 import com.mediahub.player.engine.PlaybackEventSnapshot
+import com.mediahub.player.engine.PlaybackObservedInfo
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.PlaybackStartupTrace
 import com.mediahub.player.engine.PlaybackUiState
@@ -170,7 +171,12 @@ class MpvPlaybackEngine internal constructor(
             old?.acceptsUpdates = false
             old?.playJob?.cancel()
             old?.progressJob?.cancel()
-            _uiState.value = PlaybackUiState(durationMs = session.source.durationMs ?: 0, mediaTitle = session.itemTitle)
+            _uiState.value = PlaybackUiState(
+                durationMs = session.source.durationMs ?: 0,
+                mediaTitle = session.itemTitle,
+                // 渲染器是跨会话不变的承载事实；格式/解码器观测随新媒体会话清空。
+                observed = PlaybackObservedInfo(renderer = _uiState.value.observed.renderer),
+            )
             // LAZY ensures stop/release can always cancel the job, even with an immediate dispatcher.
             next.playJob = scope.launch(start = CoroutineStart.LAZY) { initialize(next) }
             old
@@ -275,6 +281,15 @@ class MpvPlaybackEngine internal constructor(
                     m.observeProperty("pause", MpvInstance.Format.FLAG)
                     m.observeProperty("speed", MpvInstance.Format.DOUBLE)
                     m.observeProperty("media-title", MpvInstance.Format.STRING)
+                    // 运行观测（真实解码器/渲染器/码率/帧率）：mpv 只提供属性快照，未观测到保持 null。
+                    m.observeProperty("video-codec", MpvInstance.Format.STRING)
+                    m.observeProperty("audio-codec", MpvInstance.Format.STRING)
+                    m.observeProperty("hwdec-current", MpvInstance.Format.STRING)
+                    m.observeProperty("current-vo", MpvInstance.Format.STRING)
+                    m.observeProperty("file-format", MpvInstance.Format.STRING)
+                    m.observeProperty("video-bitrate", MpvInstance.Format.DOUBLE)
+                    m.observeProperty("audio-bitrate", MpvInstance.Format.DOUBLE)
+                    m.observeProperty("container-fps", MpvInstance.Format.DOUBLE)
                     checkCurrent()
                     tr?.record(PlaybackStartupTrace.Milestone.MPV_LOADFILE)
                     m.command(arrayOf("loadfile", bridgeUrl))
@@ -342,11 +357,24 @@ class MpvPlaybackEngine internal constructor(
                 "time-pos" -> _uiState.update { it.copy(positionMs = (value * 1000).toLong()) }
                 "duration" -> if (value > 0) _uiState.update { it.copy(durationMs = (value * 1000).toLong()) }
                 "speed" -> _uiState.update { it.copy(speed = value.toFloat()) }
+                "video-bitrate" -> _uiState.update { it.copy(observed = it.observed.withVideoBitrate(value)) }
+                "audio-bitrate" -> _uiState.update { it.copy(observed = it.observed.withAudioBitrate(value)) }
+                "container-fps" -> _uiState.update { it.copy(observed = it.observed.withFrameRate(value)) }
             }
         }
         override fun property(name: String, value: String) = withCurrent(run) {
             // The session owns a known item title; native media-title can be a bridge transport filename.
-            if (name == "media-title" && run.session.itemTitle.isBlank()) _uiState.update { it.copy(mediaTitle = value) }
+            when (name) {
+                "media-title" -> if (run.session.itemTitle.isBlank()) _uiState.update { it.copy(mediaTitle = value) }
+                "video-codec" -> _uiState.update { it.copy(observed = it.observed.withVideoCodec(value)) }
+                "audio-codec" -> _uiState.update { it.copy(observed = it.observed.withAudioCodec(value)) }
+                // hwdec-current 是解码后端（mediacodec/no…），mpv 不提供具体解码器名；如实单列。
+                "hwdec-current" -> if (value != "no") {
+                    _uiState.update { it.copy(observed = it.observed.withHwdec(value)) }
+                }
+                "current-vo" -> _uiState.update { it.copy(observed = it.observed.withRenderer(value)) }
+                "file-format" -> _uiState.update { it.copy(observed = it.observed.withContainer(value)) }
+            }
         }
         override fun event(event: MpvInstance.Event) = withCurrent(run) {
             val tr = run.session.trace
@@ -435,6 +463,12 @@ class MpvPlaybackEngine internal constructor(
         synchronized(stateLock) {
             if (released) return
             attachedSurface = surface
+        }
+        if (surface != null) {
+            // 画面由 UI 的 AndroidView + SurfaceView 承载：结构事实；mpv 的 current-vo 后续会覆盖为实际 vo。
+            _uiState.update {
+                it.copy(observed = it.observed.withRenderer(PlaybackObservedInfo.SURFACE_VIEW_RENDERER))
+            }
         }
         withNative { run, _ ->
             val latest = synchronized(stateLock) { attachedSurface }

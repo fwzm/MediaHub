@@ -114,6 +114,12 @@ class PlaybackEngine(
 
     override fun attachSurface(surface: Surface?) {
         player.setVideoSurface(surface)
+        if (surface != null) {
+            // 画面由 UI 的 AndroidView + SurfaceView 承载：这是结构事实，不是推断。
+            _uiState.update {
+                it.copy(observed = it.observed.withRenderer(PlaybackObservedInfo.SURFACE_VIEW_RENDERER))
+            }
+        }
     }
 
     init {
@@ -217,7 +223,33 @@ class PlaybackEngine(
                 format: Format,
                 decoderReuseEvaluation: DecoderReuseEvaluation?,
             ) {
-                _uiState.update { it.copy(audioFormatMime = format.sampleMimeType) }
+                _uiState.update {
+                    it.copy(
+                        audioFormatMime = format.sampleMimeType,
+                        observed = it.observed
+                            .withAudioFormat(format.codecs, format.sampleMimeType, format.bitrate)
+                            .withContainer(format.containerMimeType),
+                    )
+                }
+            }
+
+            override fun onVideoInputFormatChanged(
+                eventTime: AnalyticsListener.EventTime,
+                format: Format,
+                decoderReuseEvaluation: DecoderReuseEvaluation?,
+            ) {
+                _uiState.update {
+                    it.copy(
+                        observed = it.observed
+                            .withVideoFormat(
+                                codecs = format.codecs,
+                                mimeType = format.sampleMimeType,
+                                bitrate = format.bitrate,
+                                frameRate = format.frameRate,
+                            )
+                            .withContainer(format.containerMimeType),
+                    )
+                }
             }
 
             override fun onVideoDecoderInitialized(
@@ -227,6 +259,7 @@ class PlaybackEngine(
                 initializationDurationMs: Long,
             ) {
                 session?.trace?.record(PlaybackStartupTrace.Milestone.VIDEO_DECODER_INITIALIZED)
+                _uiState.update { it.copy(observed = it.observed.withVideoDecoder(decoderName)) }
             }
 
             override fun onAudioDecoderInitialized(
@@ -236,6 +269,7 @@ class PlaybackEngine(
                 initializationDurationMs: Long,
             ) {
                 session?.trace?.record(PlaybackStartupTrace.Milestone.AUDIO_DECODER_INITIALIZED)
+                _uiState.update { it.copy(observed = it.observed.withAudioDecoder(decoderName)) }
             }
 
             override fun onRenderedFirstFrame(eventTime: AnalyticsListener.EventTime, output: Any, renderTimeMs: Long) {
@@ -284,6 +318,8 @@ class PlaybackEngine(
             durationMs = session.source.durationMs ?: 0,
             mediaTitle = session.itemTitle,
             playWhenReady = player.playWhenReady,
+            // 渲染器是跨会话不变的承载事实；格式/解码器观测随新媒体会话清空。
+            observed = PlaybackObservedInfo(renderer = _uiState.value.observed.renderer),
         )
         startProgressLoop()
         logger.i(LogTag.PLAYER, "开始播放 serverId=${session.serverId} itemId=${session.itemId}")
