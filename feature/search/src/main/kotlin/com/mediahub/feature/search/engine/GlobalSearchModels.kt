@@ -33,6 +33,7 @@ data class UnifiedSearchHit(
  *
  * - [hits]：已完成服务器的全部命中，按 targets 传入顺序稳定排列（与完成顺序无关）。
  * - [searchingServers] / [completedServers] / [errors] 一律以 serverId 为键。
+ * - [nextOffsets]：每个服务器下一页的起始 offset；没有更多结果的服务器不在 map 中。
  * - 部分失败绝不吞掉其它服务器的结果：B 超时 ≠ 整个搜索 Error。
  */
 data class GlobalSearchState(
@@ -41,9 +42,13 @@ data class GlobalSearchState(
     val searchingServers: Set<String> = emptySet(),
     val completedServers: Set<String> = emptySet(),
     val errors: Map<String, String> = emptyMap(),
+    val nextOffsets: Map<String, Int> = emptyMap(),
 ) {
     /** 仍有服务器未返回（UI 显示进行中指示）。 */
     val isSearching: Boolean get() = searchingServers.isNotEmpty()
+
+    /** 至少有一个服务器还能继续加载下一页（加载中时不允许重复触发）。 */
+    val canLoadMore: Boolean get() = nextOffsets.isNotEmpty() && !isSearching
 
     companion object {
         /** 无查询（或空白）时的空态。 */

@@ -26,7 +26,7 @@ import kotlinx.coroutines.withTimeout
  *   在途搜索；[CancellationException] 只传播、绝不折叠成业务 error。
  * - Flow 生命周期：全部服务器终态（成功/失败/超时）后自然 complete；
  *   空白 query 直接发空态并 complete，不发任何网络请求。
- * - 每次搜索只取第一页（snapshot 语义）；分页续拉是后续演进，不在首版。
+ * - 分页：首轮记录各服务器 nextOffset；[loadMore] 只续拉仍有下一页的服务器。
  */
 class GlobalSearchEngine(
     private val perServerTimeoutMs: Long = 8_000,
@@ -46,26 +46,13 @@ class GlobalSearchEngine(
         val searching = targets.map { it.serverId }.toSet()
         val mutex = Mutex()
         var hitsByServer: Map<String, List<UnifiedSearchHit>> = emptyMap()
+        var nextOffsets: MutableMap<String, Int> = mutableMapOf()
         var errors: MutableMap<String, String> = mutableMapOf()
         var completed: MutableSet<String> = mutableSetOf()
 
-        /**
-         * 快照构建 + 发送整体串行化（评审 P1-3 二轮）。
-         *
-         * 一轮修复只把可变状态读取放进了锁内，但 unlock 与 send 之间仍有窗口：
-         * 多线程下旧 snapshot 可能晚于新 snapshot 到达（状态倒退——completedSets
-         * 收缩、终帧 isSearching 回真、hits 少于实际完成）。因此把 send 一并
-         * 留在锁内，保证 emission 顺序与状态版本严格一致。
-         *
-         * 持锁跨 suspension（send）通常不推荐，但此处成立：collector 不反向等待
-         * mutex（无死锁环）；每源至多一个 snapshot；并发上限 4；
-         * 正确性优先于微小吞吐差。若未来要无锁化，需 revision + emissionMutex
-         * + stale-drop，复杂度更高，首版不做。
-         */
         suspend fun sendSnapshot() {
             mutex.withLock {
                 val done = completed.toSet()
-                // 稳定顺序：按 targets 传入顺序展开已完成服务器的命中
                 val orderedHits = targets.flatMap { target -> hitsByServer[target.serverId].orEmpty() }
                 send(
                     GlobalSearchState(
@@ -74,6 +61,7 @@ class GlobalSearchEngine(
                         searchingServers = searching - done,
                         completedServers = done,
                         errors = errors.toMap(),
+                        nextOffsets = nextOffsets.toMap(),
                     )
                 )
             }
@@ -90,9 +78,17 @@ class GlobalSearchEngine(
                             val page = withTimeout(perServerTimeoutMs) {
                                 target.search(query, PageRequest(offset = 0, limit = pageSize))
                             }
+                            val next = page.nextOffset?.takeIf {
+                                page.hasMore && page.items.isNotEmpty() && it > 0
+                            }
                             mutex.withLock {
                                 hitsByServer += target.serverId to page.items.map { hit ->
                                     UnifiedSearchHit(item = hit, serverName = target.serverName)
+                                }
+                                if (next != null) {
+                                    nextOffsets[target.serverId] = next
+                                } else {
+                                    nextOffsets.remove(target.serverId)
                                 }
                                 completed += target.serverId
                             }
@@ -104,17 +100,116 @@ class GlobalSearchEngine(
                             }
                             sendSnapshot()
                         } catch (e: CancellationException) {
-                            // 消费方取消（旧 query 被切换）：向上传播，禁止折叠成业务 error
                             throw e
                         } catch (e: Exception) {
                             mutex.withLock {
-                                // A2-4 第 4 项：错误文案收口。只有 ProviderException 透传其
-                                // message（已由 ProviderException 层消毒为固定文案）；
-                                // 其余异常一律 "搜索失败"，原始 message 可能含敏感文本。
                                 errors[target.serverId] = when (e) {
                                     is ProviderException -> e.message?.takeIf(String::isNotBlank) ?: "搜索失败"
                                     else -> "搜索失败"
                                 }
+                                completed += target.serverId
+                            }
+                            sendSnapshot()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 续拉下一页：只请求 [current] 里记录了 nextOffset 的服务器；
+     * 新命中按 targets 顺序追加并去重，失败时保留旧命中与旧 offset 供再次重试。
+     */
+    fun loadMore(
+        targets: List<SearchTarget>,
+        current: GlobalSearchState,
+        pageSize: Int = 30,
+    ): Flow<GlobalSearchState> = channelFlow {
+        val targetsToLoad = targets.filter { current.nextOffsets.containsKey(it.serverId) }
+        if (current.isSearching || current.nextOffsets.isEmpty() || targetsToLoad.isEmpty()) {
+            send(current)
+            return@channelFlow
+        }
+
+        val searching = targetsToLoad.map { it.serverId }.toSet()
+        val remaining = searching.toMutableSet()
+        val mutex = Mutex()
+        val appendedByServer: MutableMap<String, List<UnifiedSearchHit>> = mutableMapOf()
+        val nextOffsets = current.nextOffsets.toMutableMap()
+        val errors = current.errors.toMutableMap()
+        val completed = current.completedServers.toMutableSet()
+
+        fun snapshot(): GlobalSearchState {
+            val ordered = buildList {
+                addAll(current.hits)
+                val seen = current.hits.mapTo(mutableSetOf()) { it.item.serverId + "\u0000" + it.item.id }
+                targets.forEach { target ->
+                    appendedByServer[target.serverId].orEmpty().forEach { hit ->
+                        val key = hit.item.serverId + "\u0000" + hit.item.id
+                        if (seen.add(key)) add(hit)
+                    }
+                }
+            }
+            return GlobalSearchState(
+                query = current.query,
+                hits = ordered,
+                searchingServers = remaining.toSet(),
+                completedServers = completed.toSet(),
+                errors = errors.toMap(),
+                nextOffsets = nextOffsets.toMap(),
+            )
+        }
+
+        suspend fun sendSnapshot() {
+            mutex.withLock { send(snapshot()) }
+        }
+
+        send(snapshot())
+
+        coroutineScope {
+            val semaphore = Semaphore(maxConcurrency)
+            targetsToLoad.forEach { target ->
+                val offset = current.nextOffsets.getValue(target.serverId)
+                launch {
+                    semaphore.withPermit {
+                        try {
+                            val page = withTimeout(perServerTimeoutMs) {
+                                target.search(current.query, PageRequest(offset = offset, limit = pageSize))
+                            }
+                            val next = page.nextOffset?.takeIf {
+                                page.hasMore && page.items.isNotEmpty() && it > offset
+                            }
+                            mutex.withLock {
+                                appendedByServer[target.serverId] = page.items.map { hit ->
+                                    UnifiedSearchHit(item = hit, serverName = target.serverName)
+                                }
+                                if (next != null) {
+                                    nextOffsets[target.serverId] = next
+                                } else {
+                                    nextOffsets.remove(target.serverId)
+                                }
+                                errors.remove(target.serverId)
+                                remaining -= target.serverId
+                                completed += target.serverId
+                            }
+                            sendSnapshot()
+                        } catch (e: TimeoutCancellationException) {
+                            mutex.withLock {
+                                errors[target.serverId] = "搜索超时"
+                                remaining -= target.serverId
+                                completed += target.serverId
+                            }
+                            sendSnapshot()
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            mutex.withLock {
+                                errors[target.serverId] = when (e) {
+                                    is ProviderException -> e.message?.takeIf(String::isNotBlank) ?: "搜索失败"
+                                    else -> "搜索失败"
+                                }
+                                remaining -= target.serverId
                                 completed += target.serverId
                             }
                             sendSnapshot()

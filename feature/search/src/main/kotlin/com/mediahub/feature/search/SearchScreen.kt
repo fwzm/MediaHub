@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -78,6 +79,7 @@ fun SearchRoute(
         onQueryChange = viewModel::onQueryChange,
         onBack = onBack,
         onOpenItem = onOpenItem,
+        onLoadMore = viewModel::loadMore,
     )
 }
 
@@ -89,6 +91,7 @@ fun SearchContent(
     onQueryChange: (String) -> Unit,
     onBack: () -> Unit,
     onOpenItem: (MediaItem) -> Unit,
+    onLoadMore: () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -141,6 +144,7 @@ fun SearchContent(
         SearchBody(
             state = state,
             onOpenItem = onOpenItem,
+            onLoadMore = onLoadMore,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
@@ -152,6 +156,7 @@ fun SearchContent(
 fun SearchBody(
     state: GlobalSearchState,
     onOpenItem: (MediaItem) -> Unit,
+    onLoadMore: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // 聚合为纯同步投影：与 state 来自同一 Compose snapshot，杜绝 stale entries 帧闪烁
@@ -209,6 +214,17 @@ fun SearchBody(
         // 逐服务器状态行：进行中 / 失败（partial success 不打断结果流）
         if (state.isSearching || state.errors.isNotEmpty()) {
             item { ServerStatusLines(state) }
+        }
+
+        if (state.canLoadMore) {
+            item {
+                TextButton(
+                    onClick = onLoadMore,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("加载更多")
+                }
+            }
         }
 
         if (!state.isSearching && state.hits.isEmpty() && state.errors.isEmpty()) {
