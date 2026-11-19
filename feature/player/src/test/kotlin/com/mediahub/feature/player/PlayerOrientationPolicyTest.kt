@@ -72,4 +72,19 @@ class PlayerOrientationPolicyTest {
         controller.exitPlayback()
         assertEquals(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, activity.requestedOrientation)
     }
+
+    @Test
+    @Config(qualifiers = "sw600dp-land")
+    fun `tablets keep following the system orientation after playback`() {
+        val activity = activity()
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        val controller = PlayerSystemUiController(activity)
+        controller.enterPlayback(autoLandscape = true, immersiveBars = false)
+        controller.exitPlayback()
+        assertEquals(
+            "平板上非播放页面应跟随系统方向，不得强制锁回竖屏",
+            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED,
+            activity.requestedOrientation,
+        )
+    }
 }

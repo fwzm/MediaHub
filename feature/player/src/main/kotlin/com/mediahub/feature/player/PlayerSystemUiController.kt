@@ -61,13 +61,23 @@ class PlayerSystemUiController(private val activity: Activity) {
     }
 
     /**
-     * 计算退出时恢复的方向。MIUI 对动态方向（UNSPECIFIED/SENSOR/USER）恢复不敏感，
-     * 显式指定方向（SENSOR_LANDSCAPE/PORTRAIT）才可靠；故把「原本竖屏/横屏」映射成显式值。
+     * 计算退出时恢复的方向。
+     *
+     * 手机沿用 P0 回归修复：非播放页面恒为竖屏，横屏只是播放器的临时租约；
+     * MIUI 对动态方向不敏感，必须显式给 PORTRAIT。
+     * 平板（sw600dp+）是例外：文件浏览等页面需要跟随系统方向，恢复为 UNSPECIFIED。
      */
     private fun resolveRestoreOrientation(): Int {
-        // P0：非播放页面恒为竖屏，横屏只是播放器的临时租约。旧实现的兜底分支
-        // 用「进入播放器时的物理配置方向」，横持点播放会让首页在退出后停留横屏。
-        // 捕获值仅用于诊断，不再参与决策。
+        if (activity.resources.configuration.smallestScreenWidthDp >= 600) {
+            Log.d(
+                "MediaHub/SYSUI",
+                "exitPlayback restore=UNSPECIFIED (tablet, captured=" + originalOrientation +
+                    ", config=" + originalConfigOrientation + ")",
+            )
+            return ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+        // P0：手机上非播放页面恒为竖屏。旧实现的兜底分支用「进入播放器时的物理配置方向」，
+        // 横持点播放会让首页在退出后停留横屏；捕获值仅用于诊断，不再参与决策。
         Log.d(
             "MediaHub/SYSUI",
             "exitPlayback restore=PORTRAIT (captured=" + originalOrientation +
