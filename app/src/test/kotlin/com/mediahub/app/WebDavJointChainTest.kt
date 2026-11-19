@@ -134,8 +134,8 @@ class WebDavJointChainTest {
         override fun togglePlayPause() = Unit
         override fun seekTo(positionMs: Long, mode: SeekMode) = Unit
         override fun setSpeed(speed: Float) = Unit
-        override fun selectAudioTrack(selection: TrackSelection?) = Unit
-        override fun selectSubtitleTrack(selection: TrackSelection?) = Unit
+        override fun selectAudioTrack(selection: TrackSelection?) = true
+        override fun selectSubtitleTrack(selection: TrackSelection?) = true
         override fun stop(): PlaybackProgress? = null
         override fun release() = Unit
     }

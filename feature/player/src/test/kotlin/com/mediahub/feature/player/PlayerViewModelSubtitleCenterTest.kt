@@ -120,9 +120,9 @@ class PlayerViewModelSubtitleCenterTest {
         override fun togglePlayPause() = Unit
         override fun seekTo(positionMs: Long, mode: SeekMode) = Unit
         override fun setSpeed(speed: Float) = Unit
-        override fun selectAudioTrack(selection: TrackSelection?) = Unit
+        override fun selectAudioTrack(selection: TrackSelection?) = true
         var selectedSubtitle: TrackSelection? = null
-        override fun selectSubtitleTrack(selection: TrackSelection?) { selectedSubtitle = selection }
+        override fun selectSubtitleTrack(selection: TrackSelection?): Boolean { selectedSubtitle = selection; return true }
         override suspend fun loadExternalSubtitle(subtitle: ExternalSubtitle): Boolean {
             loaded.add(subtitle)
             loadHook?.invoke(subtitle)
