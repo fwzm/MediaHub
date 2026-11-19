@@ -26,7 +26,9 @@ import kotlinx.coroutines.withTimeout
  *   在途搜索；[CancellationException] 只传播、绝不折叠成业务 error。
  * - Flow 生命周期：全部服务器终态（成功/失败/超时）后自然 complete；
  *   空白 query 直接发空态并 complete，不发任何网络请求。
- * - 每次搜索只取第一页（snapshot 语义）；分页续拉是后续演进，不在首版。
+ * - 分页：[GlobalSearchState.hasMoreByServer] / [GlobalSearchState.nextOffsetByServer]
+ *   逐源暴露续拉位置；初始搜索默认 offset=0，续拉按服务器各自的 nextOffset
+ *   发请求（各源返回条数可能小于 pageSize，不能用统一 pageSize 当偏移）。
  */
 class GlobalSearchEngine(
     private val perServerTimeoutMs: Long = 8_000,
@@ -37,6 +39,8 @@ class GlobalSearchEngine(
         targets: List<SearchTarget>,
         query: String,
         pageSize: Int = 30,
+        offset: Int = 0,
+        offsetsByServer: Map<String, Int> = emptyMap(),
     ): Flow<GlobalSearchState> = channelFlow {
         if (query.isBlank()) {
             send(GlobalSearchState.idle(query))
@@ -48,6 +52,8 @@ class GlobalSearchEngine(
         var hitsByServer: Map<String, List<UnifiedSearchHit>> = emptyMap()
         var errors: MutableMap<String, String> = mutableMapOf()
         var completed: MutableSet<String> = mutableSetOf()
+        var hasMoreByServer: MutableMap<String, Boolean> = mutableMapOf()
+        var nextOffsetByServer: MutableMap<String, Int?> = mutableMapOf()
 
         /**
          * 快照构建 + 发送整体串行化（评审 P1-3 二轮）。
@@ -74,6 +80,8 @@ class GlobalSearchEngine(
                         searchingServers = searching - done,
                         completedServers = done,
                         errors = errors.toMap(),
+                        hasMoreByServer = hasMoreByServer.toMap(),
+                        nextOffsetByServer = nextOffsetByServer.toMap(),
                     )
                 )
             }
@@ -87,19 +95,24 @@ class GlobalSearchEngine(
                 launch {
                     semaphore.withPermit {
                         try {
+                            val requestOffset = offsetsByServer[target.serverId] ?: offset
                             val page = withTimeout(perServerTimeoutMs) {
-                                target.search(query, PageRequest(offset = 0, limit = pageSize))
+                                target.search(query, PageRequest(offset = requestOffset, limit = pageSize))
                             }
                             mutex.withLock {
                                 hitsByServer += target.serverId to page.items.map { hit ->
                                     UnifiedSearchHit(item = hit, serverName = target.serverName)
                                 }
+                                hasMoreByServer[target.serverId] = page.hasMore
+                                nextOffsetByServer[target.serverId] = page.nextOffset
                                 completed += target.serverId
                             }
                             sendSnapshot()
                         } catch (e: TimeoutCancellationException) {
                             mutex.withLock {
                                 errors[target.serverId] = "搜索超时"
+                                hasMoreByServer[target.serverId] = false
+                                nextOffsetByServer[target.serverId] = null
                                 completed += target.serverId
                             }
                             sendSnapshot()
@@ -115,6 +128,8 @@ class GlobalSearchEngine(
                                     is ProviderException -> e.message?.takeIf(String::isNotBlank) ?: "搜索失败"
                                     else -> "搜索失败"
                                 }
+                                hasMoreByServer[target.serverId] = false
+                                nextOffsetByServer[target.serverId] = null
                                 completed += target.serverId
                             }
                             sendSnapshot()

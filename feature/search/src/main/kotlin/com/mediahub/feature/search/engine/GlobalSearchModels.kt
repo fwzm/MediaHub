@@ -41,9 +41,16 @@ data class GlobalSearchState(
     val searchingServers: Set<String> = emptySet(),
     val completedServers: Set<String> = emptySet(),
     val errors: Map<String, String> = emptyMap(),
+    /** 每个数据源是否还有下一页；缺省视为没有更多。 */
+    val hasMoreByServer: Map<String, Boolean> = emptyMap(),
+    /** 每个数据源的下一绝对偏移；null 表示没有下一页。 */
+    val nextOffsetByServer: Map<String, Int?> = emptyMap(),
 ) {
     /** 仍有服务器未返回（UI 显示进行中指示）。 */
     val isSearching: Boolean get() = searchingServers.isNotEmpty()
+
+    /** 任一数据源还有下一页（UI 显示“加载更多”）。 */
+    val hasMore: Boolean get() = hasMoreByServer.values.any { it }
 
     companion object {
         /** 无查询（或空白）时的空态。 */

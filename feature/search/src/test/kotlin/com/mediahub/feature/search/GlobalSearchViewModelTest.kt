@@ -260,6 +260,45 @@ class GlobalSearchViewModelTest {
         job.cancel()
     }
 
+    @Test
+    fun `load more appends next page until exhausted`() = runTest {
+        val requests = mutableListOf<PageRequest>()
+        val search = FakeSearch { _, page ->
+            requests += page
+            when (page.offset) {
+                0 -> PagedResult(
+                    items = listOf(item("srv-a", "m1", "一")),
+                    totalCount = 2,
+                    hasMore = true,
+                    nextOffset = 30,
+                )
+                30 -> PagedResult(
+                    items = listOf(item("srv-a", "m2", "二")),
+                    totalCount = 2,
+                    hasMore = false,
+                )
+                else -> PagedResult(emptyList(), hasMore = false)
+            }
+        }
+        val vm = viewModel(listOf(serverA), mapOf("srv-a" to handle(search)))
+
+        val job = launch { vm.state.collect {} }
+        runCurrent()
+        vm.onQueryChange("冰")
+        advanceTimeBy(400)
+        runCurrent()
+        assertEquals(listOf("m1"), vm.state.value.hits.map { it.item.id })
+
+        vm.loadMore()
+        advanceTimeBy(100)
+        runCurrent()
+
+        assertEquals(listOf("m1", "m2"), vm.state.value.hits.map { it.item.id })
+        assertFalse(vm.state.value.hasMore)
+        assertEquals(listOf(0, 30), requests.map { it.offset })
+        job.cancel()
+    }
+
     // ---- Partial success：部分服务器失败不影响其它结果进入 state ----
 
     @Test
