@@ -1542,3 +1542,41 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 
 ### exact-head CI 验收
 - 代码 head 781d102421ea9f8ea322e5e72e9968d48d3e2da5：windows-ci 44479925035（push）success、44479988695（pull_request）success；同 head Android CI in_progress（CI_PENDING，仅改 windows/tools，按 ADR-AUTO-001 继承）（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+
+## 6.30 第二十五层口径：运行名与创建时刻必须同一个瞬间（W6-113aq）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| TestRun/@name 的日期时间与 Times/@creation 的 yyyy-MM-dd HH:mm:ss 逐字相等 | TestRun/@name、Times/@creation | RED |
+| 若 name 不是 canonical 形状，不进入本层（由既有 header 规则处理） | TestRun/@name | 既有规则 |
+| 比较使用 InvariantCulture，保留原始秒级文本 | Times/@creation | RED |
+
+### 为什么前二十四层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 15/16 层 | Times/@creation、@queuing 的格式、顺序与窗口 | name 里的日期时间 |
+| 第 20 层 | name 的 user@machine 形状、runUser、machine、deploymentRoot 派生 | name 的日期时间 |
+| 第 22/23/24 层 | 行 verdict、失败证据、RunInfos、StdOut | header 的两个创建时刻自述 |
+| 全层 | — | TestRun/@name 与 Times/@creation 的文本一致性 |
+
+### 依据（EXECUTED）
+- 真实语料：green windows name=55160@INKCHOI 2026-11-19 13:17:39 vs creation=2026-11-19T13:17:39.6311170+08:00；failing artifact name=runneradmin@runnervmm7ud1 2026-11-17 16:02:17 vs creation=2026-11-17T16:02:17.6256719+00:00，均秒级一致。
+- 三例对照：clean-green OLD=0 NEW=0；creation-shift 与 name-shift 均 OLD=0 NEW=1，且 new ladder nameStamp=0 点名两个不同时刻。
+
+### 数据源与规模
+- check-test-suite-baseline.ps1 124,609 → 126,138 B，2,176 → 2,202 行（+1,529 B，+27/-1 行），0 非 ASCII，sha256 a075ac386e331f88c918c0c01824f49c56114ff5ca13b31d2203d0447ac18b20。
+- 台阶行：runHeader=<n>/3 ... nameStamp=<0|1> ...。
+
+### 负向对照
+- 三例矩阵全按预期；实现态 sha256 在对照前后一致，矩阵后 clean-green 复跑仍绿；旧层在两个变异上保持 PASS，证明新层不是旧层的重复。
+
+### 残留限制
+- 只比较 name 与 Times/@creation 的秒级文本；不比较 Times/@queuing、@start、@finish 与 name 的关系。
+- name 不是 canonical 形状时本层不触发，仍有既有 header 规则负责。
+- 无法证明该时间戳与真实机器时钟一致；只证明报告自身两个字段互相一致。
+
+### exact-head CI 验收
+- 代码 head eb073088d7504924a37dcfaba1f028b6df87d5f3：windows-ci 44486463532（push）/ 44486549036（pull_request）= success；同 head Android CI 44486548899 = in_progress（CI_PENDING）（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。

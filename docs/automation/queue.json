@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-19T15:40:00+08:00",
-  "updated_by": "lead-W6-113-r43",
+  "updated_at": "2026-11-19T16:33:00+08:00",
+  "updated_by": "lead-W6-113-r44",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -955,6 +955,28 @@
       "notes": "第 24 层收的是 ResultSummary/Output/StdOut：runner 写的控制台记录必须存在、非空白，并且命名自己的套件。前二十三层只读计数、位置、outcome 桶、每行 ErrorInfo 与 RunInfos，ResultSummary/Output/StdOut 在脚本里引用计数为 0。基线 JSON 与 updater 未改，无迁移。",
       "next_action": "候选下一层：①ErrorInfo/StackTrace 文本与 RunInfo Text 的交叉引用；②RunInfos 多条/空块与 runDeploymentRoot 的边界；③Times/@creation|@queuing 与 ResultSummary 的窗口自洽；另列独立任务刷新基线（1973 vs 1959）。",
       "closed_at": "2026-11-19T15:45:00+08:00"
+    },
+    {
+      "id": "W6-113aq",
+      "title": "第二十五层：运行名与创建时刻必须同一个瞬间（TestRun/@name ↔ Times/@creation）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r44",
+      "branch": "feature/windows-w6-113aq-run-name-stamp",
+      "evidence": [
+        "check-test-suite-baseline.ps1 124,609 -> 126,138 B (+27/-1 lines, 2,202 lines, sha256 a075ac386e331f88c918c0c01824f49c56114ff5ca13b31d2203d0447ac18b20, pure ASCII), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-25 invariant: the date and time embedded in canonical TestRun/@name must equal Times/@creation at second precision; any mismatch is RED; the ladder records nameStamp=<0|1>; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI, artifacts/test-results-r45): new gate exit 0; ladder runHeader=3/3 ... nameStamp=1 ... for both suites; combined tests=2077; growth warnings only (1973 > baseline 1959).",
+        "Negative controls: 3 cases at D:/mh-verify/r45; clean-green OLD=0 NEW=0 (nameStamp=1); creation-shift OLD=0 NEW=1 (nameStamp=0, name 2026-11-19 13:17:39 vs creation 2026-11-19 13:07:39); name-shift OLD=0 NEW=1 (name 2026-11-19 13:07:39 vs creation 2026-11-19 13:17:39); implementation sha256 a075ac38... unchanged across the matrix and clean-green re-run after the matrix still OLD=0 NEW=0.",
+        "Real test rerun: MediaHub.Tests 1973 passed / 0 failed / 0 skipped exit 0; MediaHub.WebDav.Tests 104 / 0 / 0 exit 0 (English UI).",
+        "Commit eb073088d7504924a37dcfaba1f028b6df87d5f3 (ci(windows): the run name and the creation stamp must name one instant (W6-113aq)), 1 file changed / +27/-1, non-force push to feature/windows-w6-113aq-run-name-stamp; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44486463532 (push) = success and 44486549036 (pull_request) = success; the runs printed runHeader=3/3 ... nameStamp=1 ... for both suites.",
+        "Android CI 44486548899 = in_progress（CI_PENDING） at the code head; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001.",
+        "Draft PR #139 (base main, stacked on #136) carries the layer text; G7 remains DO_NOT_MERGE. Baseline JSON and updater were not changed, so there is no migration."
+      ],
+      "notes": "第 25 层收的是 header 的两个自述：TestRun/@name 的日期时间与 Times/@creation 必须描述同一个创建瞬间。前二十四层把 name 拆成 user/machine 并验证 deploymentRoot 派生、把 Times 拆成格式/顺序/窗口，但没有任何一层把这两个字段互相比较。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①ErrorInfo/StackTrace 文本与 RunInfo Text 的交叉引用；②RunInfos 多条/空块与 runDeploymentRoot 的边界；③Times/@creation|@queuing 与 ResultSummary 的窗口自洽；另列独立任务刷新基线（1973 vs 1959）。",
+      "closed_at": "2026-11-19T16:33:00+08:00"
     }
   ]
 }

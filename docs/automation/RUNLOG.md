@@ -846,3 +846,44 @@
 
 ### 边界
 - 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。
+
+## Round 44（W6-113aq，2026-11-19）：运行名与创建时刻必须同一个瞬间
+
+### 切片动机
+- 第 24 层收 ResultSummary/StdOut 后，TestRun/@name 的日期时间与 Times/@creation 仍是同一 header 的两种自述，脚本从未比较。
+- 真实语料证明两者精确到秒一致：green windows name=55160@INKCHOI 2026-11-19 13:17:39、creation=2026-11-19T13:17:39.6311170+08:00；failing artifact name=runneradmin@runnervmm7ud1 2026-11-17 16:02:17、creation=2026-11-17T16:02:17.6256719+00:00。
+- 这不改基线 JSON；只钉 TRX 头部两个自述字段的一致性。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化）
+- TestRun/@name 命中 canonical 形状后，捕获其中的日期与时间；与 Times/@creation 按 yyyy-MM-dd HH:mm:ss 逐字比较，任何不一致都 RED。
+- 读取继续使用既有 Convert-ToInstant 的 $declarationCreation；不新增对 Times 的独立解析。
+- 台阶行在 runHeader 后追加 nameStamp=<0|1>。
+- 头部文档与 SEMANTICS 各新增一条说明；throw 细节沿用 $headerLost 上限 12。
+
+### 负向对照（EXECUTED）
+- 同一套 1973+104 行英文语料，old=D:/mh-verify/r45/gate-prev.ps1（第 24 层，2,176 行，sha256 b9c7e10b59db94e5d0f0c224c4374f26c6208f200e3ed21f9606e5b5e8b4d532），new=本层。
+- clean-green OLD=0 NEW=0，new ladder 两套件均 nameStamp=1。
+- creation-shift（Times creation/queuing 13:17:39→13:07:39，name 仍 13:17:39）OLD=0 NEW=1，new ladder nameStamp=0，throw 点名 name 2026-11-19 13:17:39 vs creation 2026-11-19 13:07:39。
+- name-shift（name 13:17:39→13:07:39 且 deploymentRoot 同步，Times 仍 13:17:39）OLD=0 NEW=1，new ladder nameStamp=0，throw 点名 name 2026-11-19 13:07:39 vs creation 2026-11-19 13:17:39。
+- 实现态 sha256 在矩阵前后一致；对照结束后 clean-green 复跑仍 OLD=0 NEW=0。
+
+### 真实语料
+- 本机 dotnet test：MediaHub.Tests 1973 passed / 0 failed / 0 skipped，exit 0；MediaHub.WebDav.Tests 104 / 0 / 0，exit 0（英文 UI，artifacts/test-results-r45）。
+- 新闸门 -ResultsDir ./artifacts/gate-corpus exit 0；两套件台阶行均 runHeader=3/3 ... nameStamp=1 ...；combined tests=2077；只有基线增长 warning（1973 > 1959）。
+
+### 数据源与规模
+- windows/tools/check-test-suite-baseline.ps1 124,609 B / 2,176 行 → 126,138 B / 2,202 行（+1,529 B，+27/−1 行），0 个非 ASCII；sha256 a075ac386e331f88c918c0c01824f49c56114ff5ca13b31d2203d0447ac18b20。
+- 双 shell 语法：pwsh 7.6.10 与 Windows PowerShell 5.1.26100.10003 均 errors=0。
+- git diff --stat：1 file changed / +27 insertions / -1 deletion；git diff --check 干净。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+- 提交 eb073088d7504924a37dcfaba1f028b6df87d5f3（ci(windows): the run name and the creation stamp must name one instant (W6-113aq)），1 file changed / +27/-1，非 force push 到 feature/windows-w6-113aq-run-name-stamp。
+- exact-head windows-ci：44486463532（push）success（push）；44486549036（pull_request）success（pull_request）。
+- 同 head Android CI：44486548899（pull_request）in_progress（CI_PENDING）（本提交只动 windows/tools，android/core/feature/app 子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+- Draft PR 139（base main，stacked 在 #136 第 24 层之上）；G7 恒 DO_NOT_MERGE。
+
+### 锁
+- run-id w6-113-round5-20261119，owner lead，8 把资源锁（3 remote-ref + 5 worktree），本轮结束 release-plan 释放。
+
+### 边界
+- 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。
