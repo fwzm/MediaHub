@@ -502,15 +502,12 @@ fun PlayerRoute(
 
         // 引擎自动降级提示（U3-A：Media3 失败 → mpv 同位置重播）
         if (engineSwitching) {
-            Text(
-                stringResource(R.string.player_switching_engine),
-                color = Color.White,
-                style = MaterialTheme.typography.bodyMedium,
+            PlayerToast(
+                text = stringResource(R.string.player_switching_engine),
+                tone = PlayerToastTone.INFO,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 64.dp)
-                    .background(Color.Black.copy(alpha = 0.65f))
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(top = 64.dp),
             )
         }
 
@@ -580,36 +577,29 @@ fun PlayerRoute(
                 val audioUnsupported = engineState.shouldWarnAboutAudioOutput()
                 // 播放期错误（Source error 等）：resolve 已成功但引擎报错，显式展示（Phase 1B-2.4）
                 state.error?.let { e ->
-                    Text(
-                        stringResource(
+                    PlayerToast(
+                        text = stringResource(
                             R.string.player_playback_failed,
                             e.message ?: stringResource(R.string.player_unknown_error),
                         ),
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .background(Color.Black.copy(alpha = 0.65f))
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        tone = PlayerToastTone.ERROR,
+                        modifier = Modifier.align(Alignment.Center),
                     )
                 }
 
                 if (audioUnsupported) {
                     val codec = engineState.audioTracks.firstNotNullOfOrNull { prettyCodecName(it.codec) }
-                    Text(
-                        if (codec != null) {
+                    PlayerToast(
+                        text = if (codec != null) {
                             stringResource(R.string.player_audio_unsupported_codec, codec)
                         } else {
                             stringResource(R.string.player_audio_unsupported)
                         },
-                        color = Color.Yellow,
-                        style = MaterialTheme.typography.bodySmall,
+                        tone = PlayerToastTone.WARNING,
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .padding(top = 64.dp)
-                            .padding(horizontal = 24.dp)
-                            .background(Color.Black.copy(alpha = 0.55f))
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                            .padding(horizontal = 24.dp),
                     )
                 }
             }
