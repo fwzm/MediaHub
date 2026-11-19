@@ -1749,3 +1749,48 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 ### exact-head CI 验收
 
 - 代码 head 5780dc20e9cf87084e0f8ae5f5535f5d469e5cfc：windows-ci 44518473191（push）success / 44518540460（pull_request）success；同 head Android CI 44518540327 = in_progress（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+
+## 6.35 第三十层口径：失败日志行必须保持 xUnit 写入器外壳（W6-113av）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| 每个 RunInfo 的第一个直接 Text 必须完整匹配 canonical xUnit 行 | ResultSummary/RunInfos/RunInfo | RED |
+| 时间必须是 `[xUnit.net hh:mm:ss.ff]`（两位小时、00–59 分/秒、两位小数） | 同上 | RED |
+| 时间后恰好 5 个 ASCII 空格；测试名首尾非空白 | 同上 | RED |
+| 测试名后恰好 1 个 ASCII 空格 + `[FAIL]`；整行锚定 | 同上 | RED |
+| 台阶行记录 runInfoTextCanonical=<canonical>/<RunInfos> | ladder | 仅记录 |
+
+### 为什么前二十九层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 29 层 | 用 `[0-9:.]+` 与 `\s+` 剥壳后比较测试名 | 裸名、4/6 空格、tab、1 位小数、秒 60、`[FAIL]` 前双空格、尾随换行 |
+| 全层 | — | 整行是否就是 xUnit 写入器产生的那一行 |
+
+### 依据（EXECUTED）
+
+- 真实绿色语料 D:/mh-w6-r41/windows/artifacts/gate-corpus：新闸门 exit 0，两套件 runInfoTextCanonical=0/0，combined tests=2077，只有基线增长 warning。
+- 真实失败语料 D:/mh-verify/r41-art/test-results/windows-tests.trx：6 个 RunInfo，最终正则 runInfos=6 canonical=6。
+- 十例矩阵：clean-green 与 fail-with-runinfo 均 OLD=0 NEW=0；8 个变异例均 OLD=0 NEW=1，且每例恰好 1 条 broken。
+
+### 数据源与规模
+
+- check-test-suite-baseline.ps1 136,513 → 138,932 B，2,351 → 2,383 行（+2,419 B，+32/-0 行），0 非 ASCII，sha256 eaf8151e5469621ff56cffed262d14c80be2f59116fedc516a328f7f58f4177a。
+- 台阶行：runInfoTextExact=... 之后追加 runInfoTextCanonical=<n>/<n>。
+
+### 负向对照
+
+- 十例矩阵全按预期；实现态 sha256 在对照前后一致；旧层在 8 个变异上保持 PASS，证明新层不是旧层的重复。
+- 初版正则 ` {5}.+?` 会把 6 空格中的第 6 个空格吞进测试名，仍 MATCH；改用 ` {5}\S(?:.*\S)?` 后才拒绝 6 空格与 `[FAIL]` 前双空格。
+
+### 残留限制
+
+- 只认证 xUnit 2.9.3 的已知 writer 外壳；其他 writer 的格式仍未覆盖。
+- 不比较 ErrorInfo Message/StackTrace 的内容。
+- 不改变基线 JSON 与 updater。
+
+### exact-head CI 验收
+
+- 代码 head 27ec4f5f7f8995899a5e4cc36998e2490abfdd0a：windows-ci 44530232205（push）success / 44530355825（pull_request）success；同 head Android CI 44530355822 = in_progress。

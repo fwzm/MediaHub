@@ -1079,3 +1079,51 @@
 ### 边界
 
 - 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。
+
+## Round 49（W6-113av，2026-11-19）：失败日志行必须保持 xUnit 写入器外壳
+
+### 切片动机
+
+- 第 29 层用 `^\[xUnit\.net [0-9:.]+\]\s+(?<name>.+?)\s+\[FAIL\]$` 剥掉“像外壳”的行，只比较剥壳后的测试名；裸名、4/6 个空格、tab、1 位小数、秒数 60、`[FAIL]` 前两个空格、尾随换行都能通过。
+- 条目数量、timestamp、machine、outcome 与失败行名全不变，前二十九层仍 PASS；第 30 层把“名字对”收紧为“整行就是 writer 的那一行”。
+- 真实失败语料 D:/mh-verify/r41-art/test-results/windows-tests.trx 的 6 个 RunInfo 全部是 `[xUnit.net 00:00:00.66]     <testName> [FAIL]`；最终 canonical 正则 6/6 MATCH=True，裸名、tab 间隔、1 位小数、尾随换行均 False。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化）
+
+- 新增 canonical 外壳检查：每个 RunInfo 的第一个直接 Text 必须完整匹配 `\A\[xUnit\.net [0-9]{2}:[0-5][0-9]:[0-5][0-9]\.[0-9]{2}\] {5}\S(?:.*\S)? \[FAIL\]\z`。
+- 判据：`[xUnit.net hh:mm:ss.ff]`（两位小时、00–59 分/秒、两位小数）、恰好 5 个 ASCII 空格、测试名首尾非空白、恰好 1 个 ASCII 空格 + `[FAIL]`、整行锚定（拒绝前导/尾随文本或换行）。
+- 台阶行在 `runInfoTextExact` 后新增 `runInfoTextCanonical=<canonical>/<RunInfos>`；broken 明细为 `a RunInfo Text is not the canonical xUnit line`，细节上限 12；throw 前缀 `the RunInfo text envelope ...`。
+- 头注释两处与 SEMANTICS 各补一条。
+
+### 负向对照（EXECUTED）
+
+- old=D:/mh-verify/r50/gate-prev.ps1（第 29 层，2,351 行，sha256 803d2f9c431a0b1b9dee768f84975b41c5a21fc1be251b23fddf00e3cad29493），new=本层。
+- clean-green OLD=0 NEW=0（runInfoTextCanonical=0/0）；fail-with-runinfo OLD=0 NEW=0（canonical 外壳，runInfoTextCanonical=1/1）。
+- 8 个变异例 OLD=0 NEW=1：runinfo-bare-name、runinfo-clock-precision（`00:00:00.6`）、runinfo-clock-range（`00:00:60.00`）、runinfo-tab-gap、runinfo-four-spaces、runinfo-six-spaces、runinfo-two-spaces-before-fail、runinfo-trailing-newline。
+- `oldAllZero=true`；每例完整日志仅 1 条 broken；`eachRedExactlyOneEnvelopeRow=true`；矩阵完成后实现态 sha256 未变。
+
+### 真实语料
+
+- gate-corpus（1973 windows + 104 webdav，英文 UI）：新闸门 exit 0；两套件 `runInfoTextCanonical=0/0`、`runInfoTextExact=0/0`、`runInfoTexts=0/0`；`combined tests=2077`；仅基线增长 warning（1973 > 1959），baseline JSON 未改。
+- 真实失败语料 D:/mh-verify/r41-art/test-results/windows-tests.trx：6 个 RunInfo，最终正则 `runInfos=6 canonical=6`。
+
+### 数据源与规模
+
+- windows/tools/check-test-suite-baseline.ps1 136,513 B / 2,351 行 → 138,932 B / 2,383 行（+2,419 B，+32/−0 行），0 个非 ASCII；sha256 eaf8151e5469621ff56cffed262d14c80be2f59116fedc516a328f7f58f4177a。
+- 双 shell 语法：pwsh 7.6.10 与 Windows PowerShell 5.1.26100.10003 均 errors=0。
+- git diff --stat：1 file changed / +32 insertions / 0 deletions；git diff --check 干净。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+
+- 提交 27ec4f5f7f8995899a5e4cc36998e2490abfdd0a（ci(windows): a failure log line must keep the xUnit envelope (W6-113av)），1 file changed / +32/-0，非 force push 到 feature/windows-w6-113av-xunit-envelope。
+- exact-head windows-ci：44530232205（push）success；44530355825（pull_request）success。
+- 同 head Android CI：44530355822（pull_request）in_progress。
+- Draft PR #151（base main，stacked 在 #147 第 29 层之上）；G7 恒 DO_NOT_MERGE。
+
+### 锁
+
+- run-id w6-113-round10-20261119，owner lead，8 把资源锁（3 remote-ref + 5 worktree），本轮结束 release-plan 释放。
+
+### 边界
+
+- 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。
