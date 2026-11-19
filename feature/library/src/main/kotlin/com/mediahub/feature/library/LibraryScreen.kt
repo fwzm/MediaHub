@@ -56,12 +56,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mediahub.core.ui.AdaptiveLayoutPolicy
 import com.mediahub.core.ui.MediaHubAccentLine
 import com.mediahub.core.ui.MediaHubCard
 import com.mediahub.core.ui.MediaHubStatus
@@ -247,6 +249,7 @@ fun LibraryContent(
             }
 
             is LibraryUiState.Content -> {
+                val columnCount = AdaptiveLayoutPolicy.libraryColumnCount(LocalConfiguration.current.screenWidthDp)
                 if (s.items.isEmpty() && !s.isLoadingMore) {
                     Box(
                         modifier = Modifier.fillMaxSize().padding(padding),
@@ -274,14 +277,14 @@ fun LibraryContent(
 
                     LazyVerticalGrid(
                         state = gridState,
-                        columns = GridCells.Fixed(3),
+                        columns = GridCells.Fixed(columnCount),
                         modifier = Modifier.fillMaxSize().padding(padding),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         if (s.canGoUp) {
-                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
+                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                                 TextButton(onClick = onGoToParent, modifier = Modifier.fillMaxWidth()) {
                                     Text("⬆ 返回上级")
                                 }
@@ -293,7 +296,7 @@ fun LibraryContent(
                                 key = { it.id },
                                 span = { item ->
                                     if (item.type == MediaType.FOLDER) {
-                                        androidx.compose.foundation.lazy.grid.GridItemSpan(3)
+                                        androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan)
                                     } else {
                                         androidx.compose.foundation.lazy.grid.GridItemSpan(1)
                                     }
@@ -309,7 +312,7 @@ fun LibraryContent(
                             val folders = s.items.filter { it.type == MediaType.FOLDER }
                             val mediaItems = s.items.filter { it.type != MediaType.FOLDER }
                             folders.forEach { folder ->
-                                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
+                                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                                     FolderRow(item = folder, onClick = { onOpenFolder(folder) })
                                 }
                             }
@@ -318,14 +321,14 @@ fun LibraryContent(
                             }
                         }
                         if (s.isLoadingMore) {
-                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
+                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                                 Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                                     CircularProgressIndicator(strokeWidth = 2.dp)
                                 }
                             }
                         }
                         if (s.loadMoreError != null) {
-                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
+                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                                 MediaHubStatus(
                                     title = "更多内容载入失败",
                                     message = s.loadMoreError,
