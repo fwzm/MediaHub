@@ -1,17 +1,11 @@
 package com.mediahub.feature.player
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -284,7 +278,6 @@ fun buildPlayerInfoSections(
 }
 
 /** 播放信息 Bottom Sheet：顶部快速专业/精简切换（只改密度），下方三段信息。 */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerInfoPanelSheet(
     inputs: PlayerInfoPanelInputs,
@@ -293,19 +286,7 @@ fun PlayerInfoPanelSheet(
 ) {
     val labels = rememberPlayerInfoLabels()
     val sections = buildPlayerInfoSections(inputs, labels)
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.onSurfaceVariant) },
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp),
-        ) {
+    PlayerSheetScaffold(onDismiss = onDismiss) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -354,5 +335,4 @@ fun PlayerInfoPanelSheet(
                 }
             }
         }
-    }
 }
