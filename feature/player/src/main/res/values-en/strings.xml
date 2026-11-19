@@ -2,6 +2,9 @@
 <resources>
     <string name="player_visual_effects_entry">Visual effects</string>
     <string name="player_visual_effects_entry_description">Open visual effects settings</string>
+    <string name="player_info_entry_description">Open playback info</string>
+    <string name="player_audio_tracks_description">Open audio track selection</string>
+    <string name="player_subtitles_description">Open subtitle selection</string>
     <string name="player_switching_engine">Switching to compatible playback…</string>
     <string name="player_retry">Retry</string>
     <string name="player_back">Back</string>

@@ -804,7 +804,6 @@ private fun applySubtitleStyle(subtitleView: androidx.media3.ui.SubtitleView?, p
 
 private const val BASE_SUBTITLE_FRACTION = 0.0533f
 
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun PlayerControls(
     modifier: Modifier = Modifier,
@@ -868,23 +867,14 @@ private fun PlayerControls(
                     modifier = Modifier.weight(1f),
                 )
             }
-            // Keep the title readable on narrow/portrait screens; actions may wrap instead
-            // of consuming all of the title's weighted row width.
-            androidx.compose.foundation.layout.FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
-            ) {
-                PlayerVisualEffectsEntry(onClick = onShowVisualEffects)
-                TextButton(onClick = onShowInfo) {
-                    Text(stringResource(R.string.player_info_entry), color = MaterialTheme.colorScheme.primary)
-                }
-                TextButton(onClick = onShowAudio) {
-                    Text(stringResource(R.string.player_audio_tracks), color = MaterialTheme.colorScheme.primary)
-                }
-                TextButton(onClick = onShowSubtitle) {
-                    Text(stringResource(R.string.player_subtitles), color = MaterialTheme.colorScheme.primary)
-                }
-            }
+            // Keep the title readable on narrow/portrait screens; the four actions are
+            // icon-only buttons so they do not consume the title's weighted row width.
+            PlayerTopChromeActions(
+                onShowVisualEffects = onShowVisualEffects,
+                onShowInfo = onShowInfo,
+                onShowAudio = onShowAudio,
+                onShowSubtitle = onShowSubtitle,
+            )
             if (serverDisplayName != null) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

@@ -2,6 +2,9 @@
 <resources>
     <string name="player_visual_effects_entry">视觉效果</string>
     <string name="player_visual_effects_entry_description">打开视觉效果设置</string>
+    <string name="player_info_entry_description">打开播放信息</string>
+    <string name="player_audio_tracks_description">打开音轨选择</string>
+    <string name="player_subtitles_description">打开字幕选择</string>
     <string name="player_switching_engine">正在切换兼容播放模式…</string>
     <string name="player_retry">重试</string>
     <string name="player_back">返回</string>
