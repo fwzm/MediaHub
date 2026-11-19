@@ -270,6 +270,10 @@
 #     writer's own [xUnit.net ...] prefix and [FAIL] suffix are removed -> red:
 #     the list check above only proves the name appears somewhere in the line,
 #     so extra text around it leaves the item count and every other field intact.
+#   a RunInfo Text whose envelope is not the canonical xUnit writer line -> red:
+#     the exact-name check strips whatever looks like an envelope, so a bare
+#     name, another clock precision, a tab or a wider gap still names the row
+#     while the failure log is no longer the writer's own line.
 #   a failure log split across more than one ResultSummary/RunInfos block, an
 #     empty RunInfos block beside the one that carries the items, or a RunInfos
 #     block outside ResultSummary -> red: the block is one container, and its
@@ -352,6 +356,10 @@
 #     removed, is not exactly one Failed/Error row name -> red (the list check
 #     only proves containment, so a prefixed or suffixed line passed while the
 #     item no longer names one test).
+#   a RunInfo Text whose envelope is not the canonical xUnit writer line -> red
+#     (a bare name, another timestamp precision, a tab or a wider gap, or
+#     trailing text leaves the item list and the exact name intact when only
+#     the name is compared).
 
 #   the row at position N of Results does not name the test that position N of
 #     TestEntries declares -> red. The two sections are emitted from one ordered
@@ -1725,6 +1733,29 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): the RunInfo text identity in $($e.file) does not name exactly one Failed/Error row while the total was $total - the item list above only asks whether a line contains a failed test name, so extra text before or after the name keeps every item, timestamp, machine and outcome identical while the failure log stops being one test per line. broken: $($runInfoExactProblems -join ', '). A TRX whose failure log line carries more than the test name was hand-merged or patched; regenerate it from a clean test run."
   }
 
+  # The exact-name check above strips any line that resembles the envelope, so a
+  # bare name, a hand-written clock or a different gap still names the right row.
+  # The xUnit writer emits one fixed line: [xUnit.net hh:mm:ss.ff], five spaces,
+  # the test name, one space, [FAIL]. The failure log is that writer's line, not
+  # a template that happens to contain a name.
+  $runInfoEnvelopeProblems = @()
+  $runInfoTextCanonical = 0
+  $xunitCanonicalPattern = '\A\[xUnit\.net [0-9]{2}:[0-5][0-9]:[0-5][0-9]\.[0-9]{2}\] {5}\S(?:.*\S)? \[FAIL\]\z'
+  foreach ($runInfo in @($runInfoNodes)) {
+    $runInfoRawText = ''
+    foreach ($runInfoChild in @($runInfo.ChildNodes)) {
+      if ([string]$runInfoChild.LocalName -eq 'Text') { $runInfoRawText = [string]$runInfoChild.InnerText; break }
+    }
+    if ([regex]::IsMatch($runInfoRawText, $xunitCanonicalPattern)) {
+      $runInfoTextCanonical++
+    } elseif ($runInfoEnvelopeProblems.Count -lt 12) {
+      $runInfoEnvelopeProblems += "a RunInfo Text is not the canonical xUnit line: '$runInfoRawText'"
+    }
+  }
+  if ($runInfoEnvelopeProblems.Count -gt 0) {
+    throw "$($e.suite): the RunInfo text envelope in $($e.file) is not the line the xUnit writer emits while the total was $total - the identity check above strips any line that resembles the envelope, so a bare name, a hand-written timestamp, a tab or a wider gap, or trailing text still names the right test while the failure log stops being the writer's own line. expected '[xUnit.net hh:mm:ss.ff]     <test name> [FAIL]' with five spaces after the bracket and one before [FAIL]. broken: $($runInfoEnvelopeProblems -join ', '). A TRX whose failure log line is not the writer's canonical envelope was hand-merged or patched; regenerate it from a clean test run."
+  }
+
   # ResultSummary/RunInfos is one container, not a bag of items. The layer above
   # counts the items wherever they sit, so two wrappers around one item, an empty
   # second wrapper, or a wrapper parked under Deployment all keep the item list
@@ -2033,6 +2064,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): runInfoBlocks=$runInfoLayoutCount strayRunInfoBlocks=$([int]$runInfoLayoutAnywhere - [int]$runInfoLayoutCount)"
   "$($e.suite): runInfoTexts=$runInfoTextSingular/$(@($runInfoNodes).Count)"
   "$($e.suite): runInfoTextExact=$runInfoTextExact/$failedRows"
+  "$($e.suite): runInfoTextCanonical=$runInfoTextCanonical/$(@($runInfoNodes).Count)"
   "$($e.suite): summaryOutput=$summaryOutputBlocks stdout=$summaryStdOutBlocks nonBlank=$summaryOutputNonBlank suiteNamed=$summaryOutputNamesSuite"
   "$($e.suite): phaseLedger=$summaryPhaseFound/4 ordered=$summaryPhaseOrdered"
   "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot nameStamp=$nameStampMatches bound rows=$boundRows header id collisions=$headerCollisions"
