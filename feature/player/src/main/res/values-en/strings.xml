@@ -11,6 +11,7 @@
     <string name="player_audio_unsupported">No audio output detected. This format may not be supported on this device. Try another audio track.</string>
     <string name="player_audio_unsupported_codec">No audio output detected (track: %1$s). This format may not be supported on this device. Try another audio track.</string>
     <string name="player_audio_tracks">Audio</string>
+    <string name="player_sources">Sources</string>
     <string name="player_subtitles">Subtitles</string>
     <string name="player_diagnostic_http">HTTP %1$d</string>
     <string name="player_diagnostic_first_byte">First byte %1$d ms</string>

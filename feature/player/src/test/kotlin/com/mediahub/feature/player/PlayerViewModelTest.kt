@@ -2,6 +2,7 @@ package com.mediahub.feature.player
 
 import androidx.lifecycle.SavedStateHandle
 import com.mediahub.core.common.NavArgCodec
+import com.mediahub.core.common.PlayerSourceHandoff
 import com.mediahub.core.database.prefs.UserPreferencesRepository
 import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
@@ -16,6 +17,7 @@ import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
 import com.mediahub.model.PlaybackEngineMode
+import com.mediahub.model.PlaybackSourceOption
 import com.mediahub.model.ServerType
 import com.mediahub.model.UserPreferences
 import com.mediahub.player.engine.InMemoryEnginePreferenceHistory
@@ -450,6 +452,62 @@ class PlayerViewModelTest {
             prefs.update { it.copy(subtitleSizeSp = 36) }; runCurrent()
             assertEquals(initial.subtitleStyle.copy(textColor = 0xFFFFFF00.toInt()) to 36, native.presentation)
         } finally { vm.stopAndFlush(); runCurrent() }
+    }
+
+    @Test fun playerReadsSourceOptionsFromDetailHandoff() = runTest(dispatcher) {
+        PlayerSourceHandoff.publish(
+            serverId = "srv-1",
+            itemId = "m1",
+            options = listOf(
+                PlaybackSourceOption(
+                    serverId = "srv-1", serverName = "Emby", itemId = "m1",
+                    title = "电影A", label = "Emby", type = MediaType.MOVIE,
+                ),
+                PlaybackSourceOption(
+                    serverId = "srv-2", serverName = "Jellyfin", itemId = "jf-1",
+                    title = "电影A", label = "Jellyfin", type = MediaType.MOVIE,
+                ),
+            ),
+        )
+        val vm = PlayerViewModel(savedState("m1"), FakeServerStore(embyServer()), FakeProgressStore(null),
+            FakeSubtitleMemoryStore(), FakeRegistry(detail = FakeDetail(mediaItemWithPoster("https://fixture.invalid/poster")),
+                playback = FakePlayback(PlaybackSource("https://fixture.invalid/video.mp4"))),
+            PlaybackEngineCreator { FakeEngine() }, PlaybackEngineCreator { FakeEngine() },
+            InMemoryEnginePreferenceHistory(), FakeUserPreferences(), NoArtworkPalette, noOpLogger)
+        try {
+            runCurrent()
+            assertEquals(listOf("Emby", "Jellyfin"), vm.sourceOptions.value.map { it.label })
+            assertEquals("srv-1", vm.currentServerId)
+            assertEquals("m1", vm.currentItemId)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+            PlayerSourceHandoff.clearFor("srv-1", "m1")
+        }
+    }
+
+    @Test fun playerStartsAtExplicitSwitchPosition() = runTest(dispatcher) {
+        val engine = FakeEngine()
+        val vm = PlayerViewModel(
+            SavedStateHandle(mapOf(
+                "serverId" to "srv-1",
+                "itemId" to NavArgCodec.encode("m1"),
+                "title" to "电影A",
+                "start" to "42000",
+            )),
+            FakeServerStore(embyServer()), FakeProgressStore(3_000L),
+            FakeSubtitleMemoryStore(), FakeRegistry(detail = FakeDetail(mediaItemWithPoster("https://fixture.invalid/poster")),
+                playback = FakePlayback(PlaybackSource("https://fixture.invalid/video.mp4"))),
+            PlaybackEngineCreator { engine }, PlaybackEngineCreator { FakeEngine() },
+            InMemoryEnginePreferenceHistory(), FakeUserPreferences(), NoArtworkPalette, noOpLogger,
+        )
+        try {
+            runCurrent()
+            assertEquals(42_000L, engine.playedSession?.resumePositionMs)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
     }
 
     // ---- fakes ----

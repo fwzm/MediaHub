@@ -88,6 +88,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
 import com.mediahub.model.AudioTrack
+import com.mediahub.model.PlaybackSourceOption
 import com.mediahub.model.PlayerVisualPreset
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.UserPreferences
@@ -130,6 +131,7 @@ private val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 @Composable
 fun PlayerRoute(
     onBack: () -> Unit,
+    onSwitchSource: (PlaybackSourceOption, Long) -> Unit = { _, _ -> },
     viewModel: PlayerViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -147,6 +149,7 @@ fun PlayerRoute(
     val engineKind by viewModel.engineKind.collectAsStateWithLifecycle()
     val subtitleCenter by viewModel.subtitleCenter.collectAsStateWithLifecycle()
     val playbackSource by viewModel.playbackSource.collectAsStateWithLifecycle()
+    val sourceOptions by viewModel.sourceOptions.collectAsStateWithLifecycle()
     val audioSpectrumBridge = rememberAudioSpectrumBridge(viewModel.engine.audioBands)
 
     // 兜底（系统返回手势/组合销毁）：异步 final flush；正常返回按钮走同步 stopAndFlush（ADR-023）。
@@ -237,6 +240,7 @@ fun PlayerRoute(
 
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
+    var showSourceDialog by remember { mutableStateOf(false) }
     var showVisualEffectsSettings by remember { mutableStateOf(false) }
     var showInfoPanel by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -571,6 +575,8 @@ fun PlayerRoute(
                         onShowInfo = { showInfoPanel = true },
                         onShowAudio = { showAudioDialog = true },
                         onShowSubtitle = { showSubtitleDialog = true },
+                        showSources = shouldShowPlayerSourceSelector(sourceOptions),
+                        onShowSources = { showSourceDialog = true },
                     )
                 }
 
@@ -741,6 +747,16 @@ fun PlayerRoute(
             )
         }
     }
+    if (showSourceDialog) {
+        PlayerSourceSheet(
+            choices = playerSourceChoices(sourceOptions, viewModel.currentServerId, viewModel.currentItemId),
+            onDismiss = { showSourceDialog = false },
+            onSelect = { option ->
+                showSourceDialog = false
+                onSwitchSource(option, state.positionMs)
+            },
+        )
+    }
     if (showSubtitleDialog) {
         val selectionSnapshot = engineState
         val selectionKind = engineKind
@@ -828,6 +844,8 @@ private fun PlayerControls(
     onShowInfo: () -> Unit,
     onShowAudio: () -> Unit,
     onShowSubtitle: () -> Unit,
+    showSources: Boolean = false,
+    onShowSources: () -> Unit = {},
 ) {
     val seekBarColors = SliderDefaults.colors(
         thumbColor = MaterialTheme.colorScheme.primary,
@@ -883,6 +901,11 @@ private fun PlayerControls(
                 }
                 TextButton(onClick = onShowSubtitle) {
                     Text(stringResource(R.string.player_subtitles), color = MaterialTheme.colorScheme.primary)
+                }
+                if (showSources) {
+                    TextButton(onClick = onShowSources) {
+                        Text(stringResource(R.string.player_sources), color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
             if (serverDisplayName != null) {

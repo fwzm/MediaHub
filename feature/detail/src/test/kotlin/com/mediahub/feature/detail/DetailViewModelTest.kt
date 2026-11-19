@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
+import com.mediahub.core.common.PlayerSourceHandoff
 import com.mediahub.feature.detail.source.CanonicalSourceResolver
 import com.mediahub.model.ExternalIds
 import com.mediahub.model.MediaDetail
@@ -198,6 +199,22 @@ class DetailViewModelTest {
             "identityLookup 存在时必须进入 Resolved（实际：${vm.sourceState.value}）",
             vm.sourceState.value is SourceResolutionState.Resolved,
         )
+    }
+
+    @Test
+    fun `resolved sources are published to the player handoff`() = runTest(testDispatcher) {
+        val item = makeItem("m1", MediaType.MOVIE).copy(externalIds = ExternalIds(tmdb = "550"))
+        val vm = createViewModel(MediaDetail(item = item), identityLookup = FakeIdentityLookup())
+        try {
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            assertTrue(vm.sourceState.value is SourceResolutionState.Resolved)
+            val snapshot = PlayerSourceHandoff.snapshotFor("srv", "m1")
+            assertNotNull("详情页解析完成后应把可播线路交给播放页", snapshot)
+            assertEquals(listOf("m1"), snapshot!!.options.map { it.itemId })
+        } finally {
+            PlayerSourceHandoff.clearFor("srv", "m1")
+        }
     }
 
     @Test
