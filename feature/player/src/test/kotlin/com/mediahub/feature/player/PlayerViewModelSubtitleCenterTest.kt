@@ -54,6 +54,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -811,6 +812,9 @@ class PlayerViewModelSubtitleCenterTest {
         }
         val vm = buildVm(RecordingEngine(), null, MemoryStore(), playback = playback)
         try {
+            runCurrent()
+            // 原始 IOException 属瞬时网络错误：策略会等待一次重试窗口后再失败。
+            advanceTimeBy(PlaybackResolveRetryPolicy.RETRY_DELAY_MS)
             runCurrent()
             assertEquals(ResolveState.Failed("播放失败，请重试"), vm.resolveState.value)
         } finally { vm.stopAndFlush(); runCurrent() }
