@@ -4,6 +4,7 @@
 type:state
 - Round 15/256；task_id=adaptive-layout-20261120；branch=feature/adaptive-layout-20261120；基于 origin/main=77ef1f2fc33b819a59e07a8bfafb40cb89d5cef7。
 - 代码提交：e437bf4d639d2ab8b396fa1af6a3b414191a706c（4 files +76/−7：AdaptiveLayoutPolicy.kt、AdaptiveLayoutPolicyTest.kt、LibraryScreen.kt、HomeScreen.kt）。
+- Draft PR #165：https://github.com/fwzm/MediaHub/pull/165（base=main）。
 - 实现：core:ui AdaptiveLayoutPolicy 提供媒体库列数（2/3/4/5/6）与继续观看卡片宽度（232/276/320/360dp）；LibraryScreen 用 LocalConfiguration.screenWidthDp 选择 GridCells.Fixed，并把所有整行 span 从固定 3 改为 maxLineSpan；HomeScreen 用同一断点策略替换固定 276dp。
 - 验证：RED core:ui 3 tests / 3 failed；聚焦 GREEN 6m42s / 92 tasks / exit0（core:ui 10 suites/60 tests）；NC 4/4 PASS_ONE_RED；全量 GREEN 17m33s / 549 tasks / exit0；80 suites / 795 tests / 0 skipped / 0 failures / 0 errors；APK size=130579351 sha256=20da6b34216f43537ce5a7274d3d205079d83a4013b1375a8ce8c1d060c52088（未安装）。
 - 真机：NOT_RUN（未触碰设备 123e243f；Room 6↔5 阻塞，禁清库）。
@@ -21,5 +22,5 @@ type:dead-end
 ## 进度与下一步
 type:progress
 - 当前为 #26 的 PARTIAL 闭环：Library 网格与 Home 卡片已完成；Detail 页面由 #163 覆盖，需在 #163 合并后复核 #26 全页闭合。
-- 下一步：用 40 位完整 SHA 查 PR #163 与本 PR 的 exact-head Android CI；结果未出前保持 CI_PENDING，不得当 PASS。
+- 下一步：用 40 位完整 SHA 查 PR #165 exact-head Android CI（首个 run 44591378930 创建于 2026-11-19T18:46:41Z，status=in_progress）；结果未出前保持 CI_PENDING，不得当 PASS。
 - 下一审计候选：审计行 #5 媒体库横竖海报自适应，或 #43 编辑媒体库不立即生效；先查 queue 第一条 READY。
