@@ -139,11 +139,11 @@ class MpvAudioTrackSelectionTest {
             engine.play(session())
             instance.observer!!.event(MpvInstance.Event.FILE_LOADED)
             instance.aidWrites.clear(); instance.sidWrites.clear()
-            engine.selectAudioTrack(TrackSelection(0, 0, snapshotToken = 777L))
-            engine.selectSubtitleTrack(TrackSelection(0, 0, snapshotToken = 777L))
+            assertFalse(engine.selectAudioTrack(TrackSelection(0, 0, snapshotToken = 777L)))
+            assertFalse(engine.selectSubtitleTrack(TrackSelection(0, 0, snapshotToken = 777L)))
             assertTrue(instance.aidWrites.isEmpty()); assertTrue(instance.sidWrites.isEmpty())
-            engine.selectAudioTrack(TrackSelection(0, 0))
-            engine.selectSubtitleTrack(TrackSelection(0, 0))
+            assertTrue(engine.selectAudioTrack(TrackSelection(0, 0)))
+            assertTrue(engine.selectSubtitleTrack(TrackSelection(0, 0)))
             assertEquals(listOf("7"), instance.aidWrites)
             assertEquals(listOf("5"), instance.sidWrites)
         } finally { engine.release(); scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
@@ -312,7 +312,7 @@ class MpvAudioTrackSelectionTest {
             withTimeout(2_000) { while (engine.uiState.value.audioTracks.size < 2) delay(10) }
 
             // UI index 1 → 必须是 mpv 的 track id "2"（不是 stream index、不是列表位置）
-            engine.selectAudioTrack(TrackSelection(1, 0))
+            assertTrue("成功下发 aid 时必须返回 true", engine.selectAudioTrack(TrackSelection(1, 0)))
             assertEquals("必须下发 set aid 2", listOf("2"), instance.aidWrites)
             withTimeout(2_000) {
                 while (engine.uiState.value.audioTracks.getOrNull(1)?.isSelected != true) delay(10)

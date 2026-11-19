@@ -350,14 +350,13 @@ class PlaybackEngine(
         _uiState.update { it.copy(volume = player.volume) }
     }
 
-    override fun selectAudioTrack(selection: TrackSelection?) {
+    override fun selectAudioTrack(selection: TrackSelection?): Boolean =
         selectTrack(C.TRACK_TYPE_AUDIO, selection)
-    }
 
-    override fun selectSubtitleTrack(selection: TrackSelection?) {
-        if (!isTrackSelectionCurrent(selection)) return
+    override fun selectSubtitleTrack(selection: TrackSelection?): Boolean {
+        if (!isTrackSelectionCurrent(selection)) return false
         subtitleOperation++
-        selectTrack(C.TRACK_TYPE_TEXT, selection)
+        return selectTrack(C.TRACK_TYPE_TEXT, selection)
     }
 
     private var currentTrackSnapshotToken = 0L
@@ -528,8 +527,8 @@ class PlaybackEngine(
         audioSpectrumController.bind(player.audioSessionId)
     }
 
-    private fun selectTrack(trackType: Int, selection: TrackSelection?) {
-        if (!isTrackSelectionCurrent(selection)) return
+    private fun selectTrack(trackType: Int, selection: TrackSelection?): Boolean {
+        if (!isTrackSelectionCurrent(selection)) return false
         val mapped = trackSelector.currentMappedTrackInfo
         val builder = trackSelector.buildUponParameters().clearOverridesOfType(trackType)
             .setTrackTypeDisabled(trackType, selection == null)
@@ -537,12 +536,13 @@ class PlaybackEngine(
             if (selection == null) {
                 if (trackType == C.TRACK_TYPE_TEXT) lastSelectedSubtitle = null
                 trackSelector.setParameters(builder)
+                return true
             }
-            return
+            return false
         }
         // Media3 renderer indices depend on the installed renderer order; C.TRACK_TYPE_* are types.
         val rendererIndices = (0 until mapped.rendererCount).filter { mapped.getRendererType(it) == trackType }
-        if (rendererIndices.isEmpty()) return
+        if (rendererIndices.isEmpty()) return false
         if (selection == null) {
             rendererIndices.forEach { renderer ->
                 builder.clearSelectionOverrides(renderer)
@@ -559,11 +559,11 @@ class PlaybackEngine(
                 if (ordinal in 0 until groups.length) { renderer = index; groupIndex = ordinal; break }
                 ordinal -= groups.length
             }
-            if (renderer < 0) return
+            if (renderer < 0) return false
             val groups = mapped.getTrackGroups(renderer)
             val plan = TrackSelectionPlanner.plan(renderer, groups,
                 selection.copy(groupIndex = groupIndex), currentTrackSnapshotToken)
-                as? TrackSelectionPlanner.Plan.Override ?: return
+                as? TrackSelectionPlanner.Plan.Override ?: return false
             rendererIndices.forEach { index ->
                 builder.clearSelectionOverrides(index)
                 builder.setRendererDisabled(index, index != renderer)
@@ -573,6 +573,7 @@ class PlaybackEngine(
             if (trackType == C.TRACK_TYPE_TEXT) lastSelectedSubtitle = selection
         }
         trackSelector.setParameters(builder)
+        return true
     }
 
     // ---- 进度 ----

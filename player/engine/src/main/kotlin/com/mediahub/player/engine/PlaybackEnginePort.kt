@@ -65,8 +65,15 @@ interface PlaybackEnginePort {
     /** Snapshot-bound requests must remain owned by the current engine; raw legacy addresses remain compatible. */
     fun isTrackSelectionCurrent(selection: TrackSelection?): Boolean =
         selection?.snapshotToken?.let { uiState.value.trackRowMap.matches(it) } ?: true
-    fun selectAudioTrack(selection: TrackSelection?)
-    fun selectSubtitleTrack(selection: TrackSelection?)
+    /**
+     * 提交一次轨道选择；返回 true 表示已在当前轨道快照内被本引擎接受。
+     *
+     * false 的语义是**未生效**：快照已过期、地址无法映射、渲染器/原生播放器拒绝。
+     * 调用方必须如实提示，不得把 false 当成成功（#80：失败不再静默）。
+     */
+    fun selectAudioTrack(selection: TrackSelection?): Boolean
+    /** 同 [selectAudioTrack]；null 表示关闭字幕，仍可能因引擎未就绪而返回 false。 */
+    fun selectSubtitleTrack(selection: TrackSelection?): Boolean
     /** Native subtitle renderers consume persisted presentation; Media3 uses its SubtitleView. */
     fun setSubtitlePresentation(style: SubtitleStyle, sizeSp: Int) = Unit
     /**

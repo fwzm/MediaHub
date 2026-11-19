@@ -566,8 +566,8 @@ class PlayerAutoplayTest {
         override fun togglePlayPause() = Unit
         override fun seekTo(positionMs: Long, mode: com.mediahub.player.engine.SeekMode) = Unit
         override fun setSpeed(speed: Float) = Unit
-        override fun selectAudioTrack(selection: TrackSelection?) = Unit
-        override fun selectSubtitleTrack(selection: TrackSelection?) = Unit
+        override fun selectAudioTrack(selection: TrackSelection?) = true
+        override fun selectSubtitleTrack(selection: TrackSelection?) = true
         fun emitProgress(value: PlaybackProgress) { progressFlow.tryEmit(value) }
         fun emitEvent(event: PlaybackEventMessage) { eventsFlow.tryEmit(event) }
         override fun stop(): PlaybackProgress? = finalProgress

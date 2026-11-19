@@ -14,6 +14,7 @@ import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.ui.effects.VisualPalette
+import com.mediahub.model.AudioTrack
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
 import com.mediahub.model.MediaTypeGuesser
@@ -23,6 +24,7 @@ import com.mediahub.model.PlayerVisualEffectsPreferences
 import com.mediahub.model.ProfessionalInfoPreferences
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.SubtitleFormats
+import com.mediahub.model.SubtitleTrack
 import com.mediahub.model.UpNextResolver
 import com.mediahub.player.engine.EnginePreferenceHistory
 import com.mediahub.player.engine.ExternalSubtitle
@@ -49,6 +51,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -68,6 +71,15 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.coroutines.coroutineContext
+
+/** 轨道选择未生效的原因（#80：UI 必须给出可见反馈）。 */
+enum class TrackSelectionIssue {
+    /** 轨道快照已变化或地址无法映射——按旧列表重选不会命中任何轨道。 */
+    STALE,
+
+    /** 地址有效但引擎未接受（渲染器/原生播放器拒绝或尚未就绪）。 */
+    REJECTED,
+}
 
 /** 播放源解析状态。 */
 sealed interface ResolveState {
@@ -199,6 +211,11 @@ class PlayerViewModel @Inject constructor(
 
     /** 当前内核（UI 徽标/诊断）。 */
     val engineKind: StateFlow<com.mediahub.player.engine.EngineKind> get() = switchableEngine.engineKind
+
+    private val _trackSelectionIssue = MutableSharedFlow<TrackSelectionIssue>(extraBufferCapacity = 1)
+
+    /** 轨道选择未生效的一次性事件（UI 用 Snackbar 提示，不静默吞掉）。 */
+    val trackSelectionIssue: SharedFlow<TrackSelectionIssue> = _trackSelectionIssue
 
 
     /**
@@ -375,14 +392,57 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    /** 音轨手动选择：失败必须可见（#80），不再无反应。 */
+    fun onAudioTrackSelected(track: AudioTrack) {
+        if (stopped) return
+        val selection = PlayerTrackSelection.addressOf(engine.uiState.value, track, engineKind.value)
+        if (selection == null) {
+            reportTrackSelectionIssue(TrackSelectionIssue.STALE)
+            return
+        }
+        if (!engine.isTrackSelectionCurrent(selection)) {
+            reportTrackSelectionIssue(TrackSelectionIssue.STALE)
+            return
+        }
+        if (!engine.selectAudioTrack(selection)) {
+            reportTrackSelectionIssue(TrackSelectionIssue.REJECTED)
+        }
+    }
+
+    /** 字幕轨手动选择：快照过期/引擎拒绝都报告，成功才写记忆。 */
+    fun onSubtitleTrackSelected(track: SubtitleTrack) {
+        if (stopped) return
+        val selection = PlayerTrackSelection.addressOf(engine.uiState.value, track, engineKind.value)
+        if (selection == null) {
+            reportTrackSelectionIssue(TrackSelectionIssue.STALE)
+            return
+        }
+        commitEmbeddedSubtitleSelection(selection)
+    }
+
     /** 内嵌字幕轨手动选择：标记本会话手动优先，迟到的发现/记忆不再覆盖。 */
     fun onEmbeddedSubtitleSelected(selection: TrackSelection?) {
         if (stopped) return
-        if (!engine.isTrackSelectionCurrent(selection)) return
+        commitEmbeddedSubtitleSelection(selection)
+    }
+
+    private fun commitEmbeddedSubtitleSelection(selection: TrackSelection?) {
+        if (!engine.isTrackSelectionCurrent(selection)) {
+            reportTrackSelectionIssue(TrackSelectionIssue.STALE)
+            return
+        }
+        if (!engine.selectSubtitleTrack(selection)) {
+            reportTrackSelectionIssue(TrackSelectionIssue.REJECTED)
+            return
+        }
         beginManualSubtitleOperation()
-        engine.selectSubtitleTrack(selection)
         _subtitleCenter.update { it.copy(selectedExternalId = null) }
         persistMemory(subtitleId = null)
+    }
+
+    private fun reportTrackSelectionIssue(issue: TrackSelectionIssue) {
+        logger.w(LogTag.PLAYER, "轨道选择未生效：$issue", null)
+        _trackSelectionIssue.tryEmit(issue)
     }
 
     /**

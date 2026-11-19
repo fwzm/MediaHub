@@ -100,8 +100,8 @@ class PlaybackEngineTrackSelectionTest {
             val audio = state.audioTracks.single { it.title == "aac-high" }
             val address = state.trackRowMap.audioFor(audio.index)!!
             assertEquals(1, address.groupIndex); assertEquals(1, address.trackIndex)
-            f.engine.selectSubtitleTrack(subtitle)
-            f.engine.selectAudioTrack(address)
+            assertTrue(f.engine.selectSubtitleTrack(subtitle))
+            assertTrue(f.engine.selectAudioTrack(address))
             val params = f.selector.parameters
             assertEquals(listOf(1), params.overrides[f.aac]!!.trackIndices)
             assertEquals(listOf(1), params.overrides[f.text]!!.trackIndices)
@@ -120,9 +120,9 @@ class PlaybackEngineTrackSelectionTest {
             f.publish()
             assertFalse(f.engine.isTrackSelectionCurrent(old))
             val before = f.selector.parameters
-            f.engine.selectAudioTrack(old)
+            assertFalse(f.engine.selectAudioTrack(old))
             assertEquals(before, f.selector.parameters)
-            f.engine.selectAudioTrack(f.engine.uiState.value.trackRowMap.audioFor(2))
+            assertTrue(f.engine.selectAudioTrack(f.engine.uiState.value.trackRowMap.audioFor(2)))
             assertEquals(listOf(1), f.selector.parameters.overrides[f.aac]!!.trackIndices)
         } finally { f.close() }
     }
@@ -130,13 +130,13 @@ class PlaybackEngineTrackSelectionTest {
         val f = Fixture(backgroundScope)
         try {
             f.publish(); val map = f.engine.uiState.value.trackRowMap
-            f.engine.selectAudioTrack(map.audioFor(2)); f.engine.selectSubtitleTrack(map.subtitleFor(1))
-            f.engine.selectSubtitleTrack(null)
+            assertTrue(f.engine.selectAudioTrack(map.audioFor(2))); assertTrue(f.engine.selectSubtitleTrack(map.subtitleFor(1)))
+            assertTrue(f.engine.selectSubtitleTrack(null))
             assertTrue(f.selector.parameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT))
             assertFalse(f.selector.parameters.overrides.containsKey(f.text))
             assertTrue(f.selector.parameters.overrides.containsKey(f.aac))
             f.publish()
-            f.engine.selectSubtitleTrack(f.engine.uiState.value.trackRowMap.subtitleFor(1))
+            assertTrue(f.engine.selectSubtitleTrack(f.engine.uiState.value.trackRowMap.subtitleFor(1)))
             assertFalse(f.selector.parameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT))
             assertEquals(listOf(1), f.selector.parameters.overrides[f.text]!!.trackIndices)
         } finally { f.close() }
@@ -147,11 +147,11 @@ class PlaybackEngineTrackSelectionTest {
             f.publish(); val token = f.engine.uiState.value.trackRowMap.snapshotToken
             val before = f.selector.parameters
             for (bad in listOf(TrackSelection(-1, 0, token), TrackSelection(0, -1, token),
-                TrackSelection(99, 0, token), TrackSelection(1, 99, token))) f.engine.selectAudioTrack(bad)
+                TrackSelection(99, 0, token), TrackSelection(1, 99, token))) assertFalse(f.engine.selectAudioTrack(bad))
             assertEquals(before, f.selector.parameters)
             val row = f.engine.uiState.value.trackRowMap.audioFor(2)!!
             f.engine.release(); assertFalse(f.engine.isTrackSelectionCurrent(row))
-            f.engine.selectAudioTrack(row); assertEquals(before, f.selector.parameters)
+            assertFalse(f.engine.selectAudioTrack(row)); assertEquals(before, f.selector.parameters)
         } finally { f.close() }
     }
     private object Quiet : Logger {
