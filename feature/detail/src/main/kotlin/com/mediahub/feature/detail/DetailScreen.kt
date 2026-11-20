@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -289,7 +290,7 @@ fun DetailBody(
                 "导演：${directors.joinToString("、") { it.name }}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = DETAIL_DIRECTOR_ROW_VERTICAL_PADDING_DP.dp),
             )
         }
 
@@ -313,7 +314,7 @@ fun DetailBody(
                         PosterImage(
                             url = person.imageUrl,
                             contentDescription = person.name,
-                            modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(50)),
+                            modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(detailAvatarShape()),
                         )
                         Text(
                             person.name,
@@ -434,13 +435,13 @@ fun DetailBody(
 
         item.overview?.takeIf(String::isNotBlank)?.let { overview ->
             var expanded by remember { mutableStateOf(false) }
-            Column(modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp).animateContentSize()) {
                 com.mediahub.core.ui.MediaHubSectionHeader("剧情简介", modifier = Modifier.padding(bottom = 10.dp))
                 Text(
                     overview,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = if (expanded) Int.MAX_VALUE else 4,
+                    maxLines = detailSynopsisMaxLines(expanded),
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (!expanded && overview.length > 120) {
