@@ -2046,3 +2046,18 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 **为什么第四十三层看不见**：既有四处 offset 检查都只判定「单个戳带没带 offset」，把整段时间换算成另一个 offset 后 instant、时长、行序与排序钟全部不变，所以旧闸门 exit 0。
 
 **边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+
+## 6.51 第四十五层口径：元素不能包含写出器不会放在该父节点下的子元素（W6-113bl）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | 每个元素的子元素必须属于该父节点在写出器里的固定集合 | `$ChildVocabulary`（24 键） |
+| 通过条件 | 取 `ParentNode`；父名不在词表只 warning；子名不在该父允许集合时 throw `an element nests a child the writer does not place there` | 真实语料 childVocabulary 全满 |
+| 台阶行 | `structure=... childVocabulary=<known>/<child elements>` | logs/real-green.log |
+| 负向对照 | clean-two-errors 在第一个 `<TestEntries>` 内插入一个 `TestList`（id 全零、name `Stray entry list`，2,698,040→2,698,118 B）；旧层 0，新层 1，恰好 1 条 `TestList inside TestEntries` | results-all.json |
+| 规模 | 2,995→3,072 行；179,584→184,181 B；+78/−1 | sha256 f4b7954c... |
+| 残留限制 | 只约束「父 → 允许的子名集合」，不约束同一父下同名子元素的先后顺序（那是第 41 层对 `TestRun` 的直接子元素才有的），也不校验叶子元素是否为空 | 更细的兄弟顺序未覆盖 |
+
+**为什么第四十四层看不见**：第 41 层只钉 `TestRun` 直接子元素的顺序，第 43 层只钉属性；其余容器一律按路径访问，错位元素从不被读到，计数、配对、行时序与台阶字段全都不变，所以旧闸门 exit 0。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。

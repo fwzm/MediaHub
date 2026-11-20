@@ -1593,3 +1593,35 @@
 
 - CLAIM run-id `w6-113-round25-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
 - W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。
+
+## Round 65（W6-113bl，2026-11-19）：元素不能包含写出器不会放在该父节点下的子元素
+
+### 动机
+
+第 41 层钉住了 `TestRun` 直接子元素的顺序，第 43 层钉住了每个元素携带哪些属性。但 `TestRun` 之下所有容器都是**按路径**读的（`$xml.TestRun.Results.UnitTestResult`、`$xml.TestRun.TestEntries.TestEntry`、`$xml.TestRun.TestLists.TestList` …），被挪到错误父节点下的元素永远不会被访问：把声明的 `TestList` 从 `TestLists` 挪进 `TestEntries`、把 `Deployment` 塞进 `Results`、在 `TestEntry` 里再放一个 `TestMethod`，全部计数、配对、行时序、phase 行与台阶字段都不变，文件却已不是 VSTest 写出的树。这一层补的就是这个缺口。
+
+### 变更
+
+- `windows/tools/check-test-suite-baseline.ps1`：2,995 → 3,072 行，179,584 → 184,181 B，`+78 / -1`，sha256 `f4b7954c1d645e3698f6c4e6f1c309f8b5c1702c79f4cc9b193bfd2ca1ed3f8c`（父层 `54724ad067603802cddd574fb13bf97559b5372272dc00631516f58fdea2522f`）。
+- 新增 `$ChildVocabulary`（24 个元素名 → 允许的子元素名集合），紧跟 `$AttributeVocabulary['Text'] = @()` 之后。
+- 新增检查段（插在 list 词汇表注释之前）：`$childEdges` / `$childOk` / `$childStray` / `$childUnknownParent`，逐个元素取 `ParentNode`；父节点非 Element 时跳过，父名不在词汇表内只 warning，子名不在该父的允许集合内计入 stray（明细 12 条上限）并 throw `an element nests a child the writer does not place there`。
+- 台阶行 `structure=` 末尾追加 `childVocabulary=<children in a known place>/<child elements>`；头注释与 SEMANTICS 各补一段。
+- 双 shell PARSE-OK（pwsh 7.6.10、Windows PowerShell 5.1.26100.10003）；纯 ASCII（nonAscii 0）、LF、无 BOM、末字节 0x0a；`git diff --check` exit 0。
+
+### 验证（EXECUTED）
+
+- 语料普查：7 个真实语料里每种父节点**恰好一种**子名集合，跨文件完全一致 —— `TestRun→Times,TestSettings,Results,TestDefinitions,TestEntries,TestLists,ResultSummary`、`TestSettings→Deployment`、`Results→UnitTestResult`、`UnitTestResult→Output`、`Output→StdOut|ErrorInfo`、`ErrorInfo→Message|StackTrace`、`ResultSummary→Counters|Output|RunInfos`、`RunInfos→RunInfo`、`RunInfo→Text`、`TestDefinitions→UnitTest`、`UnitTest→Execution|TestMethod`、`TestEntries→TestEntry`、`TestLists→TestList`；`Times`/`Deployment`/`Execution`/`TestMethod`/`TestEntry`/`TestList`/`Counters`/`Message`/`StackTrace`/`StdOut`/`Text` 为叶子。因此该要求不会误杀真实写出器。
+- 真实绿色 gate-corpus：exit 0；`MediaHub.Tests structure=7/7 … attributeVocabulary=9883/9883 runZones=1 zoneStamps=3950 childVocabulary=9882/9882`、`MediaHub.WebDav.Tests … attributeVocabulary=534/534 childVocabulary=533/533`、`phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1`、`combined tests=2077`；日志 `D:/mh-verify/r66/logs/real-green.log`。
+- 真实失败 TRX（total=767，failed=6）：exit 1；`childVocabulary=3885/3885`、`attributeVocabulary=3886/3886`、`runZones=1 zoneStamps=1544`、`timestampOffsets=6/6`，唯一 throw `MediaHub.Tests: 6 test(s) failed`；日志 `D:/mh-verify/r66/logs/real-failing.log`。
+- 5 例矩阵：clean-real / clean-two-errors / clean-green / fail-with-runinfo 旧新均 exit 0、两套件 childVocabulary 全满（windows 9882 / 9895 / 9882 / 9889，webdav 均 533）、problems=0；`bad-child-nesting` **旧 0 / 新 1**，恰好 1 条问题 `TestList inside TestEntries`；`oldAllZero=true`、`cleanOk=true`、`redOk=true`；结果 `D:/mh-verify/r66/results-all.json`。
+- 夹具：从 `D:/mh-verify/r54/cases/clean-two-errors` 复制到 `D:/mh-verify/r66/cases/bad-child-nesting`，在第一个 `<TestEntries>` 开标签后插入一个 `TestList`（id 全零、name `Stray entry list`），2,698,040 → 2,698,118 B；该元素不带多余属性、名字也在词表内，所以第 1–44 层全部放行，旧第 44 层闸门 exit 0 证明该错位此前完全不可见。
+
+### 提交与 exact-head CI
+
+- 代码提交 `6f4cd333037106f4a7ac006ff91b2cbc3fce93f1`（`ci(windows): an element may not nest a child the writer never puts there (W6-113bl)`）；Draft PR #209，base main，stacked on #206，G7 DO_NOT_MERGE。
+- 代码 head CI：windows-ci `44733162187`（push）`success`、`44733247638`（pull_request）`success`；Android CI `44733247593` `success`。
+
+### 锁与边界
+
+- CLAIM run-id `w6-113-round26-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
+- W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。

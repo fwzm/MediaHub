@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-20T18:40:00+08:00",
-  "updated_by": "lead-W6-113-r64",
+  "updated_at": "2026-11-20T20:05:00+08:00",
+  "updated_by": "lead-W6-113-r65",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -1362,6 +1362,25 @@
       "notes": "第四十四层：一份 TRX 内全部整戳属性必须写成同一个 UTC offset。既有四处 offset 检查（Times 窗口、行 start/end、RunInfo/@timestamp、RunInfo 100 ms 排序钟）都只问单个戳带没带 offset，从不相问彼此是否一致；把某行整段时间换算成另一 offset 后 instant、时长、行序与全部台阶行不变。台阶行 structure 末尾新增 runZones=<distinct>/zoneStamps=<n>。",
       "next_action": "候选第 45 层：继续从真实语料侦察可证的结构不变量；已覆盖六处显式 offset 与同文件时区唯一、section 计数与顺序、行序与 entry 序、Counters 算术与行复现、executionId 配对、RunInfo 布局与文本、duration 书写形状、元素属性词汇表；属性取值 pin（testType 恒为 13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b）仍待权衡 VSTest 版本风险；ResultFiles 全语料为空、resultType 100% 缺失、duration 严格等值不可行（真实最大差 51 ms，已有 1 s 容差）；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
       "closed_at": "2026-11-20T18:40:00+08:00"
+    },
+    {
+      "id": "W6-113bl",
+      "title": "第四十五层：元素不能包含写出器不会放在该父节点下的子元素（W6-113bl）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r65",
+      "branch": "feature/windows-w6-113bl-child-nesting",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,995 -> 3,072 lines, 179,584 -> 184,181 B, 78 insertions / 1 deletion, sha256 f4b7954c1d645e3698f6c4e6f1c309f8b5c1702c79f4cc9b193bfd2ca1ed3f8c; old sha256 54724ad067603802cddd574fb13bf97559b5372272dc00631516f58fdea2522f; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; MediaHub.Tests childVocabulary=9882/9882 attributeVocabulary=9883/9883 runZones=1 zoneStamps=3950; WebDav childVocabulary=533/533 attributeVocabulary=534/534; phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1; combined tests=2077; log D:/mh-verify/r66/logs/real-green.log.",
+        "Real failing TRX (total=767, failed=6): exit 1; childVocabulary=3885/3885, attributeVocabulary=3886/3886, runZones=1 zoneStamps=1544, timestampOffsets=6/6, runInfoChronology=6/6, runInfoOffset=6/6; only final 6 test(s) failed; log D:/mh-verify/r66/logs/real-failing.log.",
+        "Corpus census: every parent element has exactly one distinct child-name set across the seven real corpora (TestRun 7 sections; TestSettings Deployment; Results UnitTestResult; UnitTestResult Output; Output StdOut|ErrorInfo; ErrorInfo Message|StackTrace; ResultSummary Counters|Output|RunInfos; RunInfos RunInfo; RunInfo Text; TestDefinitions UnitTest; UnitTest Execution|TestMethod; TestEntries TestEntry; TestLists TestList; 11 leaf elements).",
+        "Negative matrix 5 cases: clean-real 0/0, clean-two-errors 0/0, clean-green 0/0, fail-with-runinfo 0/0 with childVocabulary full on both suites (windows 9882/9895/9882/9889, webdav 533 each); bad-child-nesting OLD=0/NEW=1 with exactly one problem (TestList inside TestEntries); oldAllZero=true; results D:/mh-verify/r66/results-all.json.",
+        "Code commit 6f4cd333037106f4a7ac006ff91b2cbc3fce93f1 (ci(windows): an element may not nest a child the writer never puts there (W6-113bl)); windows-ci 44733162187 (push) success, 44733247638 (pull_request) success; Android CI 44733247593 success."
+      ],
+      "notes": "第四十五层：每个元素的子元素必须属于写出器在该父节点下的固定集合。第 41 层只钉 TestRun 直接子元素顺序、第 43 层只钉属性；其余容器一律按路径访问（xml.TestRun.Results.UnitTestResult 等），错位元素从不被读到，计数、配对、行时序、phase 行与台阶字段全都不变。台阶行 structure 末尾新增 childVocabulary=<known>/<child elements>。",
+      "next_action": "候选第 46 层：继续从真实语料侦察可证的结构不变量；已覆盖六处显式 offset 与同文件时区唯一、TestRun 子元素顺序、元素属性词汇表、元素子节点词汇表、行序与 entry 序、Counters 算术与行复现、executionId 配对、RunInfo 布局与文本、duration 书写形状；仍开放的方向：同一父下同名兄弟元素的先后顺序（当前只对 TestRun 直接子元素有）、叶子元素必须为空且无文本、属性取值 pin（testType 恒为 13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b，需权衡 VSTest 版本风险）；不可用方向：ResultFiles 全语料为空、resultType 100% 缺失、duration 严格等值（真实最大差 51 ms，已有 1 s 容差）、StdOut 无汇总行；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T20:05:00+08:00"
     }
   ]
 }
