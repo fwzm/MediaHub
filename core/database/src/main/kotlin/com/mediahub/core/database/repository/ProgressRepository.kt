@@ -40,4 +40,15 @@ class ProgressRepository @Inject constructor(
     suspend fun cleanupOlderThan(beforeEpochMs: Long) {
         dao.deleteOlderThan(beforeEpochMs)
     }
+
+    /**
+     * 按保留窗口清理本地进度（#103 部分）。返回被删除的记录数。
+     */
+    suspend fun applyRetention(
+        nowEpochMs: Long,
+        retentionDays: Int = ProgressRetentionPolicy.DEFAULT_RETENTION_DAYS,
+    ): Int {
+        val cutoff = ProgressRetentionPolicy.cutoffEpochMs(nowEpochMs, retentionDays)
+        return dao.deleteOlderThan(cutoff)
+    }
 }

@@ -6,6 +6,7 @@ import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import com.mediahub.app.image.ProviderImageAuthInterceptor
 import com.mediahub.app.image.ProviderImageAuthStore
+import com.mediahub.core.database.repository.ProgressRepository
 import com.mediahub.core.network.NetworkExchangeLedger
 import com.mediahub.core.network.RateLimitRecordOnlyInterceptor
 import com.mediahub.core.network.OriginScopedCredentialInterceptor
@@ -14,6 +15,10 @@ import com.mediahub.core.network.UserAgentInterceptor
 import com.mediahub.core.network.UserAgentPolicy
 import dagger.hilt.android.HiltAndroidApp
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
@@ -35,6 +40,19 @@ class MediaHubApp : Application(), ImageLoaderFactory {
 
     @Inject
     lateinit var imageAuthStore: ProviderImageAuthStore
+
+    @Inject
+    lateinit var progressRepository: ProgressRepository
+
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    override fun onCreate() {
+        super.onCreate()
+        // #103 部分：应用启动时按保留窗口裁剪本地播放进度；失败不得影响启动。
+        applicationScope.launch {
+            runCatching { progressRepository.applyRetention(System.currentTimeMillis()) }
+        }
+    }
 
     /** M0-A（ADR-045）：全局唯一的 UA 策略（服务器作用域）。 */
     @Inject
