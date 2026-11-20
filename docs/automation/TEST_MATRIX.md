@@ -2061,3 +2061,18 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 **为什么第四十四层看不见**：第 41 层只钉 `TestRun` 直接子元素的顺序，第 43 层只钉属性；其余容器一律按路径访问，错位元素从不被读到，计数、配对、行时序与台阶字段全都不变，所以旧闸门 exit 0。
 
 **边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+
+## 6.52 第四十六层口径：元素只能在自己被写出器赋文本的位置携带文本（W6-113bm）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | 元素携带的**直接子**文本节点（Text/CDATA/SignificantWhitespace）只能出现在写出器赋文本的四种元素上 | `$TextVocabulary = @('StdOut','Message','StackTrace','Text')` |
+| 通过条件 | 只统计直接子文本节点、绝不继承后代文本；纯空白跳过；命中词表计入 ok，否则 throw `an element carries text the writer does not put there` | 真实语料 textVocabulary 全满 |
+| 台阶行 | `structure=... textVocabulary=<elements carrying their own text>/<elements>` | logs/real-green.log |
+| 负向对照 | clean-two-errors 在唯一 `<TestEntries>` 内插入纯文本 `a note the writer never emits`（2,698,040→2,698,069 B）；旧层 0，新层 1，恰好 1 条 `text inside TestEntries` | results-all.json |
+| 规模 | 3,072→3,122 行；184,181→187,530 B；+51/−1 | sha256 c8143804... |
+| 残留限制 | 只约束「文本出现在哪些元素上」，不约束文本内容本身（Message/StackTrace/StdOut 写什么仍然自由），也不约束同一父下同名兄弟元素的先后顺序 | 内容与兄弟顺序未覆盖 |
+
+**为什么第四十五层看不见**：第 43 层只钉属性、第 45 层只钉子元素名；文本节点既不是元素也不带属性，容器又一律按路径访问，所以塞进去的说明文字不会改变任何计数、配对、行时序与台阶字段，旧闸门 exit 0。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。

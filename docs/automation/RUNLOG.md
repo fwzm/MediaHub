@@ -1625,3 +1625,35 @@
 
 - CLAIM run-id `w6-113-round26-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
 - W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。
+
+## Round 66（W6-113bm，2026-11-19）：元素只能在自己被写出器赋文本的位置携带文本
+
+### 动机
+
+第 43 层钉住了每个元素携带哪些**属性**，第 45 层钉住了每个元素可以包含哪些**子元素**，但两者都没有约束**文本**。`TestRun` 之下所有容器都是按路径读的，叶子元素则是按属性读的，因此给 `TestEntries`、`Counters`、`TestList`、`TestEntry` 或一个通过的 `UnitTestResult` 追加一个文本节点，不会被任何既有检查读到：全部计数、配对、行时序、phase 行与台阶字段都逐字节不变，文件却已不是 VSTest 写出的形状。往机器读取的报告里塞一句说明，正是「解释」变成「被静默信任的数字」的那条路径。这一层补的就是这个缺口。
+
+### 变更
+
+- `windows/tools/check-test-suite-baseline.ps1`：3,072 → 3,122 行，184,181 → 187,530 B，`+51 / -1`，sha256 `c8143804aaac2f4ebcea0ad0d156d6e3e7cd99fa6b92ad9d872dee2dd0dffc87`（父层 `f4b7954c1d645e3698f6c4e6f1c309f8b5c1702c79f4cc9b193bfd2ca1ed3f8c`）。
+- 新增 `$TextVocabulary = @('StdOut','Message','StackTrace','Text')`，紧跟 `$ChildVocabulary['Text'] = @()` 之后。
+- 新增检查段（插在 list 词汇表注释之前）：`$textElements` / `$textOk` / `$textStray`，`foreach ($tenNode in @($xml.SelectNodes('//*')))` 只累加**直接子** Text/CDATA/SignificantWhitespace 节点（绝不继承后代文本），纯空白跳过；元素名命中词表则 `$textOk++`，否则计入 stray（明细 12 条上限）并 throw `an element carries text the writer does not put there`。
+- 台阶行 `structure=` 末尾追加 `textVocabulary=<elements carrying their own text>/<elements>`；头注释与 SEMANTICS 各补一段。
+- 双 shell PARSE-OK（pwsh 7.6.10、Windows PowerShell 5.1.26100.10003）；纯 ASCII（nonAscii 0）、LF、无 BOM、末字节 0x0a；`git diff --check` exit 0。
+
+### 验证（EXECUTED）
+
+- 语料普查：7 个真实语料里**直接**带文本的元素只有四种 —— `StdOut`、`Message`、`StackTrace`、`Text`；其余元素 `InnerText` 非空只是因为后代带文本（`TestRun`/`Results`/`ResultSummary`/`Output`/`RunInfos`/`UnitTestResult`/`ErrorInfo`/`RunInfo`）。恒空的叶子：`Counters`/`Deployment`/`Execution`/`TestEntry`/`TestList`/`TestMethod`/`Times`；`UnitTestResult` 除失败行外全空（gate-corpus 1,971/1,973、real-trx 761/767）。全部语料 CDATA 数为 0。因此该要求不会误杀真实写出器。
+- 真实绿色 gate-corpus：exit 0；`MediaHub.Tests structure=7/7 … childVocabulary=9882/9882 textVocabulary=3/3`、`MediaHub.WebDav.Tests … childVocabulary=533/533 textVocabulary=1/1`、`phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1`、`combined tests=2077`；日志 `D:/mh-verify/r67/logs/real-green.log`。
+- 真实失败 TRX（total=767，failed=6）：exit 1；`textVocabulary=19/19`（六个失败行各带 Message 与 StackTrace）、`childVocabulary=3885/3885`、`attributeVocabulary=3886/3886`、`runZones=1 zoneStamps=1544`、`timestampOffsets=6/6`，唯一 throw `MediaHub.Tests: 6 test(s) failed`；日志 `D:/mh-verify/r67/logs/real-failing.log`。
+- 5 例矩阵：clean-real / clean-two-errors / clean-green / fail-with-runinfo 旧新均 exit 0、两套件 textVocabulary 全满（3+1 / 9+1 / 3+1 / 6+1）、problems=0；`bad-stray-text` **旧 0 / 新 1**，恰好 1 条问题 `text inside TestEntries`；`oldAllZero=true`、`cleanOk=true`、`redOk=true`；结果 `D:/mh-verify/r67/results-all.json`。
+- 夹具：从 `D:/mh-verify/r54/cases/clean-two-errors` 复制到 `D:/mh-verify/r67/cases/bad-stray-text`，在唯一 `<TestEntries>` 开标签后插入纯文本 `a note the writer never emits`，2,698,040 → 2,698,069 B；该串既不是元素也不带属性，所以第 1–45 层全部放行，旧第 45 层闸门 exit 0 证明该文本此前完全不可见。
+
+### 提交与 exact-head CI
+
+- 代码提交 `c9d78ffa377548be0d312386baf348f77099cba5`（`ci(windows): an element may not carry text the writer never puts there (W6-113bm)`）；Draft PR #211，base main，stacked on #209，G7 DO_NOT_MERGE。
+- 代码 head CI：windows-ci `44743858321`（push）`success`、`44743939399`（pull_request）`success`；Android CI `44743939422` `success`。
+
+### 锁与边界
+
+- CLAIM run-id `w6-113-round27-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
+- W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。
