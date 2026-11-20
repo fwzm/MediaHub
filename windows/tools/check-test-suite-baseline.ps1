@@ -284,6 +284,13 @@
 #   such offset to sit within 100 ms of the first; the ladder line records
 #   runInfoOffset=<bound>/<items>.
 
+#   Every RunInfo also carries an absolute timestamp, and no check above reads the
+#   zone it declares: an item written without one is parsed in the host's own zone,
+#   so the same failure log places its items hours apart on two machines while the
+#   item list, its order, its row window and the clock/timestamp offset all stay
+#   unchanged. The gate now requires every RunInfo timestamp to carry an explicit
+#   UTC offset; the runInfos ladder line records timestampOffsets=<n>/<items>.
+
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
 #   total    > baseline -> green + warning (please refresh the baseline)
@@ -460,6 +467,11 @@
 #   a RunInfo timestamp that falls outside the named row's own start/end window
 #     (1 s before start through 5 s after end) -> red (the line can still name
 #     the right row while its clock belongs to a different execution).
+#   a RunInfo/@timestamp that carries no explicit UTC offset -> red: the item is
+#     then placed in the host's own zone, so the same failure log lands hours away
+#     on another machine while the item list, its order, its row window and the
+#     clock/timestamp offset stay identical; the runInfos ladder line records
+#     timestampOffsets=<n>/<items>.
 
 #   the row at position N of Results does not name the test that position N of
 #     TestEntries declares -> red. The two sections are emitted from one ordered
@@ -1243,6 +1255,8 @@ foreach ($e in $baseline.suites) {
   $runInfoBlank = 0
   $runInfoWrongMachine = 0
   $runInfoBadOutcome = 0
+  $runInfoTimestampOffsets = 0
+  $runInfoTimestampOffsetLost = 0
   $runInfoProblems = @()
   foreach ($res in @($xml.TestRun.Results.UnitTestResult)) {
     if ($null -eq $res) { continue }
@@ -1734,7 +1748,16 @@ foreach ($e in $baseline.suites) {
     foreach ($runInfoChild in @($runInfo.ChildNodes)) {
       if ([string]$runInfoChild.LocalName -eq 'Text') { $runInfoText = [string]$runInfoChild.InnerText; break }
     }
-    $runInfoStamp = Convert-ToInstant ([string]$runInfo.timestamp)
+    $runInfoTimestampRaw = [string]$runInfo.timestamp
+    $runInfoStamp = Convert-ToInstant $runInfoTimestampRaw
+    if (-not [string]::IsNullOrWhiteSpace($runInfoTimestampRaw)) {
+      if ($runInfoTimestampRaw -match '([+-][0-9]{2}:[0-9]{2}|Z)$') {
+        $runInfoTimestampOffsets++
+      } else {
+        $runInfoTimestampOffsetLost++
+        if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo timestamp '$runInfoTimestampRaw' carries no explicit UTC offset" }
+      }
+    }
     $runInfoMachine = [string]$runInfo.computerName
     $runInfoOutcome = [string]$runInfo.outcome
     if ([string]::IsNullOrWhiteSpace($runInfoText)) {
@@ -2464,7 +2487,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): displayNames=$displayNameChecked declared prefixes=$($displayNameChecked - $displayNameLost.Count) mismatched=$($displayNameLost.Count)"
   "$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"
   "$($e.suite): failureEvidence=$evidenceRows failed=$failedWithEvidence/$failedRows passed=$passedWithEvidence/$passedRows blankMessages=$blankFailureText duplicates=$duplicateEvidence"
-  "$($e.suite): runInfos=$runInfoRows failedRows=$failedRows matched=$($matchedFailedNames.Count) passed=$runInfoForPassed unmatched=$runInfoUnmatched duplicateMatches=$runInfoDuplicates outside=$runInfoOutside blankText=$runInfoBlank wrongMachine=$runInfoWrongMachine badOutcome=$runInfoBadOutcome"
+  "$($e.suite): runInfos=$runInfoRows failedRows=$failedRows matched=$($matchedFailedNames.Count) passed=$runInfoForPassed unmatched=$runInfoUnmatched duplicateMatches=$runInfoDuplicates outside=$runInfoOutside blankText=$runInfoBlank wrongMachine=$runInfoWrongMachine badOutcome=$runInfoBadOutcome timestampOffsets=$runInfoTimestampOffsets/$runInfoRows"
   "$($e.suite): runInfoBlocks=$runInfoLayoutCount strayRunInfoBlocks=$([int]$runInfoLayoutAnywhere - [int]$runInfoLayoutCount)"
   "$($e.suite): runInfoBoundary=$runInfoOwnerCount/$runInfoAnywhere deploymentBoundary=$deploymentOwnerCount/$deploymentAnywhere"
   "$($e.suite): runInfoTexts=$runInfoTextSingular/$(@($runInfoNodes).Count)"
