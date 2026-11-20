@@ -1956,3 +1956,18 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 **为什么第三十七层看不见**：第 37 层读的是 phase 时钟与最早结果行，全部通过 `Convert-ToInstant` 得到已解析的瞬间；缺 offset 时解析结果由宿主时区决定，计数、窗口、行序、phase 都可以不变。因此去掉 finish 的 offset 后，+08 主机上旧闸门 exit 0，而同一文件在 UTC 机器上会落在另一段时间。
 
 **边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+
+## 6.45 第三十九层口径：每个结果行都必须说明时区（W6-113bf）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | 每个 `UnitTestResult/@startTime` 与 `@endTime` 的显式 UTC offset（`+hh:mm`/`-hh:mm`/`Z`） | row 循环 |
+| 通过条件 | 每个非空结果行时刻均有显式 offset；空/不可读时刻仍由既有 row metadata 条目处理 | 真实语料 rowTimeOffsets=3946/3946、208/208 |
+| 台阶行 | `rowTimeOffsets=<n>/<2n>`（与 `rowAttributes` 同行） | logs/real-green.log |
+| 负向对照 | clean-two-errors 只去掉一条 startTime 的 `+08:00`；旧层 0，新层 1，恰好 1 条 result-row-instant-carries-no-explicit-UTC-offset | results-all.json |
+| 规模 | 2,770→2,792 行；164,762→166,387 B；+26/−4 | sha256 15123356... |
+| 残留限制 | 只校准结果行时刻的声明；不建立行时刻与 phase 时钟或 `Times.creation` 的交叉约束 | 真实语料 creation 晚于 start 约 1.06 s |
+
+**为什么第三十八层看不见**：第 38 层只读 `Times/@start`/`@finish` 两个窗口字段的 offset，结果行的时刻仍经同一 `DateTimeOffset.Parse` 读取；缺 offset 时由宿主时区补全，+08 主机上解析出同一瞬间，窗口、行序、duration 与 phase 都可以全部通过。因此去掉一行 startTime 的 offset 后，旧闸门 exit 0，而同一文件在 UTC 机器上会把该行平移八小时。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。

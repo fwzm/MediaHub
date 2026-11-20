@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-20T11:10:00+08:00",
-  "updated_by": "lead-W6-113-r58",
+  "updated_at": "2026-11-20T12:05:00+08:00",
+  "updated_by": "lead-W6-113-r59",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -1251,6 +1251,24 @@
       "notes": "第三十八层：Times/@start 与 Times/@finish 必须携带显式 UTC offset。Convert-ToInstant 用 DateTimeOffset.Parse，无 offset 时按宿主本地时区解释；同一 TRX 在不同机器上会界定不同窗口，而计数与行序不变。creation/queuing 原有 offset 检查未变。",
       "next_action": "候选第 39 层：继续从真实语料侦察可证结构不变量（如 Counters total 与实际 UnitTestResult 行数的等式）；避免 duration 与 start/end 严格等值（真实最大差 51 ms，已有 1 s 容差 warning）；Finished 与最后一行结束时间的上界需要容差，暂不选；RunInfo/ErrorInfo 文本交叉引用仍不可行；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
       "closed_at": "2026-11-20T11:10:00+08:00"
+    },
+    {
+      "id": "W6-113bf",
+      "title": "第三十九层：每个结果行都必须说明时区（W6-113bf）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r59",
+      "branch": "feature/windows-w6-113bf-row-time-offset",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,770 -> 2,792 lines, 164,762 -> 166,387 B, 26 insertions / 4 deletions, sha256 1512335643e22714e41cde09b2cf6909161f20689ab1a85fd42b70b7c207be99; old sha256 d83cc5470825048914f93b1a1adefcc77055dfdfcc12017129efca102934f739; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites rowTimeOffsets=3946/3946 and 208/208, phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1; combined tests=2077; log D:/mh-verify/r60/logs/real-green.log.",
+        "Real failing TRX (total=767, failed=6): rowTimeOffsets=1534/1534 and 208/208, RunInfo chronology/offset/rowClock 6/6; only final 6 test(s) failed; log D:/mh-verify/r60/logs/real-failing.log.",
+        "Negative matrix 5 cases: clean-real 0/0, clean-two-errors 0/0, clean-green 0/0, fail-with-runinfo 0/0, rowTimeOffsets [3946,208]; bad-row-time-offset OLD=0/NEW=1, exactly one result-row-instant-carries-no-explicit-UTC-offset problem; oldAllZero=true; results D:/mh-verify/r60/results-all.json.",
+        "Code commit 41a89eee986c35a4b2240f8b0c5e8aff54847769 (ci(windows): every result row must say which zone it is in (W6-113bf)); windows-ci 44669931770 (push) success, 44669969563 (pull_request) success; Android CI 44669969519 success."
+      ],
+      "notes": "第三十九层：每个 UnitTestResult 的 startTime/endTime 必须携带显式 UTC offset。Convert-ToInstant 用 DateTimeOffset.Parse，无 offset 时按宿主本地时区解释；同一 TRX 的同一行在不同机器上会落在不同瞬间，而计数、行序、duration 与 phase 可全部不变。空/不可读时刻仍由既有 row metadata 条目处理。",
+      "next_action": "候选第 40 层：继续从真实失败语料侦察可证的结构不变量；结果行 offset 已覆盖；duration 严格等值（真实最大差 51 ms，已有 1 s 容差 warning）、Finished 与最后一行结束时间的上界（需容差）、RunInfo/ErrorInfo 文本交叉引用（缺测试名）均暂不选；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T12:05:00+08:00"
     }
   ]
 }

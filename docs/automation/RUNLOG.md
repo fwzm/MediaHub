@@ -1408,3 +1408,33 @@
 
 - CLAIM run-id `w6-113-round19-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
 - W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。
+
+## Round 59（W6-113bf，2026-11-19）：每个结果行都必须说明时区
+
+### 动机
+
+第 38 层把 `Times/@start` 与 `Times/@finish` 纳入了显式 UTC offset 检查，但每条 `UnitTestResult` 的 `startTime` 与 `endTime` 仍然只经 `Convert-ToInstant` 的 `[DateTimeOffset]::Parse` 读取。无 offset 的字符串会按**宿主本地时区**解释，同一份 TRX 的同一行在不同机器上落在不同瞬间，而计数、行序、duration 与 phase 行可能全部不变。把一行 startTime 的 `+08:00` 去掉后，本机（+08）上旧闸门 exit 0 —— 这正是漏洞：该声明在文件里已经缺失，只是宿主时区恰好替它补上了。
+
+### 变更
+
+- `windows/tools/check-test-suite-baseline.ps1`：2,770 → 2,792 行，164,762 → 166,387 B，`+26 / -4`，sha256 `1512335643e22714e41cde09b2cf6909161f20689ab1a85fd42b70b7c207be99`（父层 `d83cc5470825048914f93b1a1adefcc77055dfdfcc12017129efca102934f739`）。
+- 在结果行循环中保存 `$rstartRaw`/`$rendRaw`，新增 `$rowTimeOffsets` 与 `$rowOffsetLost`；每个非空结果行时刻若匹配 `+hh:mm`/`-hh:mm`/`Z` 则计入显式 offset，否则计入缺失。
+- 缺失时向 `$rowAttrLost` 追加 `$rowOffsetLost result row instant(s) carry no explicit UTC offset`；空/不可读时刻仍由既有 row metadata 条目处理，不重复报 red。throw 文案扩展为 “impossible or zone-less timestamp”；台阶行 `rowAttributes` 末尾追加 `rowTimeOffsets=<n>/<2n>`。
+- 顶部注释与 SEMANTICS 各补一段；双 shell PARSE-OK（pwsh 7.6.10、Windows PowerShell 5.1.26100.10003）；纯 ASCII、无 BOM/CRLF；`git diff --check` exit 0。
+
+### 验证（EXECUTED）
+
+- 真实绿色 gate-corpus：exit 0；`rowTimeOffsets=3946/3946`（MediaHub.Tests 1973 行）与 `208/208`（WebDav 104 行），`phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1`，`combined tests=2077`；日志 `D:/mh-verify/r60/logs/real-green.log`。
+- 真实失败 TRX（total=767，failed=6）：exit 1；`rowTimeOffsets=1534/1534`、WebDav `208/208`，RunInfo chronology/offset/rowClock 均 6/6，唯一 throw `MediaHub.Tests: 6 test(s) failed`；日志 `D:/mh-verify/r60/logs/real-failing.log`。
+- 5 例矩阵：clean-real / clean-two-errors / clean-green / fail-with-runinfo 旧新均 exit 0，`rowTimeOffsets=[3946,208]`、problems=0；`bad-row-time-offset` **旧 0 / 新 1**，恰好 1 条 `result row instant(s) carry no explicit UTC offset`；`oldAllZero=true`、`cleanOk=true`、`redOk=true`；结果 `D:/mh-verify/r60/results-all.json`。
+- 夹具：从 `D:/mh-verify/r54/cases/clean-two-errors` 复制到 `D:/mh-verify/r60/cases/bad-row-time-offset`，只把 windows-tests.trx 第一条 `startTime="2026-11-19T13:17:42.8361570+08:00"` 的 `+08:00` 去掉（恰好 1 次；2,698,040 → 2,698,034 B）。旧第 38 层在该夹具上 exit 0，证明修复前缺失 offset 完全不被发现。
+
+### 提交与 exact-head CI
+
+- 代码提交 `41a89eee986c35a4b2240f8b0c5e8aff54847769`（`ci(windows): every result row must say which zone it is in (W6-113bf)`）；Draft PR #187，base main，stacked on #183，G7 DO_NOT_MERGE。
+- 代码 head CI：windows-ci `44669931770`（push）`success`、`44669969563`（pull_request）`success`；Android CI `44669969519` `success`。
+
+### 锁与边界
+
+- CLAIM run-id `w6-113-round20-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
+- W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。
