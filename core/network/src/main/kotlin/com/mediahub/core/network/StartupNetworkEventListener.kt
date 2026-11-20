@@ -10,8 +10,22 @@ import okhttp3.Response
  * - POST /PlaybackInfo → PLAYBACK_INFO start/end
  * - GET /stream.* 或 /Videos/ → MEDIA request/firstByte
  * 不记录 URL / header / token。
+ *
+ * 重定向（U4-B 补充）：OkHttp 对每一个 hop 都会回调 responseHeadersEnd /
+ * responseBodyStart，而回调时 [Response.priorResponse] 恒为 null（实测），
+ * 所以 hop 数只能自己累计。中间 hop 只计数，**不上报**媒体元数据与首字节——
+ * 否则 302 的响应体会被当成媒体首字节，TTFF 被提前盖戳，元数据也被 302 的
+ * code / Content-Length 覆盖。
+ *
+ * 每个 Call 一个实例（[FACTORY]），因此下面的计数器天然是 per-call 的。
  */
 class StartupNetworkEventListener : EventListener() {
+
+    /** 已完成的中间 hop 数（3xx 且带 Location）。 */
+    private var redirectCount = 0
+
+    /** 已收到最终响应头、但还没收到第一个响应体字节。 */
+    private var awaitingFinalBody = false
 
     override fun callStart(call: Call) {
         val sink = PlaybackNetworkTraceRegistry.get() ?: return
@@ -25,32 +39,40 @@ class StartupNetworkEventListener : EventListener() {
     override fun responseHeadersEnd(call: Call, response: Response) {
         val sink = PlaybackNetworkTraceRegistry.get() ?: return
         val url = call.request().url
-        if (isPlaybackInfo(url.encodedPath, call.request().method)) {
+        val playbackInfo = isPlaybackInfo(url.encodedPath, call.request().method)
+        val media = isMediaRequest(url.encodedPath, call.request().method)
+        if (!playbackInfo && !media) return
+
+        if (isRedirect(response)) {
+            redirectCount++
+            return
+        }
+
+        if (playbackInfo) {
             sink.onPlaybackInfoEnd()
         }
-        if (isMediaRequest(url.encodedPath, call.request().method)) {
-            val resp = response.priorResponse?.let { r -> var last = r; while (r.priorResponse != null) { last = r.priorResponse!! }; last } ?: response
-            var redirectCount = 0
-            var r = response
-            while (r.priorResponse != null) { redirectCount++; r = r.priorResponse!! }
+        if (media) {
+            awaitingFinalBody = true
             sink.onMediaResponseMetadata(
-                code = resp.code,
-                protocol = resp.protocol.toString(),
+                code = response.code,
+                protocol = response.protocol.toString(),
                 redirectCount = redirectCount,
-                acceptsRanges = resp.header("Accept-Ranges") == "bytes",
-                contentLengthBytes = resp.header("Content-Length")?.toLongOrNull() ?: -1L,
-                contentRange = resp.header("Content-Range"),
+                acceptsRanges = response.header("Accept-Ranges") == "bytes",
+                contentLengthBytes = response.header("Content-Length")?.toLongOrNull() ?: -1L,
+                contentRange = response.header("Content-Range"),
             )
         }
     }
 
     override fun responseBodyStart(call: Call) {
+        if (!awaitingFinalBody) return
+        awaitingFinalBody = false
         val sink = PlaybackNetworkTraceRegistry.get() ?: return
-        val url = call.request().url
-        if (isMediaRequest(url.encodedPath, call.request().method)) {
-            sink.onMediaFirstByte()
-        }
+        sink.onMediaFirstByte()
     }
+
+    private fun isRedirect(response: Response): Boolean =
+        response.code in 300..399 && response.header("Location") != null
 
     private fun isPlaybackInfo(path: String, method: String): Boolean =
         method == "POST" && path.contains("/PlaybackInfo")
