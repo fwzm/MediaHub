@@ -178,6 +178,13 @@
 #   explicit UTC offset, and the ladder line adds windowOffsets=<n>/2. A window instant
 #   that is absent or unreadable stays a warning: a TRX without a usable window can be
 #   reported, but not placed.
+#
+#   The result rows also carry their own start and end instants, and neither was
+#   required to carry an explicit offset. The window check above compares them with
+#   Times/@start and Times/@finish, but a bare local time in a row is read in the
+#   host's own zone too: the same row moves by hours on another machine while every
+#   count, phase line and duration stays identical. Every row's startTime and endTime
+#   now require an explicit UTC offset; the ladder line adds rowTimeOffsets=<n>/<2n>.
 
 #   The rows also carry an order, and nothing above read it: TestEntries and the
 #   Results section are written from one ordered pass, so the row at position N is
@@ -428,6 +435,11 @@
 #     every machine while every count, row timing and phase line stays unchanged; the
 #     ladder line records windowOffsets=<n>/2. An absent or unreadable window remains
 #     a warning, because a run that records no window can be reported but not placed.
+#   a UnitTestResult/@startTime or @endTime carries no explicit UTC offset -> red: the
+#     row is then read in the host's own zone, so the same row moves by hours on another
+#     machine while every count, row timing and phase line stays unchanged; the ladder
+#     line records rowTimeOffsets=<n>/<2n>. An absent or unreadable row instant remains
+#     covered by the row metadata bullet above.
 #   a failed run that does not carry exactly one ResultSummary/RunInfos container,
 #     a run without Failed/Error rows that carries more than one, or any RunInfos
 #     block outside ResultSummary -> red
@@ -883,6 +895,8 @@ foreach ($e in $baseline.suites) {
   $execIdCounts = @{}
   $blankExecIds = 0
   $rowCount = 0
+  $rowTimeOffsets = 0
+  $rowOffsetLost = 0
   $timeOrdered = 0
   $badTimes = 0
   $timeReversed = 0
@@ -1254,9 +1268,16 @@ foreach ($e in $baseline.suites) {
         $attrValues[$ak][$av] = $true
       }
     }
-    $rstart = Convert-ToInstant ([string]$res.startTime)
-    $rend = Convert-ToInstant ([string]$res.endTime)
+    $rstartRaw = [string]$res.startTime
+    $rendRaw = [string]$res.endTime
+    $rstart = Convert-ToInstant $rstartRaw
+    $rend = Convert-ToInstant $rendRaw
     $rms = Convert-ToMillis ([string]$res.duration)
+    foreach ($rowStampRaw in @($rstartRaw, $rendRaw)) {
+      if (-not [string]::IsNullOrWhiteSpace($rowStampRaw) -and $rowStampRaw -match '([+-][0-9]{2}:[0-9]{2}|Z)$') { $rowTimeOffsets++ }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($rstartRaw) -and $rstartRaw -notmatch '([+-][0-9]{2}:[0-9]{2}|Z)$') { $rowOffsetLost++ }
+    if (-not [string]::IsNullOrWhiteSpace($rendRaw) -and $rendRaw -notmatch '([+-][0-9]{2}:[0-9]{2}|Z)$') { $rowOffsetLost++ }
     if ($null -eq $rstart -or $null -eq $rend) {
       $badTimes++
     } else {
@@ -1413,12 +1434,13 @@ foreach ($e in $baseline.suites) {
       if ($rowAttrLost.Count -lt 12) { $rowAttrLost += "$ak is recorded nowhere in $($e.file)" }
     }
   }
+  if ($rowOffsetLost -gt 0) { $rowAttrLost += "$rowOffsetLost result row instant(s) carry no explicit UTC offset" }
   if ($badTimes -gt 0) { $rowAttrLost += "$badTimes row(s) carry an unreadable startTime or endTime" }
   if ($timeReversed -gt 0) { $rowAttrLost += "$timeReversed row(s) end before they start" }
   if ($badDuration -gt 0) { $rowAttrLost += "$badDuration row(s) carry an unreadable or negative duration" }
   if ($outOfWindow -gt 0) { $rowAttrLost += "$outOfWindow row(s) fall outside the run's own Times window" }
   if ($rowAttrLost.Count -gt 0) {
-    throw "$($e.suite): the result rows contradict their own metadata while the total was $total - every count above is read from this file's rows, so rows that share an execution id, drop or mix a row attribute, or carry an impossible timestamp can keep all of them identical. broken: $($rowAttrLost -join ', '). A TRX whose rows disagree with themselves was hand-merged or patched; regenerate it from a clean test run."
+    throw "$($e.suite): the result rows contradict their own metadata while the total was $total - every count above is read from this file's rows, so rows that share an execution id, drop or mix a row attribute, or carry an impossible or zone-less timestamp can keep all of them identical. broken: $($rowAttrLost -join ', '). A TRX whose rows disagree with themselves was hand-merged or patched; regenerate it from a clean test run."
   }
   if ($durDrift -gt 0) {
     $durWarn += "$($e.suite) ($durDrift row(s) report a duration that disagrees with their own start/end by more than a second)"
@@ -2436,7 +2458,7 @@ foreach ($e in $baseline.suites) {
   }
   "$($e.suite): outcomes=$($actualOutcomes.Count) baseline=outcome table $(@($e.outcomes.PSObject.Properties.Name).Count) outcomes"
   "$($e.suite): identities=$pairedIds named=$namedRows unique test ids shared by both halves"
-  "$($e.suite): rowAttributes=$rowCount unique execution ids=$($execIdCounts.Count) ordered row times=$timeOrdered rows within the run window=$inWindow uniform row fields=$uniformFields"
+  "$($e.suite): rowAttributes=$rowCount unique execution ids=$($execIdCounts.Count) ordered row times=$timeOrdered rows within the run window=$inWindow uniform row fields=$uniformFields rowTimeOffsets=$rowTimeOffsets/$($rowCount*2)"
   "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount"
   "$($e.suite): executionIds=$($execByDefId.Count) distinct declared ids=$($defExecCounts.Count) paired rows=$pairedRowExecs paired result directories=$pairedRowDirs"
   "$($e.suite): displayNames=$displayNameChecked declared prefixes=$($displayNameChecked - $displayNameLost.Count) mismatched=$($displayNameLost.Count)"
