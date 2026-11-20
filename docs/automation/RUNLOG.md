@@ -1530,3 +1530,35 @@
 
 - CLAIM run-id `w6-113-round23-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
 - W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。
+
+## Round 63（W6-113bj，2026-11-19）：任何元素都不得携带写出器不会写的属性
+
+### 动机
+
+第 42 层之前，闸门只有三处会遍历属性：`TestRun` 上取一次 `xmlns`、`Counters` 的属性循环（未知属性名只记 warning）、以及 `TestSettings`/`Deployment` 的属性循环（只挑 `id`、`name`、`runDeploymentRoot`，其余静默忽略）。其余全部按属性名直接取值。于是一个被手工加了属性的元素仍然读得通：总数、类/方法计数、行序、配对、phase 行与全部台阶行都不变，文件却已不是 VSTest 写出的文档。
+
+### 变更
+
+- `windows/tools/check-test-suite-baseline.ps1`：2,878 → 2,961 行，171,849 → 176,830 B，`+84 / -1`，sha256 `5f6c31437d4e61dd72dc5026044d218b975f538c53bf1e8c972c4edd370dc7cd`（父层 `a8cb9628ddc7fdc1a08ab7d6c90326ffe382c3810a70f126e0108a4e67955a55`）。
+- 新增脚本级哈希 `$AttributeVocabulary`：元素本地名 → 写出器会写的属性集合；`Counters` 的允许集合由 `total`、`executed` 加 `$OutcomeByAttribute.Keys` 派生，因此与既有的 16 个计数器口径同源。
+- 文件循环内新增全元素检查：`foreach ($ael in @($xml.SelectNodes('//*')))`，元素名在表内则逐个属性做 `-notcontains` 判定，多出的属性计入 `$attrStray` 并收集明细（12 条上限）；元素名不在表内只记 `::warning::` 不 red，避免未来写出器新增元素时误杀。
+- 多出属性时 throw `an element carries an attribute the writer does not emit`，明细形如 `UnitTestResult carries foo`；台阶行 `structure=` 行末追加 `attributeVocabulary=<n>/<elements>`；头注释与 SEMANTICS 各补一段。
+- 双 shell PARSE-OK（pwsh 7.6.10、Windows PowerShell 5.1.26100.10003）；纯 ASCII（nonAscii 0）、LF、无 BOM；`git diff --check` exit 0。
+
+### 验证（EXECUTED）
+
+- 语料普查：7 个真实语料共 55 个 element/@attr 组合，每种元素只有恰好一种属性集合变体 —— TestRun(id,name,runUser,xmlns)、Times(creation,finish,queuing,start)、TestSettings(id,name)、Deployment(runDeploymentRoot)、UnitTestResult(computerName,duration,endTime,executionId,outcome,relativeResultsDirectory,startTime,testId,testListId,testName,testType)、UnitTest(id,name,storage)、Execution(id)、TestMethod(adapterTypeName,className,codeBase,name)、TestEntry(executionId,testId,testListId)、TestList(id,name)、ResultSummary(outcome)、RunInfo(computerName,outcome,timestamp)、Counters(16 个)；ErrorInfo/Message/Output/Results/RunInfos/StackTrace/StdOut/TestDefinitions/TestEntries/TestLists/Text 无属性。因此该要求不会误杀真实写出器。
+- 真实绿色 gate-corpus：exit 0；两套件 `attributeVocabulary=9883/9883` 与 `534/534`，`phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1`，`MediaHub.Tests total=1973 baseline=1973`、WebDav 104、`combined tests=2077`；日志 `D:/mh-verify/r64/logs/real-green.log`。
+- 真实失败 TRX（total=767，failed=6）：exit 1；`attributeVocabulary=3886/3886`、`timestampOffsets=6/6`、`runInfoChronology=6/6`、`runInfoOffset=6/6`，唯一 throw `MediaHub.Tests: 6 test(s) failed`；日志 `D:/mh-verify/r64/logs/real-failing.log`。
+- 5 例矩阵：clean-real / clean-two-errors / clean-green / fail-with-runinfo 旧新均 exit 0、两套件 attributeVocabulary 全满、problems=0；`bad-extra-attribute` **旧 0 / 新 1**，恰好 1 条 `UnitTestResult carries foo`；`oldAllZero=true`、`cleanOk=true`、`redOk=true`；结果 `D:/mh-verify/r64/results-all.json`。
+- 夹具：从 `D:/mh-verify/r54/cases/clean-two-errors` 复制到 `D:/mh-verify/r64/cases/bad-extra-attribute`，只给第一个 `<UnitTestResult ` 加 ` foo="1"`（2,697,714 → 2,698,048 B）；旧第 42 层在该夹具上 exit 0，证明多余属性此前完全不可见。
+
+### 提交与 exact-head CI
+
+- 代码提交 `c23bbbb2d4a316e8f0130f692b52cc167a6d847c`（`ci(windows): an element may not carry an attribute the writer never emits (W6-113bj)`）；Draft PR #202，base main，stacked on #198，G7 DO_NOT_MERGE。
+- 代码 head CI：windows-ci `44710743527`（push）`success`、`44710839921`（pull_request）`success`；Android CI `44710839943` `success`。
+
+### 锁与边界
+
+- CLAIM run-id `w6-113-round24-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
+- W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。

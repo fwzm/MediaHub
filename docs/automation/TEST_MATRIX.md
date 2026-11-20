@@ -2016,3 +2016,18 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 **为什么第四十一层看不见**：第 41 层只读 `TestRun` 直接子元素的位置序列，从不解析 duration 文本；更早的 `Convert-ToMillis` 用 `[TimeSpan]::Parse`，把 `0:0:1`、`1.00:00:00`、`00:00:01.5` 一律读成合法毫秒。因此改写一条 duration 的形状后，总数、类/方法计数、参数行、结果分布、行时间、phase 行与全部配对都不变，旧闸门 exit 0。
 
 **边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+
+## 6.49 第四十三层口径：任何元素都不得携带写出器不会写的属性（W6-113bj）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | 每个元素的属性名必须落在 `$AttributeVocabulary` 给出的固定集合内（元素本地名 → 写出器会写的属性） | `$attrOk` / `$attrStray` / `$attrUnknown` |
+| 通过条件 | `$xml.SelectNodes('//*')` 逐元素逐属性做 `-notcontains` 判定；多出属性时 throw `an element carries an attribute the writer does not emit`，明细形如 `UnitTestResult carries foo` | 真实语料 attributeVocabulary 全满 |
+| 台阶行 | `structure=... attributeVocabulary=<n>/<elements>` | logs/real-green.log |
+| 负向对照 | clean-two-errors 只给第一个 `<UnitTestResult ` 加 ` foo="1"`（2,697,714 → 2,698,048 B）；旧层 0，新层 1，恰好 1 条 `UnitTestResult carries foo` | results-all.json |
+| 规模 | 2,878→2,961 行；171,849→176,830 B；+84/−1 | sha256 5f6c3143... |
+| 残留限制 | 只校准属性名的词汇表，不校验属性取值（如 testType 的 GUID、computerName 的机器名）是否等于写出器常量 | 取值类不变量留给后续层 |
+
+**为什么第四十二层看不见**：第 42 层及更早只按属性名取值，唯一的属性遍历在 Counters（未知名只 warning）与 TestSettings/Deployment（只挑三个属性、其余静默忽略）。因此给任意元素追加一个属性后，总数、类/方法计数、行序、配对、phase 行与全部台阶行都不变，旧闸门 exit 0。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
