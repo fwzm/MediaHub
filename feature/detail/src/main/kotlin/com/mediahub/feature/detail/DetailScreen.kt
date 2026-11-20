@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.BackdropImage
+import com.mediahub.core.ui.MediaHubThumbnailTokens
 import com.mediahub.core.ui.PosterImage
 import com.mediahub.core.ui.ThumbImage
 import com.mediahub.feature.detail.source.shouldShowSourceSelector
@@ -220,7 +221,7 @@ fun DetailBody(
                     PosterImage(
                         url = item.posterUrl,
                         contentDescription = item.title,
-                        modifier = Modifier.width(104.dp),
+                        modifier = Modifier.width(MediaHubThumbnailTokens.POSTER_HERO_WIDTH_DP.dp),
                     )
                     Column(modifier = Modifier.weight(1f).padding(top = 24.dp)) {
                         Text(
@@ -468,7 +469,7 @@ private fun EpisodeRow(
             url = episode.posterUrl,
             contentDescription = episode.title,
             modifier = Modifier
-                .width(120.dp)
+                .width(MediaHubThumbnailTokens.THUMB_16X9_WIDTH_DP.dp)
                 .aspectRatio(16f / 9f)
                 .clip(RoundedCornerShape(6.dp)),
         )
