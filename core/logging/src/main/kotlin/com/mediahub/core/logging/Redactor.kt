@@ -30,6 +30,19 @@ object Redactor {
         "session-key",
         "client_secret",
         "proxy-authorization",
+        // Emby / Jellyfin 家族的结构化凭据头：键名漏登记 = 整行值原样进日志与诊断导出。
+        "x-emby-authorization",
+        "x-mediabrowser-authorization",
+        "x-mediabrowser-token",
+        "x-session-key",
+    )
+
+    /**
+     * 凭据头键名形状兜底（fail-closed）：未来新增的 `X-<server>-Token` /
+     * `X-<server>-Authorization` / `X-...-Secret` 无需改登记表也自动脱敏。
+     */
+    private val SENSITIVE_HEADER_KEY_PATTERN = Regex(
+        """(?i)^(?:[a-z0-9]+-)*(?:authorization|cookie|token|api-key|apikey|api_key|secret|password|credential|signature|session-key)$"""
     )
 
     /**
@@ -71,13 +84,11 @@ object Redactor {
         Regex(
             """(?i)(\b(?:access_token|refresh_token|id_token|token|api_key|apikey|api-key|password|passwd|pw|session_token|session_key|client_secret|secret|searchterm)\s*[:=]\s*)([^&\s",}]+)"""
         ),
-        // 请求头（整行值）
-        Regex("""(?i)(authorization\s*[:=]\s*)([^
-]+)"""),
-        Regex("""(?i)(cookie\s*[:=]\s*)([^
-]+)"""),
-        Regex("""(?i)(x-(?:emby|mediabrowser|plex)-token\s*[:=]\s*)([^
-]+)"""),
+        // 结构化凭据头（Emby/Jellyfin 家族）：整行值全部抹除。
+        // 值内部同时含 UserId / DeviceId / Token 等片段，只抹 token= 会漏掉其余片段。
+        Regex("""(?i)((?:^|[\s,{(])(?:x-[a-z0-9]+-)*(?:authorization|cookie|set-cookie)\s*[:=]\s*)([^\n]+)"""),
+        // 结构化 token / secret 头（单值）。
+        Regex("""(?i)((?:^|[\s,{(])(?:x-[a-z0-9]+-)*(?:token|api-key|apikey|session-key|secret|password)\s*[:=]\s*)([^\s,;}]+)"""),
     )
 
     /** 脱敏一段文本（URL / 响应体 / 异常消息）。超长输入先全文脱敏再截断（fail-closed）。 */
@@ -98,12 +109,15 @@ object Redactor {
         return out
     }
 
-    /** 脱敏请求/响应头（键名命中敏感集合时隐藏值）。 */
+    /** 脱敏请求/响应头（键名命中敏感集合或凭据头形状时隐藏值）。 */
     fun redactHeaders(headers: Map<String, String>): Map<String, String> =
         headers.mapValues { (key, value) ->
-            if (key.lowercase() in HEADER_KEYS_SENSITIVE) REDACTED else value
+            if (isSensitiveHeader(key)) REDACTED else value
         }
 
-    /** 判断某个请求头键名是否敏感。 */
-    fun isSensitiveHeader(key: String): Boolean = key.lowercase() in HEADER_KEYS_SENSITIVE
+    /** 判断某个请求头键名是否敏感：显式登记集合 ∪ 凭据头形状（fail-closed）。 */
+    fun isSensitiveHeader(key: String): Boolean {
+        val normalized = key.trim().lowercase()
+        return normalized in HEADER_KEYS_SENSITIVE || SENSITIVE_HEADER_KEY_PATTERN.matches(normalized)
+    }
 }
