@@ -1,5 +1,8 @@
 package com.mediahub.core.security
 
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.CodingErrorAction
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.NonCancellable
@@ -19,6 +22,9 @@ data class StoredToken(
 /**
  * 按 serverId 管理 Token 的加密存取。
  * 存储格式（不依赖 JSON 库）：base64(access) | base64(refresh) | expires
+ *
+ * 解码严格性：字段数不符、base64 非法、字节非合法 UTF-8、access 为空、expires 非数字
+ * 一律判为损坏并返回 null —— 宁可让用户重新登录，也不把残缺/替换字符当成有效会话。
  *
  * 说明：使用 java.util.Base64（API 26+ 可用），保证 JVM 单测可运行；
  * 输出格式与旧版（android.util.Base64 NO_WRAP）兼容。
@@ -181,13 +187,25 @@ class TokenStore(private val storage: SecretStorage) {
         if (parts.size != 3) return null
         return try {
             val decoder = Base64.getDecoder()
-            val access = String(decoder.decode(parts[0]), Charsets.UTF_8)
+            val access = decodeUtf8(decoder.decode(parts[0])) ?: return null
+            if (access.isBlank()) return null
             val refreshRaw = decoder.decode(parts[1])
-            val refresh = if (refreshRaw.isEmpty()) null else String(refreshRaw, Charsets.UTF_8)
-            val expires = parts[2].toLongOrNull()?.takeIf { it > 0 }
-            StoredToken(accessToken = access, refreshToken = refresh, expiresAtEpochMs = expires)
+            val refresh = if (refreshRaw.isEmpty()) null else decodeUtf8(refreshRaw) ?: return null
+            val expires = parts[2].toLongOrNull() ?: return null
+            StoredToken(accessToken = access, refreshToken = refresh, expiresAtEpochMs = expires.takeIf { it > 0 })
         } catch (e: IllegalArgumentException) {
             null
         }
+    }
+
+    /** 严格 UTF-8 解码：非法字节返回 null，绝不产出替换字符（U+FFFD）冒充 Token。 */
+    private fun decodeUtf8(bytes: ByteArray): String? = try {
+        Charsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(bytes))
+            .toString()
+    } catch (e: CharacterCodingException) {
+        null
     }
 }
