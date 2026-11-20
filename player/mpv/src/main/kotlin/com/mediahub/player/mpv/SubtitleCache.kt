@@ -4,6 +4,8 @@ import android.net.Uri
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.OriginScopedCredentialInterceptor
+import com.mediahub.model.SubtitleCharset
+import com.mediahub.model.SubtitleCharsetDetector
 import java.io.File
 import java.io.IOException
 import kotlin.coroutines.resume
@@ -121,6 +123,7 @@ internal open class SubtitleCache(
         try {
             if (remote) download(uri, mediaUrl, sessionHeaders, part, token)
             else if (!contentResolver.copy(Uri.parse(uri), part)) return null
+            normalizeToUtf8(part)
             beforeCommit(part) // deterministic test seam at the real, closed-file publication window
             job.ensureActive()
             return synchronized(ownershipLock) {
@@ -145,6 +148,28 @@ internal open class SubtitleCache(
                 }
             }
         }
+    }
+
+    /**
+     * 落盘前统一转成 UTF-8（审计条目 66：部分字幕乱码）。
+     *
+     * mpv 的 `sub-add` 按 UTF-8 渲染本地字幕文件，非 UTF-8 字节（GBK/GB18030/Big5）会直接显示成乱码。
+     * 因此**在发布（rename）之前**就地改写 part：探测编码 → 解码 → 以 UTF-8 重写。
+     * - 已是 UTF-8（含带 BOM）的字节逐字节保留，不改写用户的合法文件；
+     * - 探测为 UNKNOWN 时保持原字节（宁可乱码也不猜错编码把文件写坏）；
+     * - 任何异常都只记录、不抛出：转码失败退化为旧行为，不阻断字幕加载。
+     */
+    private fun normalizeToUtf8(part: File) {
+        val bytes = runCatching { part.readBytes() }.getOrNull() ?: return
+        if (bytes.isEmpty()) return
+        val detected = SubtitleCharsetDetector.detect(bytes)
+        if (detected == SubtitleCharset.UTF_8 || detected == SubtitleCharset.UNKNOWN) return
+        val text = SubtitleCharsetDetector.decode(bytes)
+        val utf8 = text.toByteArray(Charsets.UTF_8)
+        if (utf8.contentEquals(bytes)) return
+        runCatching { part.writeBytes(utf8) }
+            .onSuccess { logger.d(LogTag.PLAYER, "mpv external subtitle transcoded to UTF-8") }
+            .onFailure { logger.w(LogTag.PLAYER, "mpv external subtitle transcode failed") }
     }
 
     private suspend fun download(
