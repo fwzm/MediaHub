@@ -25,8 +25,23 @@ data class DeviceCapabilities(
     val maxDisplayHeight: Int = 2160,
     val sdkInt: Int = 0,
 ) {
-    fun videoCapability(codec: VideoCodec): VideoCodecCapability? =
-        videoCodecs.firstOrNull { it.codec == codec }
+    /**
+     * 合并同一编码的多个解码器能力（MediaCodecList 常为同一编码返回软解 + 硬解 + 不同档位）。
+     * 只取首个匹配会让能力取决于声明顺序：软解在前会把硬解能力藏起来，
+     * 因此这里取"包络"：最大分辨率取最大、10bit 与硬解取任一支持。
+     */
+    fun videoCapability(codec: VideoCodec): VideoCodecCapability? {
+        val matching = videoCodecs.filter { it.codec == codec }
+        if (matching.isEmpty()) return null
+        if (matching.size == 1) return matching.first()
+        return VideoCodecCapability(
+            codec = codec,
+            maxWidth = matching.maxOf { it.maxWidth },
+            maxHeight = matching.maxOf { it.maxHeight },
+            supports10Bit = matching.any { it.supports10Bit },
+            hardwareAccelerated = matching.any { it.hardwareAccelerated },
+        )
+    }
 
     fun supportsHdr(hdr: HdrType): Boolean = hdr == HdrType.NONE || hdr in hdrSupported
 }
