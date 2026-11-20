@@ -1927,3 +1927,17 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 **为什么第三十五层看不见**：第 35 层只比较 phase 相对时钟与 `Times` 窗口，RunInfo 的 Text clock 和 timestamp 各自都能通过行窗、顺序和 canonical 检查；把第二项 timestamp 后移 250 ms 时，两者不再描述同一瞬间，但旧层仍全绿。
 
 **边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+## 6.43 第三十七层口径：Starting 不得晚于最早结果行（W6-113bd）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | `Starting` phase clock 与所有 `UnitTestResult/@startTime` 的最早值（相对 `Times.start`） | phaseClock 块 |
+| 通过条件 | `earliestRowStart - Times.start >= Starting clock`，空结果行集视为通过 | 真实 earliest 1.133/0.931/1.819/4.442/0.849 s vs Starting 0.46/0.42/0.46/0.46/0.19 |
+| 台阶行 | `phaseClock=<n>/4 ordered=<0或1> finishedAfterRunInfo=<0或1> withinRun=<0或1> firstRowAfterStart=<0或1>` | gate-real-r58.log |
+| 负向对照 | clean-two-errors 只把 Starting .46 改 2.00；旧层 0，新层 1，`firstRowAfterStart=0`，恰好 1 条 comes-after-first-row | results-all.json |
+| 规模 | 2,702→2,743 行；160,608→162,959 B；+43/−2 | sha256 5f9cb1df... |
+| 残留限制 | 只证明 Starting 不晚于最早行；不约束 Finished 与行尾（真实语料行尾比 Finished 晚约 0.59 s，需要容差才有意义） | 真实语料观察 |
+
+**为什么第三十六层看不见**：第 34/35 层只比较 phase 时钟彼此、run 窗口和最后 RunInfo；第 36 层只比较 RunInfo 的 Text clock 与 timestamp。把 Starting 移到 2.00 时所有 phase 时钟仍递增、仍在 `Times` 窗口内、Finished 仍晚于最后 RunInfo，但最早行 1.819 已开始，旧层无法发现。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。

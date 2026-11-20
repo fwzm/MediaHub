@@ -1348,3 +1348,33 @@
 
 - CLAIM run-id `w6-113-round17-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
 - W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。
+## Round 57（W6-113bd，2026-11-19）：Starting 不得晚于最早结果行
+
+### 动机
+
+第 34/35/36 层的 phaseClock 只把四个 phase 时钟互相比、与 `Times` 窗口比、与最后一条 RunInfo Text clock 比；它从不读取结果行自己的 `startTime`。因此把 `Starting` 从 `00:00:00.46` 改到 `00:00:02.00`，phase 顺序 .11/.29/2.00/7.88 仍成立、`withinRun` 仍成立、`Finished` 仍晚于最后 RunInfo 4.44，旧闸门全绿；但真实最早行从 1.819 s 相对 `Times.start` 开始，控制台却声称宿主到 2.00 s 才启动。真实语料的最早行均晚于 Starting：绿色 gate-corpus 1.133 vs 0.46、真实失败 0.931 vs 0.42、clean-two-errors 1.819 vs 0.46、fail-with-runinfo 4.442 vs 0.46、WebDav 0.849 vs 0.19。
+
+### 变更
+
+- `windows/tools/check-test-suite-baseline.ps1`：2,702 → 2,743 行，160,608 → 162,959 B，`+43 / -2`，sha256 `5f9cb1dfe544706e9b3dcd8da144a5511dedc3b45a02d8dd1973c4b62cd022d2`（父层 `90bdf991f8c4caf5c501ece6fc683aab30be604e80316fc5244d0233efcf1548`）。
+- phaseClock 块新增 `$summaryPhaseStartingClock` / `$summaryPhaseStartingClockText`；在四个 phase 时钟有序时遍历 `@($xml.TestRun.Results.UnitTestResult)`，用 `Convert-ToInstant` 求最早 `@startTime`，比较 `($earliestRowStart - $phaseRunStart) -ge $summaryPhaseStartingClock`。
+- 不成立时向 `$summaryPhaseClockProblems` 追加 `the Starting clock '...' comes after the first result row '...' started at '...'`，`$summaryFirstRowAfterStart=0`；无结果行时视为 1（空集不反证）。
+- throw 消息扩展为 `(phaseClock=N/4 ordered=... finishedAfterRunInfo=... withinRun=... firstRowAfterStart=0|1)`，expected 增加 `Starting not later than the earliest result row's start`；台阶行在现有字段末尾追加 `firstRowAfterStart=<0|1>`。
+- 顶部 phase 注释与 SEMANTICS 各补一段；双 shell PARSE-OK（pwsh 7.6.10、Windows PowerShell 5.1.26100.10003）；纯 ASCII、无 BOM/CRLF；`git diff --check` exit 0。
+
+### 验证（EXECUTED）
+
+- 真实绿色 gate-corpus：exit 0；两套件 `phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1`，`combined tests=2077`；日志 `D:/mh-verify/r58/gate-real-r58.log`。
+- 真实失败 TRX（total=767，failed=6）：exit 1；`firstRowAfterStart=1`，`runInfoChronology=6/6`、`runInfoOffset=6/6` 保持，唯一 throw `MediaHub.Tests: 6 test(s) failed`；日志 `D:/mh-verify/r58/gate-real-failing-r58.log`。
+- 5 例矩阵：clean-real / clean-two-errors / clean-green / fail-with-runinfo 旧新均 exit 0、`firstRowAfterStart=1`、problems=0；`bad-starting-after-first-row` 旧 0 / 新 1、`firstRowAfterStart=0`、恰好 1 条 `comes after the first result row` 问题；`oldAllZero=true`、`cleanOk=true`、`redOk=true`；结果 `D:/mh-verify/r58/results-all.json`。
+- 夹具：从 `D:/mh-verify/r54/cases/clean-two-errors` 复制到 `D:/mh-verify/r58/cases/bad-starting-after-first-row`，只把 `[xUnit.net 00:00:00.46]   Starting:    MediaHub.Tests` 改为 `00:00:02.00`（恰好 1 次，文件仍 2,698,040 B）。
+
+### 提交与 exact-head CI
+
+- 代码提交 `5ad8ff57128f3f885eb53d8a14c9855f603ef319`（`ci(windows): the host cannot start after the first row (W6-113bd)`）；Draft PR #179，base main，stacked on #176，G7 DO_NOT_MERGE。
+- 代码 head CI：windows-ci `44646121700`（push）`success`、`44646185495`（pull_request）`success`；Android CI `44646185437` `success`。
+
+### 锁与边界
+
+- CLAIM run-id `w6-113-round18-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
+- W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。
