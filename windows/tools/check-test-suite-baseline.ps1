@@ -233,6 +233,13 @@
 #   StackTrace and Text are written with text of their own, so the gate walks every
 #   element and refuses text anywhere else; the structure ladder line adds
 #   textVocabulary=<elements with text of their own>/<elements carrying text>.
+#   The attributes also have one fixed order per element, and nothing above read
+#   that: the vocabulary is a set, so swapping two attributes of one element keeps
+#   every value, every count, every pairing and every phase line identical while
+#   the bytes stop being the ones VSTest wrote. The writer emits each element's
+#   attributes in one order, so the gate walks every element and requires the
+#   attributes present to appear in that order; the structure ladder line adds
+#   attributeOrder=<elements in the writer's order>/<elements>.
 
 #   The rows also carry an order, and nothing above read it: TestEntries and the
 #   Results section are written from one ordered pass, so the row at position N is
@@ -556,6 +563,11 @@
 #     every ladder line stays identical; only StdOut, Message, StackTrace and Text
 #     are written with text of their own. The structure ladder line records
 #     textVocabulary=<elements with text of their own>/<elements carrying text>.
+#   an element writes its attributes in an order the writer never uses -> red. The
+#     vocabulary is a set, so swapping two attributes keeps every value, every count,
+#     every pairing and every ladder line identical while the bytes are no longer the
+#     ones VSTest wrote; the structure ladder line records
+#     attributeOrder=<elements in the writer's order>/<elements>.
 
 #   the row at position N of Results does not name the test that position N of
 #     TestEntries declares -> red. The two sections are emitted from one ordered
@@ -648,6 +660,36 @@ $AttributeVocabulary['TestDefinitions'] = @()
 $AttributeVocabulary['TestEntries'] = @()
 $AttributeVocabulary['TestLists'] = @()
 $AttributeVocabulary['Text'] = @()
+# The writer also emits each element's attributes in one fixed order, and nothing
+# above read that: the attribute vocabulary is a set, so swapping two attributes of
+# one element keeps every value, every count, every pairing and every ladder line
+# identical while the bytes stop being the ones VSTest wrote. Keep the order the
+# writer uses for each element and require the attributes present to appear in it.
+$AttributeOrder = @{}
+$AttributeOrder['TestRun'] = @('id', 'name', 'runUser', 'xmlns')
+$AttributeOrder['Times'] = @('creation', 'queuing', 'start', 'finish')
+$AttributeOrder['TestSettings'] = @('name', 'id')
+$AttributeOrder['Deployment'] = @('runDeploymentRoot')
+$AttributeOrder['UnitTestResult'] = @('executionId', 'testId', 'testName', 'computerName', 'duration', 'startTime', 'endTime', 'testType', 'outcome', 'testListId', 'relativeResultsDirectory')
+$AttributeOrder['UnitTest'] = @('name', 'storage', 'id')
+$AttributeOrder['Execution'] = @('id')
+$AttributeOrder['TestMethod'] = @('codeBase', 'adapterTypeName', 'className', 'name')
+$AttributeOrder['TestEntry'] = @('testId', 'executionId', 'testListId')
+$AttributeOrder['TestList'] = @('name', 'id')
+$AttributeOrder['ResultSummary'] = @('outcome')
+$AttributeOrder['RunInfo'] = @('computerName', 'outcome', 'timestamp')
+$AttributeOrder['Counters'] = @('total', 'executed', 'passed', 'failed', 'error', 'timeout', 'aborted', 'inconclusive', 'passedButRunAborted', 'notRunnable', 'notExecuted', 'disconnected', 'warning', 'completed', 'inProgress', 'pending')
+$AttributeOrder['ErrorInfo'] = @()
+$AttributeOrder['Message'] = @()
+$AttributeOrder['Output'] = @()
+$AttributeOrder['Results'] = @()
+$AttributeOrder['RunInfos'] = @()
+$AttributeOrder['StackTrace'] = @()
+$AttributeOrder['StdOut'] = @()
+$AttributeOrder['TestDefinitions'] = @()
+$AttributeOrder['TestEntries'] = @()
+$AttributeOrder['TestLists'] = @()
+$AttributeOrder['Text'] = @()
 # Every element is also read by path, so an element moved under the wrong parent
 # keeps every count, pairing, row time and phase line identical - the only place
 # the tree itself was checked is TestRun's own section order. Keep the children
@@ -1761,6 +1803,38 @@ foreach ($e in $baseline.suites) {
   if ($attrStray.Count -gt 0) {
     throw "$($e.suite): an element carries an attribute the writer does not emit while the total was $total - every element above is read by name, so a file that gains an attribute keeps every count, every pairing, every row time and every phase line identical. broken: $($attrStray -join ', '). A TRX whose elements were extended by hand was hand-merged or patched; regenerate it from a clean test run."
   }
+  # The writer also emits each element's attributes in one fixed order, and nothing
+  # above read that: the attribute vocabulary is a set, so swapping two attributes of
+  # one element keeps every value, every count, every pairing and every phase line
+  # identical while the bytes stop being the ones VSTest wrote. Walk every element
+  # and require the attributes it does carry to appear in the writer's order.
+  $orderElements = 0
+  $orderOk = 0
+  $orderStray = @()
+  foreach ($oen in @($xml.SelectNodes('//*'))) {
+    $oenName = [string]$oen.LocalName
+    if (-not $AttributeOrder.ContainsKey($oenName)) { continue }
+    $orderElements++
+    $expectedOrder = @($AttributeOrder[$oenName])
+    $actualOrder = @()
+    foreach ($oat in @($oen.Attributes)) { $actualOrder += [string]$oat.Name }
+    $lastPos = -1
+    $misordered = $false
+    foreach ($oan in $actualOrder) {
+      $pos = [array]::IndexOf($expectedOrder, $oan)
+      if ($pos -lt 0) { continue }
+      if ($pos -lt $lastPos) { $misordered = $true }
+      $lastPos = $pos
+    }
+    if (-not $misordered) {
+      $orderOk++
+    } elseif ($orderStray.Count -lt 12) {
+      $orderStray += "$oenName writes $($actualOrder -join ',') where the writer writes $($expectedOrder -join ',')"
+    }
+  }
+  if ($orderStray.Count -gt 0) {
+    throw "$($e.suite): an element writes its attributes in an order the writer never uses while the total was $total - the attribute vocabulary above is a set, so swapping two attributes of one element keeps every value, every count, every pairing, every row time and every phase line identical. broken: $($orderStray -join '; '). A TRX whose attribute order was rewritten by hand was hand-merged or patched; regenerate it from a clean test run."
+  }
   # Every instant in one results file is written in one zone. The offset checks
   # above ask each stamp to carry an offset and place it on the timeline, but they
   # never ask the stamps to agree with one another: a row copied in from another
@@ -2789,7 +2863,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): outcomes=$($actualOutcomes.Count) baseline=outcome table $(@($e.outcomes.PSObject.Properties.Name).Count) outcomes"
   "$($e.suite): identities=$pairedIds named=$namedRows unique test ids shared by both halves"
   "$($e.suite): rowAttributes=$rowCount unique execution ids=$($execIdCounts.Count) ordered row times=$timeOrdered rows within the run window=$inWindow uniform row fields=$uniformFields rowTimeOffsets=$rowTimeOffsets/$($rowCount*2) durationShape=$durShapeOk/$rowCount"
-  "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount runSections=$runSectionMatches/7 attributeVocabulary=$attrOk/$attrElements runZones=$($runZoneList.Count) zoneStamps=$runZoneStamps childVocabulary=$childOk/$childEdges textVocabulary=$textOk/$textElements"
+  "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount runSections=$runSectionMatches/7 attributeVocabulary=$attrOk/$attrElements attributeOrder=$orderOk/$orderElements runZones=$($runZoneList.Count) zoneStamps=$runZoneStamps childVocabulary=$childOk/$childEdges textVocabulary=$textOk/$textElements"
   "$($e.suite): executionIds=$($execByDefId.Count) distinct declared ids=$($defExecCounts.Count) paired rows=$pairedRowExecs paired result directories=$pairedRowDirs"
   "$($e.suite): displayNames=$displayNameChecked declared prefixes=$($displayNameChecked - $displayNameLost.Count) mismatched=$($displayNameLost.Count)"
   "$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"
