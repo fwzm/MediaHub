@@ -226,6 +226,13 @@
 #   was collected in, so the gate collects the distinct offsets over every
 #   attribute of the document and refuses more than one; the structure ladder line
 #   adds runZones=<distinct offsets> zoneStamps=<stamps read>.
+#   The elements also carry text only where the writer puts it, and nothing above
+#   read that: the containers are read by path and the leaves by attribute, so a
+#   text node added inside a list, a counter or a row keeps every count, every
+#   pairing, every row time and every phase line identical. Only StdOut, Message,
+#   StackTrace and Text are written with text of their own, so the gate walks every
+#   element and refuses text anywhere else; the structure ladder line adds
+#   textVocabulary=<elements with text of their own>/<elements carrying text>.
 
 #   The rows also carry an order, and nothing above read it: TestEntries and the
 #   Results section are written from one ordered pass, so the row at position N is
@@ -543,6 +550,12 @@
 #     pairing and every ladder line identical while the tree is no longer the one
 #     VSTest writes; the structure ladder line records
 #     childVocabulary=<children in a known place>/<child elements>.
+#   an element carries text the writer does not put there -> red. The containers
+#     are read by path and the leaves by attribute, so a text node added inside a
+#     list, a counter or a row is never read while every count, every pairing and
+#     every ladder line stays identical; only StdOut, Message, StackTrace and Text
+#     are written with text of their own. The structure ladder line records
+#     textVocabulary=<elements with text of their own>/<elements carrying text>.
 
 #   the row at position N of Results does not name the test that position N of
 #     TestEntries declares -> red. The two sections are emitted from one ordered
@@ -666,6 +679,15 @@ $ChildVocabulary['Message'] = @()
 $ChildVocabulary['StackTrace'] = @()
 $ChildVocabulary['StdOut'] = @()
 $ChildVocabulary['Text'] = @()
+
+# Every element is also read by name for its text: only StdOut, Message,
+# StackTrace and Text are written with text of their own, and every other
+# element is either empty or a container. Nothing above reads the text of any
+# other element, so a note added inside a list, a counter or a row keeps every
+# count, every pairing, every row time and every phase line identical while the
+# file stops being the shape VSTest writes. Keep the elements the writer gives
+# text to; a text node anywhere else is a shape VSTest never writes.
+$TextVocabulary = @('StdOut', 'Message', 'StackTrace', 'Text')
 
 # Sorted copy of one method's argument rows, duplicates kept. A row is the
 # display-name suffix from the first "(", i.e. the argument text of one
@@ -1796,6 +1818,34 @@ foreach ($e in $baseline.suites) {
   if ($childStray.Count -gt 0) {
     throw "$($e.suite): an element nests a child the writer does not place there while the total was $total - every container below TestRun is read by path, so an element moved under the wrong parent keeps every count, every pairing, every row time and every phase line identical. broken: $($childStray -join ', '). A TRX whose tree was rearranged by hand was hand-merged or patched; regenerate it from a clean test run."
   }
+  # Every element also carries text only where the writer puts it. The containers
+  # are read by path and the leaves by attribute, so a text node added inside a
+  # list, a counter or a row is never read by any check above: every count, every
+  # pairing, every row time and every phase line stays identical while the file
+  # stops being the shape VSTest writes. Walk every element and require its own
+  # text - the text nodes directly under it, not its descendants - to be either
+  # blank or owned by an element the writer gives text to.
+  $textElements = 0
+  $textOk = 0
+  $textStray = @()
+  foreach ($tenNode in @($xml.SelectNodes('//*'))) {
+    $tenName = [string]$tenNode.LocalName
+    $tenText = ''
+    foreach ($tenChild in @($tenNode.ChildNodes)) {
+      $tenType = [string]$tenChild.NodeType
+      if ($tenType -eq 'Text' -or $tenType -eq 'CDATA' -or $tenType -eq 'SignificantWhitespace') { $tenText += [string]$tenChild.Value }
+    }
+    if ([string]::IsNullOrWhiteSpace($tenText)) { continue }
+    $textElements++
+    if ($TextVocabulary -contains $tenName) {
+      $textOk++
+    } elseif ($textStray.Count -lt 12) {
+      $textStray += "text inside $tenName"
+    }
+  }
+  if ($textStray.Count -gt 0) {
+    throw "$($e.suite): an element carries text the writer does not put there while the total was $total - the containers are read by path and the leaves by attribute, so a text node added inside a list, a counter or a row keeps every count, every pairing, every row time and every phase line identical. broken: $($textStray -join ', '). A TRX whose elements were annotated by hand was hand-merged or patched; regenerate it from a clean test run."
+  }
   # A declared list is a vocabulary entry, not just an id in a set. The structure
   # check above asks a list id to exist, be unique and be used, and the row metadata
   # check asks every row to name one list, so the name - the only part a reader ever
@@ -2739,7 +2789,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): outcomes=$($actualOutcomes.Count) baseline=outcome table $(@($e.outcomes.PSObject.Properties.Name).Count) outcomes"
   "$($e.suite): identities=$pairedIds named=$namedRows unique test ids shared by both halves"
   "$($e.suite): rowAttributes=$rowCount unique execution ids=$($execIdCounts.Count) ordered row times=$timeOrdered rows within the run window=$inWindow uniform row fields=$uniformFields rowTimeOffsets=$rowTimeOffsets/$($rowCount*2) durationShape=$durShapeOk/$rowCount"
-  "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount runSections=$runSectionMatches/7 attributeVocabulary=$attrOk/$attrElements runZones=$($runZoneList.Count) zoneStamps=$runZoneStamps childVocabulary=$childOk/$childEdges"
+  "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount runSections=$runSectionMatches/7 attributeVocabulary=$attrOk/$attrElements runZones=$($runZoneList.Count) zoneStamps=$runZoneStamps childVocabulary=$childOk/$childEdges textVocabulary=$textOk/$textElements"
   "$($e.suite): executionIds=$($execByDefId.Count) distinct declared ids=$($defExecCounts.Count) paired rows=$pairedRowExecs paired result directories=$pairedRowDirs"
   "$($e.suite): displayNames=$displayNameChecked declared prefixes=$($displayNameChecked - $displayNameLost.Count) mismatched=$($displayNameLost.Count)"
   "$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"
