@@ -214,7 +214,7 @@ fun DetailBody(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
+                    .padding(horizontal = DETAIL_SCREEN_GUTTER_DP.dp),
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     PosterImage(
@@ -267,8 +267,8 @@ fun DetailBody(
             onClick = { onPlay(item) },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 20.dp)
-                .height(54.dp),
+                .padding(horizontal = DETAIL_PRIMARY_CTA_PADDING_DP.dp, vertical = DETAIL_PRIMARY_CTA_PADDING_DP.dp)
+                .height(DETAIL_PRIMARY_CTA_HEIGHT_DP.dp),
             shape = MaterialTheme.shapes.medium,
         ) {
             Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(26.dp))
@@ -434,7 +434,7 @@ fun DetailBody(
 
         item.overview?.takeIf(String::isNotBlank)?.let { overview ->
             var expanded by remember { mutableStateOf(false) }
-            Column(modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
+            Column(modifier = Modifier.padding(horizontal = DETAIL_SCREEN_GUTTER_DP.dp).padding(bottom = 32.dp)) {
                 com.mediahub.core.ui.MediaHubSectionHeader("剧情简介", modifier = Modifier.padding(bottom = 10.dp))
                 Text(
                     overview,
