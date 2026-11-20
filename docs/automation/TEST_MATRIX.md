@@ -2001,3 +2001,18 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 **为什么第四十层看不见**：第 40 层只给 `RunInfo/@timestamp` 增加显式 offset 要求，第 39 层及更早的 `$sectionBlocks` 只对六个节名做出现次数计数、`TestSettings` 单独计数，没有任何检查读取 `TestRun` 子元素的位置。因此重排节块后，总数、类/方法计数、参数行、结果分布、行时间、phase 行与全部配对都不变，旧闸门 exit 0。
 
 **边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+
+## 6.48 第四十二层口径：每一行的时长保持写出时的形状（W6-113bi）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | 每条 `UnitTestResult/@duration` 的文本形状，必须恰为 `hh:mm:ss.fffffff`（两位时、两位分、两位秒、七位小数） | `$durShapeOk` / `$durShapeLost` / `$rdurRaw` |
+| 通过条件 | 逐行 `-cmatch '^[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{7}$'` 命中；否则 `$rowAttrLost` 追加 `<n> row(s) carry a duration that is not written as hh:mm:ss.fffffff` | 真实语料 durationShape 全满 |
+| 台阶行 | `rowAttributes=... durationShape=<n>/<rows>` | logs/real-green.log |
+| 负向对照 | clean-two-errors 只把一条行 duration 改成 `0:00:00.0795122`（同一 tick 数、少 1 字符）；旧层 0，新层 1，恰好 1 条形状问题 | results-all.json |
+| 规模 | 2,851→2,878 行；170,342→171,849 B；+29/−3 | sha256 a8cb9628... |
+| 残留限制 | 只校准 duration 的书写形状，不建立 duration 与 start/end 的严格等值（真实语料最大差 51 ms，已有 1 秒容差告警） | 既有 `$durDrift` warning 保留 |
+
+**为什么第四十一层看不见**：第 41 层只读 `TestRun` 直接子元素的位置序列，从不解析 duration 文本；更早的 `Convert-ToMillis` 用 `[TimeSpan]::Parse`，把 `0:0:1`、`1.00:00:00`、`00:00:01.5` 一律读成合法毫秒。因此改写一条 duration 的形状后，总数、类/方法计数、参数行、结果分布、行时间、phase 行与全部配对都不变，旧闸门 exit 0。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。

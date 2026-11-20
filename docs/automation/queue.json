@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-20T14:45:00+08:00",
-  "updated_by": "lead-W6-113-r61",
+  "updated_at": "2026-11-20T16:05:00+08:00",
+  "updated_by": "lead-W6-113-r62",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -1305,6 +1305,25 @@
       "notes": "第四十一层：TestRun 直接子元素必须恰为 Times,TestSettings,Results,TestDefinitions,TestEntries,TestLists,ResultSummary。既有 section 检查只数出现次数（六名白名单 + TestSettings 单独计数），从不读位置，因此重排节块后所有计数、配对、行时间与 phase 行不变。台阶行 structure 末尾新增 runSections=<n>/7。",
       "next_action": "候选第 42 层：继续从真实语料侦察可证的结构不变量；已覆盖六处显式 offset、section 计数与顺序、行序与 entry 序、Counters 算术与行复现、executionId 配对、RunInfo 布局与文本；duration 严格等值（真实最大差 51 ms，已有 1 s 容差 warning）、Finished 与最后一行结束时间上界（需容差）、RunInfo/ErrorInfo 文本交叉引用（缺测试名）、ResultFiles（全部语料为空）均暂不选；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
       "closed_at": "2026-11-20T14:45:00+08:00"
+    },
+    {
+      "id": "W6-113bi",
+      "title": "第四十二层：每一行的时长保持写出时的形状（W6-113bi）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r62",
+      "branch": "feature/windows-w6-113bi-duration-shape",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,851 -> 2,878 lines, 170,342 -> 171,849 B, 29 insertions / 3 deletions, sha256 a8cb9628ddc7fdc1a08ab7d6c90326ffe382c3810a70f126e0108a4e67955a55; old sha256 06d5306098a69accae7663e66314fed5072706ec59c9f9b7bdb5138adaa4f1e6; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites durationShape=1973/1973 and 104/104, rowTimeOffsets=3946/3946 and 208/208, phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1; MediaHub.Tests total=1973 baseline=1973, WebDav 104, combined tests=2077; log D:/mh-verify/r63/logs/real-green.log.",
+        "Real failing TRX (total=767, failed=6): exit 1; durationShape=767/767, timestampOffsets=6/6, runInfoChronology=6/6, runInfoOffset=6/6; only final 6 test(s) failed; log D:/mh-verify/r63/logs/real-failing.log.",
+        "Corpus census: 4,043 result rows across 7 real corpora all carry 16-character canonical durations (length set exactly {16}); max 00:00:05.3670676, min 00:00:00.0000008.",
+        "Negative matrix 5 cases: clean-real 0/0, clean-two-errors 0/0, clean-green 0/0, fail-with-runinfo 0/0 all with durationShape full; bad-duration-shape OLD=0/NEW=1 with exactly one shape problem (1 row(s) carry a duration that is not written as hh:mm:ss.fffffff); oldAllZero=true; results D:/mh-verify/r63/results-all.json.",
+        "Code commit 7eee35e3197355fe7ced2306f5c229d2767c4514 (ci(windows): every row duration keeps the shape the writer gives it (W6-113bi)); windows-ci 44699199883 (push) success, 44699247427 (pull_request) success; Android CI 44699247182 success."
+      ],
+      "notes": "第四十二层：每条 UnitTestResult/@duration 的文本形状必须恰为 hh:mm:ss.fffffff。既有 Convert-ToMillis 用 [TimeSpan]::Parse，宽容接受 0:0:1、00:00:01、000:00:01、00:00:01.5、1.00:00:00，所以被改写的 duration 读得通、不触发 unreadable/negative 与 1 秒 drift 告警、也不动台阶行。台阶行 rowAttributes 末尾新增 durationShape=<n>/<rows>。",
+      "next_action": "候选第 43 层：继续从真实语料侦察可证的结构不变量；已覆盖六处显式 offset、section 计数与顺序、行序与 entry 序、Counters 算术与行复现、executionId 配对、RunInfo 布局与文本、duration 书写形状；duration 严格等值（真实最大差 51 ms，已有 1 s 容差 warning）、Finished 与最后一行结束时间上界（需容差）、RunInfo/ErrorInfo 文本交叉引用（缺测试名）、ResultFiles（全部语料为空）、UnitTestResult/@resultType（100% 缺失）均暂不选；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T16:05:00+08:00"
     }
   ]
 }

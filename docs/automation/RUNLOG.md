@@ -1499,3 +1499,34 @@
 
 - CLAIM run-id `w6-113-round22-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
 - W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。
+
+## Round 62（W6-113bi，2026-11-19）：每一行的时长保持写出时的形状
+
+### 动机
+
+第 41 层之前，闸门对每条 `UnitTestResult/@duration` 只做两件事：用 `Convert-ToMillis` 解析成毫秒，解析不出来或为负就计入 `$badDuration`，再拿它与该行自己的 start/end 差值做一次 1 秒容差的漂移告警。解析用的是 `[TimeSpan]::Parse`，它极其宽容：`0:0:1`、`00:00:01`、`000:00:01`、`00:00:01.5`、`1.00:00:00` 全部能解析成合法的毫秒数。于是一条被手工改写过的 duration 仍然读得通、不触发任何告警、也不推动任何台阶行，文件却已不是 VSTest 写出的形状。
+
+### 变更
+
+- `windows/tools/check-test-suite-baseline.ps1`：2,851 → 2,878 行，170,342 → 171,849 B，`+29 / -3`，sha256 `a8cb9628ddc7fdc1a08ab7d6c90326ffe382c3810a70f126e0108a4e67955a55`（父层 `06d5306098a69accae7663e66314fed5072706ec59c9f9b7bdb5138adaa4f1e6`）。
+- 新增 `$durShapeOk` / `$durShapeLost` 计数；行循环里先把原始文本读进 `$rdurRaw`，再用 `-cmatch '^[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{7}$'` 判定形状，命中记 OK，否则记 Lost，并向 `$rowAttrLost` 追加 `<n> row(s) carry a duration that is not written as hh:mm:ss.fffffff`。
+- 台阶行 `rowAttributes=` 末尾追加 `durationShape=<n>/<rows>`；头注释与 SEMANTICS 各补一段；throw 文案补上「or a duration written in another shape」。
+- 双 shell PARSE-OK（pwsh 7.6.10、Windows PowerShell 5.1.26100.10003）；纯 ASCII（nonAscii 0）、LF、无 BOM；`git diff --check` exit 0。
+
+### 验证（EXECUTED）
+
+- 语料普查：7 个真实语料共 4,043 条行 duration 全部为 16 字符 canonical 形状（长度集合恒为 {16}），最大 `00:00:05.3670676`、最小 `00:00:00.0000008`。
+- 真实绿色 gate-corpus：exit 0；两套件 `durationShape=1973/1973` 与 `104/104`，`phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1`，`MediaHub.Tests total=1973 baseline=1973`、WebDav 104、`combined tests=2077`；日志 `D:/mh-verify/r63/logs/real-green.log`。
+- 真实失败 TRX（total=767，failed=6）：exit 1；`durationShape=767/767`、`timestampOffsets=6/6`、`runInfoChronology=6/6`、`runInfoOffset=6/6`，唯一 throw `MediaHub.Tests: 6 test(s) failed`；日志 `D:/mh-verify/r63/logs/real-failing.log`。
+- 5 例矩阵：clean-real / clean-two-errors / clean-green / fail-with-runinfo 旧新均 exit 0、两套件 durationShape 全满、problems=0；`bad-duration-shape` **旧 0 / 新 1**，恰好 1 条 `1 row(s) carry a duration that is not written as hh:mm:ss.fffffff`；`oldAllZero=true`、`cleanOk=true`、`redOk=true`；结果 `D:/mh-verify/r63/results-all.json`。
+- 夹具：从 `D:/mh-verify/r54/cases/clean-two-errors` 复制到 `D:/mh-verify/r63/cases/bad-duration-shape`，只把一条行的 `duration="00:00:00.0795122"` 改成 `duration="0:00:00.0795122"`（同一时刻、同一 tick 数，少 1 字符；文件 2,698,040 → 2,698,039 B）；旧第 41 层在该夹具上 exit 0，证明形状此前完全不可见。
+
+### 提交与 exact-head CI
+
+- 代码提交 `7eee35e3197355fe7ced2306f5c229d2767c4514`（`ci(windows): every row duration keeps the shape the writer gives it (W6-113bi)`）；Draft PR #198，base main，stacked on #193，G7 DO_NOT_MERGE。
+- 代码 head CI：windows-ci `44699199883`（push）`success`、`44699247427`（pull_request）`success`；Android CI `44699247182` `success`。
+
+### 锁与边界
+
+- CLAIM run-id `w6-113-round23-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
+- W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。
