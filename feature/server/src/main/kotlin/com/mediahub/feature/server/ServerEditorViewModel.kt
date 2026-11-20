@@ -14,6 +14,7 @@ import com.mediahub.model.EndpointQualityResult
 import com.mediahub.model.MediaServer
 import com.mediahub.model.ServerEndpoint
 import com.mediahub.model.ServerType
+import com.mediahub.model.activeEndpoint
 import com.mediahub.provider.api.ConnectionStatus
 import com.mediahub.provider.api.MediaProviderRegistry
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -417,6 +418,36 @@ class ServerEditorViewModel @Inject constructor(
         }
     }
 
+    /** 切换当前生效线路（仅草稿；保存后写库）。停用/未知线路显式不动。 */
+    fun selectEndpoint(endpointId: String) {
+        val state = _uiState.value
+        val server = state.server ?: return
+        val target = server.endpoints.firstOrNull { it.id == endpointId && it.enabled } ?: return
+        qualityJob?.cancel()
+        qualityRequestId += 1
+        val preferHttps = target.url.startsWith("https://", ignoreCase = true)
+        val normalized = ServerAddressNormalizer.normalize(target.url, preferHttps)
+        _uiState.update { st ->
+            val current = st.server ?: server
+            st.copy(
+                server = current.copy(
+                    endpoints = current.endpoints.map { ep -> ep.copy(isPrimary = ep.id == endpointId) },
+                ),
+                baseUrl = target.url,
+                preferHttps = preferHttps,
+                resolvedUrl = (normalized as? ServerAddressNormalizer.Result.Ok)?.address?.url,
+                addressError = (normalized as? ServerAddressNormalizer.Result.Invalid)?.error?.userMessage,
+                addressVersion = st.addressVersion + 1,
+                qualityRequestId = qualityRequestId,
+                isMediaTesting = false,
+                testResult = null,
+                mediaQualityResult = null,
+                message = "已切换线路：${target.name}",
+                error = null,
+            )
+        }
+    }
+
     fun delete(onDeleted: () -> Unit) {
         val server = _uiState.value.server ?: return
         viewModelScope.launch {
@@ -484,8 +515,10 @@ class ServerEditorViewModel @Inject constructor(
                 )
             )
         } else {
-            original.endpoints.mapIndexed { index, ep ->
-                if (index == 0) ep.copy(url = url) else ep
+            // 只重写当前生效线路的 URL；其余线路（含备用/停用）逐字保留。
+            val primaryId = original.endpoints.activeEndpoint()?.id
+            original.endpoints.map { ep ->
+                if (ep.id == primaryId) ep.copy(url = url) else ep
             }
         }
         return original.copy(

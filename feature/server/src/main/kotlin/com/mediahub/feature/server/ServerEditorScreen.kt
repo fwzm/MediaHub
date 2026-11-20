@@ -49,6 +49,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.ServerIcon
 import com.mediahub.model.MediaServer
 import com.mediahub.model.ServerType
+import com.mediahub.model.activeEndpoint
 
 /** Server Editor 页面：编辑已有媒体源。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,6 +63,7 @@ fun ServerEditorRoute(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var showIconDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showEndpointDialog by remember { mutableStateOf(false) }
 
     val iconPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) viewModel.saveIcon(uri)
@@ -199,6 +201,29 @@ fun ServerEditorRoute(
                 // LOCAL 媒体源无网络地址语义：隐藏连接/线路质量区（Phase 1I review P1）
                 if (state.server?.type != ServerType.LOCAL) {
                     EditorSection("连接") {
+                        if (server.endpoints.count { it.enabled } > 1) {
+                            val active = server.endpoints.activeEndpoint()
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        "当前线路：${active?.name ?: "默认线路"}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    active?.let {
+                                        Text(
+                                            it.url,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
+                                TextButton(onClick = { showEndpointDialog = true }) { Text("切换线路") }
+                            }
+                        }
                         ServerAddressField(
                             value = state.baseUrl,
                             onValueChange = viewModel::updateBaseUrl,
@@ -299,6 +324,17 @@ fun ServerEditorRoute(
                 }
             }
         }
+    }
+
+    if (showEndpointDialog && state.server != null) {
+        ServerEndpointDialog(
+            endpoints = state.server!!.endpoints,
+            onSelect = { id ->
+                viewModel.selectEndpoint(id)
+                showEndpointDialog = false
+            },
+            onDismiss = { showEndpointDialog = false },
+        )
     }
 
     if (showIconDialog) {
