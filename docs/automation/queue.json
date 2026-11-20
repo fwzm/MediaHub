@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-20T17:20:00+08:00",
-  "updated_by": "lead-W6-113-r63",
+  "updated_at": "2026-11-20T18:40:00+08:00",
+  "updated_by": "lead-W6-113-r64",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -1343,6 +1343,25 @@
       "notes": "第四十三层：元素的属性名必须落在写出器固定词汇表内。既有闸门只在三处遍历属性——TestRun 的 xmlns、Counters 属性循环（未知名只 warning）、TestSettings/Deployment 属性循环（只挑 id/name/runDeploymentRoot，其余静默忽略）——其余按名取值，因此给任意元素追加属性不改变任何计数、配对、行序与台阶行。台阶行 structure 末尾新增 attributeVocabulary=<n>/<elements>；未知元素名只 warning 不 red。",
       "next_action": "候选第 44 层：继续从真实语料侦察可证的结构不变量；已覆盖六处显式 offset、section 计数与顺序、行序与 entry 序、Counters 算术与行复现、executionId 配对、RunInfo 布局与文本、duration 书写形状、元素属性词汇表；属性取值类（testType 恒为 13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b）尚未 pin，但需权衡未来 VSTest 版本风险；duration 严格等值（真实最大差 51 ms，已有 1 s 容差 warning）、Finished 上界（需容差）、ResultFiles（全部语料为空）、UnitTestResult/@resultType（100% 缺失）均暂不选；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
       "closed_at": "2026-11-20T17:20:00+08:00"
+    },
+    {
+      "id": "W6-113bk",
+      "title": "第四十四层：同一份结果文件里的时间戳只有一个时区（W6-113bk）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r64",
+      "branch": "feature/windows-w6-113bk-run-zone",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,960 -> 2,995 lines, 176,830 -> 179,584 B, 36 insertions / 1 deletion, sha256 54724ad067603802cddd574fb13bf97559b5372272dc00631516f58fdea2522f; old sha256 5f6c31437d4e61dd72dc5026044d218b975f538c53bf1e8c972c4edd370dc7cd; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; MediaHub.Tests runZones=1 zoneStamps=3950, WebDav runZones=1 zoneStamps=212, phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1; combined tests=2077; log D:/mh-verify/r65/logs/real-green.log.",
+        "Real failing TRX (total=767, failed=6): exit 1; runZones=1 zoneStamps=1544, attributeVocabulary=3886/3886, timestampOffsets=6/6, runInfoChronology=6/6, runInfoOffset=6/6; only final 6 test(s) failed; log D:/mh-verify/r65/logs/real-failing.log.",
+        "Corpus census: each of the seven real corpora holds exactly one distinct UTC offset within the file (gate windows 3950 +08:00, webdav 212 +08:00; real TRX windows 1544 +00:00, webdav 212 +08:00; clean-two-errors 3952, clean-green 3950, fail-with-runinfo 3951 all +08:00).",
+        "Negative matrix 5 cases: clean-real 0/0, clean-two-errors 0/0, clean-green 0/0, fail-with-runinfo 0/0 all with runZones=1 on both suites; bad-mixed-zone OLD=0/NEW=1 with exactly one problem (the instants in windows-tests.trx are written in 2 different UTC offsets); oldAllZero=true; results D:/mh-verify/r65/results-all.json.",
+        "Code commit b10b118e355f041cd7122a0d6b392f36c9fe184b (ci(windows): every instant in one run report is in one zone (W6-113bk)); windows-ci 44722267860 (push) success, 44722413160 (pull_request) success; Android CI 44722413273 success."
+      ],
+      "notes": "第四十四层：一份 TRX 内全部整戳属性必须写成同一个 UTC offset。既有四处 offset 检查（Times 窗口、行 start/end、RunInfo/@timestamp、RunInfo 100 ms 排序钟）都只问单个戳带没带 offset，从不相问彼此是否一致；把某行整段时间换算成另一 offset 后 instant、时长、行序与全部台阶行不变。台阶行 structure 末尾新增 runZones=<distinct>/zoneStamps=<n>。",
+      "next_action": "候选第 45 层：继续从真实语料侦察可证的结构不变量；已覆盖六处显式 offset 与同文件时区唯一、section 计数与顺序、行序与 entry 序、Counters 算术与行复现、executionId 配对、RunInfo 布局与文本、duration 书写形状、元素属性词汇表；属性取值 pin（testType 恒为 13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b）仍待权衡 VSTest 版本风险；ResultFiles 全语料为空、resultType 100% 缺失、duration 严格等值不可行（真实最大差 51 ms，已有 1 s 容差）；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T18:40:00+08:00"
     }
   ]
 }

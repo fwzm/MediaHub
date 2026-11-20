@@ -1562,3 +1562,34 @@
 
 - CLAIM run-id `w6-113-round24-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
 - W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。
+
+## Round 64（W6-113bk，2026-11-19）：同一份结果文件里的时间戳只有一个时区
+
+### 动机
+
+第 43 层之前，闸门已有四处检查会看时间戳的 UTC offset：`Times` 窗口的四个属性、每一行的 `startTime`/`endTime`、`RunInfo/@timestamp`、以及 RunInfo 的 100 ms 排序钟。但这四处都只问「这个戳自己带没带 offset」，从没问过「它们彼此是不是同一个 offset」。于是把某一行的整段时间从 `+08:00` 改写成 `+00:00`（instant 完全不变）之后：行窗口、时长、行序、RunInfo 排序钟、phase 行与全部台阶行都不变，文件里却出现了两种墙钟。这一层补的就是这个缺口。
+
+### 变更
+
+- `windows/tools/check-test-suite-baseline.ps1`：2,960 → 2,995 行，176,830 → 179,584 B，`+36 / -1`，sha256 `54724ad067603802cddd574fb13bf97559b5372272dc00631516f58fdea2522f`（父层 `5f6c31437d4e61dd72dc5026044d218b975f538c53bf1e8c972c4edd370dc7cd`）。
+- 在第 43 层属性词汇表段之后新增全属性扫描：把每个属性值与整戳正则 `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([+-][0-9]{2}:[0-9]{2}|Z)$` 比对，命中则累计 `$runZoneStamps` 并把尾部的 offset 记进 `$runZoneCounts`。
+- 去重后超过一种 offset 时 throw `the instants in <file> are written in <n> different UTC offsets`，明细列出每种 offset 的出现次数；台阶行 `structure=` 行末追加 `runZones=<distinct>/zoneStamps=<n>`；头注释与 SEMANTICS 各补一段。
+- 双 shell PARSE-OK（pwsh 7.6.10、Windows PowerShell 5.1.26100.10003）；纯 ASCII（nonAscii 0）、LF、无 BOM、末字节 0x0a；`git diff --check` exit 0。
+
+### 验证（EXECUTED）
+
+- 语料普查：7 个真实语料每个文件内 distinct offset 恒为 1 —— gate-corpus windows 3950 戳 `+08:00`、webdav 212 戳 `+08:00`；真实失败 TRX windows 1544 戳 `+00:00`、webdav 212 戳 `+08:00`；clean-two-errors 3952、clean-green 3950、fail-with-runinfo 3951，全部 `+08:00`。跨文件可以不同区，同文件内从不同区，因此该要求不会误杀真实写出器。
+- 真实绿色 gate-corpus：exit 0；`MediaHub.Tests runZones=1 zoneStamps=3950`、`MediaHub.WebDav.Tests runZones=1 zoneStamps=212`，`phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1`，`combined tests=2077`；日志 `D:/mh-verify/r65/logs/real-green.log`。
+- 真实失败 TRX（total=767，failed=6）：exit 1；`runZones=1 zoneStamps=1544`、`attributeVocabulary=3886/3886`、`timestampOffsets=6/6`、`runInfoChronology=6/6`、`runInfoOffset=6/6`，唯一 throw `MediaHub.Tests: 6 test(s) failed`；日志 `D:/mh-verify/r65/logs/real-failing.log`。
+- 5 例矩阵：clean-real / clean-two-errors / clean-green / fail-with-runinfo 旧新均 exit 0、两套件 `runZones=1`、problems=0；`bad-mixed-zone` **旧 0 / 新 1**，恰好 1 条 `the instants in windows-tests.trx are written in 2 different UTC offsets`；`oldAllZero=true`、`cleanOk=true`、`redOk=true`；结果 `D:/mh-verify/r65/results-all.json`。
+- 夹具：从 `D:/mh-verify/r54/cases/clean-two-errors` 复制到 `D:/mh-verify/r65/cases/bad-mixed-zone`，把第一条 `UnitTestResult` 的 `startTime`/`endTime` 整体换算成同一 instant 的 `+00:00`（文件长度不变 2,698,040 B）；旧第 43 层在该夹具上 exit 0，证明混合时区此前完全不可见。第一版夹具改 `Times/@creation` 为 `+07:00` 被判无效——它同时触发了既有的 `creation ≤ queuing` 规则，无法隔离本层。
+
+### 提交与 exact-head CI
+
+- 代码提交 `b10b118e355f041cd7122a0d6b392f36c9fe184b`（`ci(windows): every instant in one run report is in one zone (W6-113bk)`）；Draft PR #206，base main，stacked on #202，G7 DO_NOT_MERGE。
+- 代码 head CI：windows-ci `44722267860`（push）`success`、`44722413160`（pull_request）`success`；Android CI `44722413273` `success`。
+
+### 锁与边界
+
+- CLAIM run-id `w6-113-round25-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
+- W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。

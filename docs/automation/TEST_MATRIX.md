@@ -2031,3 +2031,18 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 **为什么第四十二层看不见**：第 42 层及更早只按属性名取值，唯一的属性遍历在 Counters（未知名只 warning）与 TestSettings/Deployment（只挑三个属性、其余静默忽略）。因此给任意元素追加一个属性后，总数、类/方法计数、行序、配对、phase 行与全部台阶行都不变，旧闸门 exit 0。
 
 **边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+
+## 6.50 第四十四层口径：同一份结果文件里的时间戳只有一个时区（W6-113bk）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | 一份 TRX 内全部整戳属性的 UTC offset 必须唯一 | `$runZoneStamps` / `$runZoneCounts` |
+| 通过条件 | 整戳正则命中后取尾部 offset 去重；distinct > 1 时 throw `the instants in <file> are written in <n> different UTC offsets` | 真实语料 runZones 恒为 1 |
+| 台阶行 | `structure=... runZones=<distinct> zoneStamps=<n>` | logs/real-green.log |
+| 负向对照 | clean-two-errors 把第一条 `UnitTestResult` 的 start/end 换算成同 instant 的 `+00:00`（长度不变 2,698,040 B）；旧层 0，新层 1，恰好 1 条 different UTC offsets | results-all.json |
+| 规模 | 2,960→2,995 行；176,830→179,584 B；+36/−1 | sha256 54724ad0... |
+| 残留限制 | 只要求同一文件内时区一致，不要求跨文件一致（真实语料 windows `+00:00` 与 webdav `+08:00` 并存），也不校验 offset 是否等于运行机器的本地时区 | 跨文件差异保留 |
+
+**为什么第四十三层看不见**：既有四处 offset 检查都只判定「单个戳带没带 offset」，把整段时间换算成另一个 offset 后 instant、时长、行序与排序钟全部不变，所以旧闸门 exit 0。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
