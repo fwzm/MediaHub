@@ -212,6 +212,13 @@
 #   gate now walks every element in the document and refuses an attribute outside
 #   the writer's vocabulary; the structure ladder line adds
 #   attributeVocabulary=<elements with only known attributes>/<elements>.
+#   The instants also have to agree with one another, and nothing above read that:
+#   every offset check visits one stamp at a time, so a row copied in from another
+#   run keeps a readable instant, a plausible duration and the same order while the
+#   file now mixes two zones. The writer stamps a whole file in the zone its run
+#   was collected in, so the gate collects the distinct offsets over every
+#   attribute of the document and refuses more than one; the structure ladder line
+#   adds runZones=<distinct offsets> zoneStamps=<stamps read>.
 
 #   The rows also carry an order, and nothing above read it: TestEntries and the
 #   Results section are written from one ordered pass, so the row at position N is
@@ -519,6 +526,11 @@
 #     every ladder line identical while the file is no longer the shape VSTest
 #     writes; the structure ladder line records attributeVocabulary=<elements
 #     carrying only known attributes>/<elements>.
+#   the instants in one file are written in more than one UTC offset -> red. Each
+#     offset check reads a single stamp, so a row copied in from another run keeps
+#     a readable instant, a plausible duration and the same order while the file
+#     stops describing one moment in one place; the structure ladder line records
+#     runZones=<distinct offsets> zoneStamps=<stamps read>.
 
 #   the row at position N of Results does not name the test that position N of
 #     TestEntries declares -> red. The two sections are emitted from one ordered
@@ -1684,6 +1696,29 @@ foreach ($e in $baseline.suites) {
   if ($attrStray.Count -gt 0) {
     throw "$($e.suite): an element carries an attribute the writer does not emit while the total was $total - every element above is read by name, so a file that gains an attribute keeps every count, every pairing, every row time and every phase line identical. broken: $($attrStray -join ', '). A TRX whose elements were extended by hand was hand-merged or patched; regenerate it from a clean test run."
   }
+  # Every instant in one results file is written in one zone. The offset checks
+  # above ask each stamp to carry an offset and place it on the timeline, but they
+  # never ask the stamps to agree with one another: a row copied in from another
+  # run keeps a readable instant, a plausible duration and the same order, while
+  # the file now mixes two zones. The writer stamps a whole file in the zone its
+  # run was collected in, so walk every attribute, collect the distinct offsets
+  # and require exactly one.
+  $runZoneStamps = 0
+  $runZoneCounts = @{}
+  foreach ($zoneNode in @($xml.SelectNodes('//*'))) {
+    foreach ($zoneAttr in @($zoneNode.Attributes)) {
+      $zoneRaw = [string]$zoneAttr.Value
+      if ($zoneRaw -notmatch '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([+-][0-9]{2}:[0-9]{2}|Z)$') { continue }
+      $runZoneStamps++
+      $zoneKey = $Matches[2]
+      if ($runZoneCounts.ContainsKey($zoneKey)) { $runZoneCounts[$zoneKey] = $runZoneCounts[$zoneKey] + 1 } else { $runZoneCounts[$zoneKey] = 1 }
+    }
+  }
+  $runZoneList = @($runZoneCounts.Keys | Sort-Object)
+  $runZoneShown = @($runZoneList | ForEach-Object { "$_ x$($runZoneCounts[$_])" })
+  if ($runZoneStamps -gt 0 -and $runZoneList.Count -gt 1) {
+    throw "$($e.suite): the instants in $($e.file) are written in $($runZoneList.Count) different UTC offsets while the total was $total - every check above reads one instant at a time, so a stamp copied in from another run keeps a readable instant, a plausible duration and the same order while the file stops describing one moment in one place. found: $($runZoneShown -join ', '). A TRX whose instants were collected in different zones was hand-merged or patched; regenerate it from a clean test run."
+  }
   # A declared list is a vocabulary entry, not just an id in a set. The structure
   # check above asks a list id to exist, be unique and be used, and the row metadata
   # check asks every row to name one list, so the name - the only part a reader ever
@@ -2627,7 +2662,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): outcomes=$($actualOutcomes.Count) baseline=outcome table $(@($e.outcomes.PSObject.Properties.Name).Count) outcomes"
   "$($e.suite): identities=$pairedIds named=$namedRows unique test ids shared by both halves"
   "$($e.suite): rowAttributes=$rowCount unique execution ids=$($execIdCounts.Count) ordered row times=$timeOrdered rows within the run window=$inWindow uniform row fields=$uniformFields rowTimeOffsets=$rowTimeOffsets/$($rowCount*2) durationShape=$durShapeOk/$rowCount"
-  "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount runSections=$runSectionMatches/7 attributeVocabulary=$attrOk/$attrElements"
+  "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount runSections=$runSectionMatches/7 attributeVocabulary=$attrOk/$attrElements runZones=$($runZoneList.Count) zoneStamps=$runZoneStamps"
   "$($e.suite): executionIds=$($execByDefId.Count) distinct declared ids=$($defExecCounts.Count) paired rows=$pairedRowExecs paired result directories=$pairedRowDirs"
   "$($e.suite): displayNames=$displayNameChecked declared prefixes=$($displayNameChecked - $displayNameLost.Count) mismatched=$($displayNameLost.Count)"
   "$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"
