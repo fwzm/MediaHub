@@ -22,7 +22,7 @@ interface PlaybackProgressDao {
     suspend fun delete(serverId: String, itemId: String)
 
     @Query("DELETE FROM playback_progress WHERE updatedAtEpochMs < :beforeEpochMs")
-    suspend fun deleteOlderThan(beforeEpochMs: Long)
+    suspend fun deleteOlderThan(beforeEpochMs: Long): Int
 
     @Query("DELETE FROM playback_progress WHERE serverId = :serverId")
     suspend fun deleteByServer(serverId: String)
