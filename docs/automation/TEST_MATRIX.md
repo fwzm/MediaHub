@@ -1971,3 +1971,18 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 **为什么第三十八层看不见**：第 38 层只读 `Times/@start`/`@finish` 两个窗口字段的 offset，结果行的时刻仍经同一 `DateTimeOffset.Parse` 读取；缺 offset 时由宿主时区补全，+08 主机上解析出同一瞬间，窗口、行序、duration 与 phase 都可以全部通过。因此去掉一行 startTime 的 offset 后，旧闸门 exit 0，而同一文件在 UTC 机器上会把该行平移八小时。
 
 **边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+
+## 6.46 第四十层口径：失败日志条目必须说明时区（W6-113bg）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | 每个 `ResultSummary/RunInfos/RunInfo/@timestamp` 的显式 UTC offset（`+hh:mm`/`-hh:mm`/`Z`） | RunInfo 循环 |
+| 通过条件 | 每个非空 RunInfo timestamp 均有显式 offset；空/不可读时刻仍由既有 unreadable-timestamp 条目处理 | 真实语料 timestampOffsets=6/6 与 0/0 |
+| 台阶行 | `timestampOffsets=<n>/<items>`（与 `runInfos` 同行） | logs/real-failing.log |
+| 负向对照 | clean-two-errors 只去掉第二条 RunInfo 的 `+08:00`；旧层 0，新层 1，恰好 1 条 carries-no-explicit-UTC-offset | results-all.json |
+| 规模 | 2,792→2,815 行；166,387→167,786 B；+25/−2 | sha256 d2e1fe0d... |
+| 残留限制 | 只校准失败日志条目的时刻声明；不建立条目 timestamp 与 RunInfo Text 时钟的绝对时区交叉约束 | 真实语料 runInfoOffset=6/6 已覆盖相对偏移 |
+
+**为什么第三十九层看不见**：第 39 层只读结果行 `startTime`/`endTime` 的 offset，RunInfo 条目仍经同一 `DateTimeOffset.Parse` 读取；缺 offset 时由宿主时区补全，+08 主机上解析出同一瞬间，条目数量、顺序、行窗口与 clock/timestamp offset 都可以全部通过。因此去掉一条 RunInfo 的 offset 后，旧闸门 exit 0，而同一文件在 UTC 机器上会把该条目平移八小时。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。

@@ -1438,3 +1438,33 @@
 
 - CLAIM run-id `w6-113-round20-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
 - W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。
+
+## Round 60（W6-113bg，2026-11-19）：失败日志条目必须说明时区
+
+### 动机
+
+第 38 层与第 39 层分别把 `Times/@start`/`@finish` 与每条 `UnitTestResult` 的 `startTime`/`endTime` 纳入显式 UTC offset 检查，但 `ResultSummary/RunInfos/RunInfo/@timestamp` 仍然只经 `Convert-ToInstant` 的 `[DateTimeOffset]::Parse` 读取。无 offset 的字符串按**宿主本地时区**解释，同一份失败日志在不同机器上把条目摆到相差数小时的瞬间，而条目数量、顺序、行窗口与 clock/timestamp offset 全部不变。把第二条 RunInfo 的 `+08:00` 去掉后，本机（+08）上旧闸门 exit 0 —— 该声明在文件里已经缺失，只是宿主时区恰好替它补上了。
+
+### 变更
+
+- `windows/tools/check-test-suite-baseline.ps1`：2,792 → 2,815 行，166,387 → 167,786 B，`+25 / -2`，sha256 `d2e1fe0d82d7d98f741e1903302c9fc5125019837dbb43626bd402d6bcf028b8`（父层 `1512335643e22714e41cde09b2cf6909161f20689ab1a85fd42b70b7c207be99`）。
+- 新增 `$runInfoTimestampOffsets` 与 `$runInfoTimestampOffsetLost`；RunInfo 循环保存 `$runInfoTimestampRaw`，匹配 `+hh:mm`/`-hh:mm`/`Z` 计入显式 offset，否则累进并向 `$runInfoProblems` 追加 `a RunInfo timestamp '<raw>' carries no explicit UTC offset`。
+- 空/不可读 timestamp 仍由既有「unreadable timestamp」条目处理，不重复报 red；台阶行 `runInfos` 末尾追加 `timestampOffsets=<n>/<items>`；头注释与 SEMANTICS 各补一段。
+- 双 shell PARSE-OK（pwsh 7.6.10、Windows PowerShell 5.1.26100.10003）；纯 ASCII（nonAscii 0）、LF、无 BOM；`git diff --check` exit 0。
+
+### 验证（EXECUTED）
+
+- 真实绿色 gate-corpus：exit 0；两套件 `runInfos=0` 且 `timestampOffsets=0/0`，`phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1`，`combined tests=2077`；日志 `D:/mh-verify/r61/logs/real-green.log`。
+- 真实失败 TRX（total=767，failed=6，6 条 RunInfo）：exit 1；`runInfos=6 failedRows=6 matched=6` 且 `timestampOffsets=6/6`，`runInfoChronology=6/6`、`runInfoOffset=6/6`，唯一 throw `MediaHub.Tests: 6 test(s) failed`；日志 `D:/mh-verify/r61/logs/real-failing.log`。
+- 5 例矩阵：clean-real / clean-two-errors / clean-green / fail-with-runinfo 旧新均 exit 0，`timestampOffsets` 分别为 0/0、2/2、0/0、1/1（WebDav 均 0/0），problems=0；`bad-runinfo-zone` **旧 0 / 新 1**，恰好 1 条 `a RunInfo timestamp ... carries no explicit UTC offset`；`oldAllZero=true`、`cleanOk=true`、`redOk=true`；结果 `D:/mh-verify/r61/results-all.json`。
+- 夹具：从 `D:/mh-verify/r54/cases/clean-two-errors` 复制到 `D:/mh-verify/r61/cases/bad-runinfo-zone`，只把第二条 RunInfo 的 `timestamp="2026-11-19T13:17:42.8361570+08:00"` 改为无 offset（恰好 1 次；2,698,040 → 2,698,034 B）。旧第 39 层在该夹具上 exit 0，证明修复前缺失 offset 完全不被发现。
+
+### 提交与 exact-head CI
+
+- 代码提交 `74039fc02fdd26990fc63e423a0f8cef17907f55`（`ci(windows): every failure-log item must say which zone it is in (W6-113bg)`）；Draft PR #190，base main，stacked on #187，G7 DO_NOT_MERGE。
+- 代码 head CI：windows-ci `44679133745`（push）`success`、`44679166137`（pull_request）`success`；Android CI `44679166122` `success`。
+
+### 锁与边界
+
+- CLAIM run-id `w6-113-round21-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
+- W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。
