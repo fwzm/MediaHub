@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-05T01:00+08:00",
-  "updated_by": "lead-W6-113-r40",
+  "updated_at": "2026-11-20T21:25:00+08:00",
+  "updated_by": "lead-W6-113-r66",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -885,6 +885,521 @@
       "notes": "第 21 层收的是「文件讲述这次运行的顺序」：Results 第 N 行必须是 TestEntries 第 N 条声明的那个 testId。规范顺序由生产者（运行时写入顺序）决定，本层不假定任何排序规则；只比较 entries 与 results 两侧，TestDefinitions 的文档顺序随 VSTest 内部调度变化，不作判据。",
       "next_action": "候选下一层：①Counters/@inconclusive、@inProgress、@pending 三个桶与结果行分布的桶表补全；②UnitTestResult/@duration 与 startTime/endTime 的算术自洽（duration 与差值是否一致）；③TestSettings/@name 与 Deployment 目录名的多重派生关系。",
       "closed_at": "2026-11-05T01:00+08:00"
+    },
+    {
+      "id": "W6-113an",
+      "title": "第二十二层：失败证据必须与自己的 verdict 一致（Output/ErrorInfo ↔ outcome）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r41",
+      "branch": "feature/windows-w6-113an-failure-evidence",
+      "evidence": [
+        "check-test-suite-baseline.ps1 109,291 -> 113,800 B (+75 lines, 1,987 lines, sha256 26428d0621b8f7e81792da727da1f94e911bbb1e9528381c41d12866a4b632e6, pure ASCII), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-22 invariants: a Failed/Error row carries exactly one Output/ErrorInfo whose Message is not blank; a Passed row carries none; more than one ErrorInfo is RED; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI): new gate exit 0; ladder failureEvidence=0 failed=0/0 passed=0/1973 blankMessages=0 duplicates=0 and .../104; combined tests=2077; growth warnings only (ArtworkDiskCacheTests +10, MpvSubtitleStyleTests +2, PlaylistStoreTests +2 over baseline 1959).",
+        "Negative controls: 7 cases at D:/mh-verify/r41; clean-green OLD=0 NEW=0, error-with-evidence OLD=0 NEW=0 (failureEvidence=1 failed=1/1 passed=0/1972); passed-with-evidence, passed-with-duplicate-evidence, error-with-blank-message, error-without-evidence, error-with-duplicate-evidence all OLD=0 NEW=1, each naming its own defect.",
+        "Implementation sha256 26428d06... unchanged across the whole matrix; clean-green re-run after the matrix still OLD=0 NEW=0 (byte restoration verified).",
+        "Real failure corpus (artifact 44120750161, 767 rows): 6 Failed rows all carry non-empty Message+StackTrace, 761 Passed rows carry no ErrorInfo; 6 RunInfos carry [FAIL] text and timestamps inside [start, finish].",
+        "Incident recorded: PowerShell XML adapter flattens the namespaced Message child to System.String, so .InnerText read empty; the fix walks ChildNodes by LocalName. Probe evidence: messageType=System.String, messageInnerText=[], XPath messageInnerText=[boom: Error 42].",
+        "Corpus must be generated with DOTNET_CLI_UI_LANGUAGE=en-US VSLANG=1033; localized TestList names trip the layer-20 listVocabulary check.",
+        "Commit 1762cd35f40d529f443cdaaaea848f4ac79a1246 (1 file changed / +75 insertions / 0 deletions), non-force push 77ef1f2f..1762cd35; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44465809330 (push) = success and 44465888575 (pull_request) = success, both printing the new ladder line; licence check-licence-surface checks=57 failed=0 warnings=0 skipped=0.",
+        "Android CI 44465888544 = success at the code head; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001."
+      ],
+      "notes": "第 22 层收的是失败证据：verdict 为 Failed/Error 的行必须带一个非空 Message，Passed 行不得带任何 ErrorInfo。前二十一层全部按 id 与计数建表，Output 子树从未进入比较；ErrorInfo/StackTrace/RunInfos/StdOut 在脚本里引用计数为 0。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①RunInfos 与失败行一一对应（数量、outcome、[FAIL] 文本、时间窗）；②ResultSummary/Output/StdOut 与执行器诊断的自洽；③ErrorInfo/StackTrace 文本与 RunInfo 文本的交叉引用。",
+      "closed_at": "2026-11-19T14:00+08:00"
+    },
+    {
+      "id": "W6-113ao",
+      "title": "第二十三层：失败日志必须一一描述失败行（RunInfos ↔ Failed/Error）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r42",
+      "branch": "feature/windows-w6-113ao-runinfos",
+      "evidence": [
+        "check-test-suite-baseline.ps1 113,800 -> 121,162 B (+134 lines, 2,121 lines, sha256 20e3c53cda1cfd8f90ac1057b2819657e1fb3dc5c561bdd3fefe8390bc75826a, pure ASCII), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-23 invariants: RunInfo count equals Failed/Error row count; every failed row is named exactly once; Text is not blank; timestamp parses inside [Times.start, Times.finish]; computerName matches the row; outcome is not a success verdict; naming a Passed row, naming no row, or naming a row twice is RED; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI): new gate exit 0; ladder runInfos=0 failedRows=0 matched=0 passed=0 unmatched=0 duplicateMatches=0 outside=0 blankText=0 wrongMachine=0 badOutcome=0 for both suites; combined tests=2077; growth warnings only (1973 > baseline 1959).",
+        "Negative controls: 10 cases at D:/mh-verify/r43; clean-green OLD=0 NEW=0; fail-with-runinfo OLD=0 NEW=0 (runInfos=1 failedRows=1 matched=1); fail-without-runinfo, runinfo-for-passing, runinfo-duplicate, runinfo-outside-window, runinfo-wrong-machine, runinfo-blank-text, runinfo-bad-outcome, runinfo-unmatched-text all OLD=0 NEW=1, each naming its own defect.",
+        "Incident recorded: the first duplicate fixture placed the second RunInfo outside the <RunInfos> wrapper, so the ladder still read runInfos=1 and the new layer stayed green; moving it inside the wrapper made the case RED with 'RunInfos carries 2 item(s) while 1 row(s)'. Negative controls must check the ladder count, not only the exit code.",
+        "Implementation sha256 20e3c53c... unchanged across the whole matrix; clean-green re-run after the matrix still OLD=0 NEW=0 (byte restoration verified).",
+        "Commit c99ac346c8cdb248a55995c0f82d243d5461cd10 (ci(windows): the failure log must describe the failed rows (W6-113ao)), 1 file changed / +134 insertions / 0 deletions, non-force push to feature/windows-w6-113ao-runinfos; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44475518066 (push) = success and 44475570854 (pull_request) = success; the push run printed MediaHub.Tests: runInfos=0 failedRows=0 matched=0 passed=0 unmatched=0 duplicateMatches=0 outside=0 blankText=0 wrongMachine=0 badOutcome=0 and the webdav line of the same shape.",
+        "Android CI 44475570962 在取证时 visual-instrumentation (API 32/36) 仍 in_progress（CI_PENDING）; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001.",
+        "Draft PR #135 (base main, stacked on #132) carries the layer text; G7 remains DO_NOT_MERGE. Baseline JSON and updater were not changed, so there is no migration."
+      ],
+      "notes": "第 23 层收的是 ResultSummary/RunInfos 这棵失败日志：runner 写的每条 RunInfo 必须一一描述 Results 里的 Failed/Error 行，而不是只靠 Counters 的失败数。前二十二层只读计数、位置、outcome 桶与每行 ErrorInfo，RunInfos 在脚本里引用计数为 0。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①ResultSummary/Output/StdOut 与执行器诊断的自洽；②ErrorInfo/StackTrace 文本与 RunInfo 文本的交叉引用；③RunInfos 多条/空块与 runDeploymentRoot 的边界；另列独立任务刷新基线（1973 vs 1959）。",
+      "closed_at": "2026-11-19T15:15:00+08:00"
+    },
+    {
+      "id": "W6-113ap",
+      "title": "第二十四层：控制台输出必须命名自己的套件（ResultSummary/Output/StdOut）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r43",
+      "branch": "feature/windows-w6-113ap-summary-output",
+      "evidence": [
+        "check-test-suite-baseline.ps1 121,162 -> 124,609 B (+55 lines, 2,176 lines, sha256 b9c7e10b59db94e5d0f0c224c4374f26c6208f200e3ed21f9606e5b5e8b4d532, pure ASCII), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-24 invariants: ResultSummary has exactly one direct Output child; Output has exactly one StdOut child; the StdOut text is not blank; the StdOut text names its own suite (MediaHub.Tests or MediaHub.WebDav.Tests); missing, duplicate, blank, or wrong-suite blocks are RED; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI): new gate exit 0; ladder summaryOutput=1 stdout=1 nonBlank=1 suiteNamed=1 for both suites; combined tests=2077; growth warnings only (1973 > baseline 1959).",
+        "Negative controls: 7 cases at D:/mh-verify/r44; clean-green OLD=0 NEW=0; stdout-missing, stdout-blank, stdout-duplicate, stdout-wrong-suite, output-missing, output-duplicate all OLD=0 NEW=1, each naming its own defect; implementation sha256 b9c7e10b... unchanged across the matrix and clean-green re-run after the matrix still OLD=0 NEW=0.",
+        "Real failure corpus (artifact 44120750161, 767 rows): ResultSummary/Output/StdOut is 7,084 B; 6 Failed testNames all occur in StdOut, 761 Passed testNames occur zero times; green windows/webdav corpora carry 504/556 B and name their own suites.",
+        "Incident recorded: a single runner process calling the gate 14 times exceeded the 120 s run_code wrapper; the matrix was split into run-group.mjs groups of 4+3 cases and completed. Old-gate logs are UTF-8 text and ops_read_files returning empty for them is a tool behavior, not an exit-code issue.",
+        "Commit 781d102421ea9f8ea322e5e72e9968d48d3e2da5 (ci(windows): the console output must name its own suite (W6-113ap)), 1 file changed / +55 insertions / 0 deletions, non-force push to feature/windows-w6-113ap-summary-output; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44479925035 (push) = success and 44479988695 (pull_request) = success; the runs printed summaryOutput=1 stdout=1 nonBlank=1 suiteNamed=1 for both suites.",
+        "Android CI 44479988666 = in_progress (CI_PENDING) at the code head; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001.",
+        "Draft PR #136 (base main, stacked on #135) carries the layer text; G7 remains DO_NOT_MERGE. Baseline JSON and updater were not changed, so there is no migration."
+      ],
+      "notes": "第 24 层收的是 ResultSummary/Output/StdOut：runner 写的控制台记录必须存在、非空白，并且命名自己的套件。前二十三层只读计数、位置、outcome 桶、每行 ErrorInfo 与 RunInfos，ResultSummary/Output/StdOut 在脚本里引用计数为 0。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①ErrorInfo/StackTrace 文本与 RunInfo Text 的交叉引用；②RunInfos 多条/空块与 runDeploymentRoot 的边界；③Times/@creation|@queuing 与 ResultSummary 的窗口自洽；另列独立任务刷新基线（1973 vs 1959）。",
+      "closed_at": "2026-11-19T15:45:00+08:00"
+    },
+    {
+      "id": "W6-113aq",
+      "title": "第二十五层：运行名与创建时刻必须同一个瞬间（TestRun/@name ↔ Times/@creation）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r44",
+      "branch": "feature/windows-w6-113aq-run-name-stamp",
+      "evidence": [
+        "check-test-suite-baseline.ps1 124,609 -> 126,138 B (+27/-1 lines, 2,202 lines, sha256 a075ac386e331f88c918c0c01824f49c56114ff5ca13b31d2203d0447ac18b20, pure ASCII), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-25 invariant: the date and time embedded in canonical TestRun/@name must equal Times/@creation at second precision; any mismatch is RED; the ladder records nameStamp=<0|1>; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI, artifacts/test-results-r45): new gate exit 0; ladder runHeader=3/3 ... nameStamp=1 ... for both suites; combined tests=2077; growth warnings only (1973 > baseline 1959).",
+        "Negative controls: 3 cases at D:/mh-verify/r45; clean-green OLD=0 NEW=0 (nameStamp=1); creation-shift OLD=0 NEW=1 (nameStamp=0, name 2026-11-19 13:17:39 vs creation 2026-11-19 13:07:39); name-shift OLD=0 NEW=1 (name 2026-11-19 13:07:39 vs creation 2026-11-19 13:17:39); implementation sha256 a075ac38... unchanged across the matrix and clean-green re-run after the matrix still OLD=0 NEW=0.",
+        "Real test rerun: MediaHub.Tests 1973 passed / 0 failed / 0 skipped exit 0; MediaHub.WebDav.Tests 104 / 0 / 0 exit 0 (English UI).",
+        "Commit eb073088d7504924a37dcfaba1f028b6df87d5f3 (ci(windows): the run name and the creation stamp must name one instant (W6-113aq)), 1 file changed / +27/-1, non-force push to feature/windows-w6-113aq-run-name-stamp; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44486463532 (push) = success and 44486549036 (pull_request) = success; the runs printed runHeader=3/3 ... nameStamp=1 ... for both suites.",
+        "Android CI 44486548899 = in_progress（CI_PENDING） at the code head; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001.",
+        "Draft PR #139 (base main, stacked on #136) carries the layer text; G7 remains DO_NOT_MERGE. Baseline JSON and updater were not changed, so there is no migration."
+      ],
+      "notes": "第 25 层收的是 header 的两个自述：TestRun/@name 的日期时间与 Times/@creation 必须描述同一个创建瞬间。前二十四层把 name 拆成 user/machine 并验证 deploymentRoot 派生、把 Times 拆成格式/顺序/窗口，但没有任何一层把这两个字段互相比较。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①ErrorInfo/StackTrace 文本与 RunInfo Text 的交叉引用；②RunInfos 多条/空块与 runDeploymentRoot 的边界；③Times/@creation|@queuing 与 ResultSummary 的窗口自洽；另列独立任务刷新基线（1973 vs 1959）。",
+      "closed_at": "2026-11-19T16:33:00+08:00"
+    },
+    {
+      "id": "W6-113ar",
+      "title": "第二十六层：控制台输出必须命名自己的发现与运行阶段（ResultSummary/Output/StdOut phase ledger）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r45",
+      "branch": "feature/windows-w6-113ar-counter-arithmetic",
+      "evidence": [
+        "check-test-suite-baseline.ps1 126,138 -> 129,275 B (+48 lines, 2,250 lines, sha256 c40b83b59c48e293ddca3cea9c40bb98abd7c6b1e767e99c3eb23d6791163c0a, pure ASCII), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-26 invariant: ResultSummary/Output/StdOut carries exactly one Discovering, Discovered, Starting and Finished phase line, each naming this suite and in that order; missing, duplicate, wrong-suite and out-of-order are RED; the ladder records phaseLedger=<n>/4 ordered=<0|1>; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI): D:/mh-w6-r41/windows/artifacts/gate-corpus and artifacts/test-results-r45 both exit 0; both suites phaseLedger=4/4 ordered=1; combined tests=2077; growth warnings only (1973 > baseline 1959).",
+        "Negative controls: 5 cases at D:/mh-verify/r46; clean-green OLD=0 NEW=0 (phaseLedger=4/4 ordered=1); phase-missing, phase-duplicate, phase-out-of-order, phase-wrong-suite all OLD=0 NEW=1, each naming its own defect; implementation sha256 c40b83b5... unchanged across the matrix and clean-green re-run after the matrix still OLD=0 NEW=0.",
+        "Real test results: D:/mh-w6-r41/windows/artifacts/test-results-r45 gate -ResultsDir ./artifacts/test-results-r45 exit 0; MediaHub.Tests 1973 and MediaHub.WebDav.Tests 104 both phaseLedger=4/4 ordered=1; combined 2077.",
+        "Commit bad8b42a9210aa1d895f2ed84d86e1af3184639d (ci(windows): the console output must name its own phases (W6-113ar)), 1 file changed / +48 insertions / 0 deletions, non-force push to feature/windows-w6-113ar-counter-arithmetic; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44491834447 (push) = success and 44491896251 (pull_request) = success; the runs printed phaseLedger=4/4 ordered=1 for both suites.",
+        "Android CI 44491896189 = in_progress（CI_PENDING，17:07 取证） at the code head; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001.",
+        "Draft PR #140 (base main, stacked on #139) carries the layer text; G7 remains DO_NOT_MERGE. Baseline JSON and updater were not changed, so there is no migration."
+      ],
+      "notes": "第 26 层收的是 ResultSummary/Output/StdOut 的阶段账本：runner 的控制台记录必须分别出现 Discovering、Discovered、Starting、Finished 四行，每行命名本套件且严格按该顺序。前二十五层只检查 StdOut 存在、非空和任意位置出现套件名，这四条阶段行在脚本里引用计数为 0。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①ErrorInfo/StackTrace 文本与 RunInfo Text 的交叉引用；②RunInfos 多条/空块与 runDeploymentRoot 的边界；③Times/@creation|@queuing 与 ResultSummary 的窗口自洽；另列独立任务刷新基线（1973 vs 1959）。",
+      "closed_at": "2026-11-19T17:10:00+08:00"
+    },
+    {
+      "id": "W6-113as",
+      "title": "第二十七层：失败日志必须装在一个 RunInfos 容器里（ResultSummary/RunInfos block cardinality）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r46",
+      "branch": "feature/windows-w6-113as-runinfos-singular",
+      "evidence": [
+        "check-test-suite-baseline.ps1 129,275 -> 131,885 B (+33 lines, 2,283 lines, sha256 45d6ff72ded3bed62bb41c0cbffefcb687f654c2de9d3cec6c6f17509f9cc95e, pure ASCII), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-27 invariant: a run with Failed/Error rows carries exactly one ResultSummary/RunInfos container, a run without those rows carries at most one, and any RunInfos outside ResultSummary is RED; the ladder records runInfoBlocks=<n> strayRunInfoBlocks=<n>; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI): D:/mh-w6-r41/windows/artifacts/gate-corpus exit 0; both suites runInfoBlocks=0 strayRunInfoBlocks=0; combined tests=2077; growth warnings only (1973 > baseline 1959).",
+        "Negative controls: 4 cases at D:/mh-verify/r47; clean-green OLD=0 NEW=0 and fail-with-runinfo OLD=0 NEW=0 (MediaHub.Tests runInfoBlocks=1); runinfos-extra-empty-block OLD=0 NEW=1 naming 2 RunInfos blocks for 1 Failed/Error row; runinfos-stray-deployment OLD=0 NEW=1 naming 2 blocks but only 1 directly under ResultSummary; implementation sha256 45d6ff72... unchanged across the matrix and clean-green re-run after the matrix still OLD=0 NEW=0.",
+        "Commit 8c1d5de896b851177d1f989250020ca4f6dc5e34 (ci(windows): the failure log must fit in one RunInfos block (W6-113as)), 1 file changed / +33 insertions / 0 deletions, non-force push to feature/windows-w6-113as-runinfos-singular; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44501175782 (push) = success and 44501257430 (pull_request) = success; the runs printed runInfoBlocks=0 strayRunInfoBlocks=0 for both suites.",
+        "Android CI 44501257547 = in_progress at the code head; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001.",
+        "Draft PR #143 (base main, stacked on #140) carries the layer text; G7 remains DO_NOT_MERGE. Baseline JSON and updater were not changed, so there is no migration."
+      ],
+      "notes": "第 27 层收的是 ResultSummary/RunInfos 的容器基数：有 Failed/Error 行时必须恰好一个直接 RunInfos 块，没有失败行时最多一个，整棵树中任何 RunInfos 出现在 ResultSummary 之外即 RED。第 23 层只扁平读取条目，前二十六层没有统计包装块数量与位置。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①ResultSummary/Output/StdOut 与 RunInfos 的文本交叉引用（需真实语料证明）；②RunInfos 的 RunInfo 只允许包含一个 Text 子元素；③独立任务刷新基线（1973 vs 1959）。",
+      "closed_at": "2026-11-19T18:15:00+08:00"
+    },
+    {
+      "id": "W6-113at",
+      "title": "第二十八层：每个失败日志项只能有一个 Text（RunInfo single Text child）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r47",
+      "branch": "feature/windows-w6-113at-runinfo-text-singular",
+      "evidence": [
+        "check-test-suite-baseline.ps1 131,885 -> 133,857 B (+29 lines, 2,312 lines, sha256 803d2f9c431a0b1b9dee768f84975b41c5a21fc1be251b23fddf00e3cad29493, pure ASCII), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-28 invariant: every ResultSummary/RunInfos/RunInfo must carry exactly one direct Text child; zero or two or more Text children are RED; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI): D:/mh-w6-r41/windows/artifacts/gate-corpus exit 0; both suites runInfoTexts=0/0; combined tests=2077; growth warnings only (1973 > baseline 1959).",
+        "Negative controls: 4 cases at D:/mh-verify/r48; clean-green OLD=0 NEW=0 and fail-with-runinfo OLD=0 NEW=0 (MediaHub.Tests runInfoTexts=1/1); runinfo-text-duplicate OLD=0 NEW=1 and runinfo-text-extra-empty OLD=0 NEW=1, both naming \"a RunInfo carries 2 Text child element(s)\"; implementation sha256 803d2f9c... unchanged across the matrix and clean-green re-run after the matrix still OLD=0 NEW=0.",
+        "Commit 3cf422eb05a5f30519df4b1a393688ef794139b9 (ci(windows): each failure log item must name itself exactly once (W6-113at)), 1 file changed / +29 insertions / 0 deletions, non-force push to feature/windows-w6-113at-runinfo-text-singular; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44510242835 (push) = success and 44510303586 (pull_request) = success; the runs printed runInfoTexts=0/0 for both suites.",
+        "Android CI 44510303772 = in_progress（CI_PENDING，19:03 取证） at the code head; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001.",
+        "Draft PR #145 (base main, stacked on #143) carries the layer text; G7 remains DO_NOT_MERGE. Baseline JSON and updater were not changed, so there is no migration."
+      ],
+      "notes": "第 28 层收的是 ResultSummary/RunInfos/RunInfo 的 Text 子元素基数：每个失败日志项必须恰有一个直接 Text 子元素；0 个或 2 个及以上均 RED。第 23 层读取第一个 Text 后 break，前二十七层没有统计 Text 兄弟节点。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①RunInfo Text 必须与对应失败行 testName 完全相等（当前只做子串匹配）；②RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用（需真实语料证明）；③独立任务刷新基线（1973 vs 1959）。",
+      "closed_at": "2026-11-19T19:10:00+08:00"
+    },
+    {
+      "id": "W6-113au",
+      "title": "第二十九层：失败日志行必须只命名一个测试（RunInfo Text exact test name）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r48",
+      "branch": "feature/windows-w6-113au-runinfo-text-exact",
+      "evidence": [
+        "check-test-suite-baseline.ps1 133,857 -> 136,513 B (+39 lines, 2,351 lines, sha256 b91c6aaa85c9aa31978d8952a476103737b5b0da2345137fd1ee9030da28cb58, pure ASCII), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-29 invariant: every ResultSummary/RunInfos/RunInfo first direct Text child must name exactly one Failed/Error row after stripping the writer xUnit.net timestamp prefix and [FAIL] suffix; any other text is RED; ladder records runInfoTextExact=<n>/<failedRows>; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI): D:/mh-w6-r41/windows/artifacts/gate-corpus exit 0; both suites runInfoTextExact=0/0; combined tests=2077; growth warnings only (1973 > baseline 1959).",
+        "Real failed corpus D:/mh-verify/r41-art/test-results/windows-tests.trx: 6 Failed/Error rows and 6 RunInfos; the writer envelope [xUnit.net 00:00:00.66]     <testName> [FAIL] normalizes to names that exactly equal the corresponding row testName 6/6 (exactRowHit=1).",
+        "Negative controls: 5 cases at D:/mh-verify/r49; clean-green OLD=0 NEW=0 and fail-with-runinfo OLD=0 NEW=0 (MediaHub.Tests runInfoTextExact=1/1); runinfo-text-prefix, runinfo-text-suffix and runinfo-text-outside all OLD=0 NEW=1, each naming the normalized prefixed/suffixed/outside text; implementation sha256 b91c6aaa... unchanged across the matrix and clean-green re-run after the matrix still OLD=0 NEW=0.",
+        "Commit 5780dc20e9cf87084e0f8ae5f5535f5d469e5cfc (ci(windows): a failure log line must name exactly one test (W6-113au)), 1 file changed / +39 insertions / 0 deletions, non-force push to feature/windows-w6-113au-runinfo-text-exact; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44518473191 (push) = success and 44518540460 (pull_request) = success; the runs printed runInfoTextExact=0/0 for both suites.",
+        "Android CI 44518540327 = in_progress at the code head; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001.",
+        "Draft PR #147 (base main, stacked on #145) carries the layer text; G7 remains DO_NOT_MERGE. Baseline JSON and updater were not changed, so there is no migration."
+      ],
+      "notes": "第 29 层收的是 RunInfo Text 与失败行 testName 的逐字身份：先剥掉 xUnit 写入器的 [xUnit.net <时间>] 前缀和 [FAIL] 后缀，再与 Failed/Error 行名做 Ordinal 精确比较；额外前缀、后缀或外壳外噪声均 RED。第 23 层只做 IndexOf 子串匹配，第 28 层只钉 Text 子元素数量。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①RunInfo Text 的 xUnit 外壳格式（时间戳精度/空白）必须是 writer 唯一形态；②RunInfos 与 runDeploymentRoot/Deployment 的层次边界；③独立任务刷新基线（1973 vs 1959）。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-19T20:10:00+08:00"
+    },
+    {
+      "id": "W6-113av",
+      "title": "第三十层：失败日志行必须保持 xUnit 写入器外壳（RunInfo canonical envelope）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r49",
+      "branch": "feature/windows-w6-113av-xunit-envelope",
+      "evidence": [
+        "check-test-suite-baseline.ps1 136,513 -> 138,932 B (+32 lines, 2,383 lines, sha256 eaf8151e5469621ff56cffed262d14c80be2f59116fedc516a328f7f58f4177a, 0 non-ASCII, no BOM/CRLF), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-30 invariant: every ResultSummary/RunInfos/RunInfo first direct Text must match the canonical xUnit 2.9.3 line [xUnit.net hh:mm:ss.ff] + exactly five ASCII spaces + non-blank test name + exactly one ASCII space + [FAIL], anchored to the whole line; bare names, 4/6 spaces, tabs, one-digit fractions, second 60, double space before [FAIL], and trailing newlines are RED; ladder records runInfoTextCanonical=<n>/<RunInfos>; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI): D:/mh-w6-r41/windows/artifacts/gate-corpus exit 0; both suites runInfoTextCanonical=0/0, runInfoTextExact=0/0, runInfoTexts=0/0; combined tests=2077; growth warnings only (1973 > baseline 1959).",
+        "Real failed corpus D:/mh-verify/r41-art/test-results/windows-tests.trx: 6 Failed/Error rows and 6 RunInfos; final canonical regex reports runInfos=6 canonical=6, including [xUnit.net 00:00:00.66]     <testName> [FAIL].",
+        "Negative controls: 10 cases at D:/mh-verify/r50; clean-green OLD=0 NEW=0 and fail-with-runinfo OLD=0 NEW=0 (runInfoTextCanonical=1/1); runinfo-bare-name, runinfo-clock-precision, runinfo-clock-range, runinfo-tab-gap, runinfo-four-spaces, runinfo-six-spaces, runinfo-two-spaces-before-fail and runinfo-trailing-newline all OLD=0 NEW=1; oldAllZero=true; each red case reports exactly one broken envelope row; implementation sha256 eaf8151e... unchanged across the matrix.",
+        "Commit 27ec4f5f7f8995899a5e4cc36998e2490abfdd0a (ci(windows): a failure log line must keep the xUnit envelope (W6-113av)), 1 file changed / +32 insertions / 0 deletions, non-force push to feature/windows-w6-113av-xunit-envelope; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44530232205 (push) = success and 44530355825 (pull_request) = success.",
+        "Android CI 44530355822 = in_progress at the code head; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001.",
+        "Draft PR #151 (base main, stacked on #147) carries the layer text; G7 remains DO_NOT_MERGE. Baseline JSON and updater were not changed, so there is no migration."
+      ],
+      "notes": "第 30 层收的是 RunInfo Text 的整行外壳：必须是 xUnit 2.9.3 写入器的 [xUnit.net hh:mm:ss.ff] + 恰好 5 个 ASCII 空格 + 非空白测试名 + 恰好 1 个空格 + [FAIL]，整行锚定。第 29 层只剥壳比较名字，裸名、4/6 空格、tab、1 位小数、秒 60、[FAIL] 前双空格、尾随换行都能通过。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①RunInfos 与 runDeploymentRoot/Deployment 的层次边界；②RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用（需真实语料证明）；③独立任务刷新基线（1973 vs 1959）。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-19T21:25:00+08:00"
+    },
+    {
+      "id": "W6-113aw",
+      "title": "第三十一层：失败日志条目与 Deployment 必须各归其主（RunInfo/Deployment ownership）",
+      "priority": "P0",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r50",
+      "branch": "feature/windows-w6-113aw-runinfo-deployment-boundary",
+      "evidence": [
+        "check-test-suite-baseline.ps1 138,932 -> 141,834 B (+40 lines, 2,423 lines, sha256 16fcef0a631c44fa95179e42aa3c4900f01d50f60cb2af9033d03791544a53bf, 0 non-ASCII, no BOM/CRLF), PARSE-OK on pwsh 7.6.10 and Windows PowerShell 5.1.26100.10003.",
+        "Layer-31 invariant: every RunInfo must be a direct child of the unique ResultSummary/RunInfos block; every Deployment must be a direct child of TestSettings; a RunInfo parked under Deployment/TestSettings or nested in another RunInfo, and a second Deployment under ResultSummary/RunInfos, are RED; ladder records runInfoBoundary=<direct>/<all> and deploymentBoundary=<direct>/<all>; per-file detail cap 12.",
+        "Real corpus (1973 passed windows, 104 passed webdav, English UI): D:/mh-w6-r41/windows/artifacts/gate-corpus exit 0; both suites runInfoBoundary=0/0, deploymentBoundary=1/1, runInfoTexts/Exact/Canonical=0/0; combined tests=2077; growth warnings only (1973 > baseline 1959).",
+        "Real failed corpus D:/mh-verify/r41-art/test-results/windows-tests.trx: runInfoAny=6 runInfoOwner=6, deploymentAny=1 deploymentOwner=1.",
+        "Negative controls: 7 cases at D:/mh-verify/r51; clean-green OLD=0 NEW=0 and fail-with-runinfo OLD=0 NEW=0 (runInfoBoundary=1/1, deploymentBoundary=1/1); runinfo-under-deployment, runinfo-nested-in-runinfo, runinfo-under-testsettings, deployment-under-summary and deployment-under-runinfos all OLD=0 NEW=1; oldAllZero=true; each red case reports exactly one broken owner row; implementation sha256 16fcef0a... unchanged across the matrix.",
+        "Commit 7e9cef7933bc105bc03a95ef978ea037148072f6 (ci(windows): a failure log item must stay under its own block (W6-113aw)), 1 file changed / +40 insertions / 0 deletions, non-force push to feature/windows-w6-113aw-runinfo-deployment-boundary; git ls-remote matches the remote ref.",
+        "exact-head windows-ci 44541458120 (push) = success and 44541577847 (pull_request) = success.",
+        "Android CI 44541577966 = success at the code head; the commit changes only windows/tools, so android/core/feature/app subtrees are byte-identical to 77ef1f2f -> inherited per ADR-AUTO-001.",
+        "Draft PR #154 (base main, stacked on #151) carries the layer text; G7 remains DO_NOT_MERGE. Baseline JSON and updater were not changed, so there is no migration."
+      ],
+      "notes": "第 31 层收的是每类节点的归属：所有 RunInfo 必须直接挂在唯一 ResultSummary/RunInfos 下，所有 Deployment 必须直接挂在 TestSettings 下；把 RunInfo 放到 Deployment/TestSettings、嵌套进 RunInfo，或把额外 Deployment 放到 ResultSummary/RunInfos，都会让报告出现两个 owner。基线 JSON 与 updater 未改，无迁移。",
+      "next_action": "候选下一层：①RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用（需真实语料证明）；②Deployment 的 runDeploymentRoot 字段与 Deployment 记录的一致性；③独立任务刷新基线（1973 vs 1959）。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-19T22:50:00+08:00"
+    },
+    {
+      "id": "W6-113ax",
+      "title": "基线刷新：Windows 套件基线 1959 -> 1973（W6-113ax）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r51",
+      "branch": "feature/windows-w6-113ax-baseline-refresh",
+      "evidence": [
+        "windows/tools/test-suite-baseline.json 165,251 -> 166,328 B, 23 insertions / 3 deletions; old sha256 99c754ad88ba61aedb3b1dac7aa88cf6381c0ec9217b29b55b6767d0e02b9e13, new sha256 0622d04fc6edc169c1b9103a0436a707fcaa6c6d8d3c6885bb9d349dad2a0cc8.",
+        "Old baseline gate-corpus: exit 0 with 5 warnings (1 virtual-list + 4 baseline growth: total 1973 > 1959, 2 new classes, 4 new methods, Passed +14); log D:/mh-verify/r52/gate-old-baseline.log.",
+        "New baseline gate-corpus: exit 0 with 1 virtual-list warning; MediaHub.Tests total=1973 baseline=1973, classes=115 baseline=class table 115 entries, methods=1656 baseline=method table 1656 methods, combined tests=2077; log D:/mh-verify/r52/gate-new-baseline.log.",
+        "Gate logic unchanged: check-test-suite-baseline.ps1 sha256 16fcef0a631c44fa95179e42aa3c4900f01d50f60cb2af9033d03791544a53bf; git diff --check clean.",
+        "Code commit cc0575a7a6a33963c82f0ed2a2ff44d72d8cde8a (chore(windows): refresh the test-suite baseline to 1973 (W6-113ax)); windows-ci 44556355724 (push) success, 44556498755 (pull_request) success; Android CI 44556499067 success."
+      ],
+      "notes": "独立任务：只刷新基线 JSON，不改闸门逻辑；把已由真实绿色语料证明的 14 个新增 case 固定进基线，消除 4 条长期存在的基线增长 warning。无测试删除或降级；基线 JSON 新增 2 个类、4 个方法、Passed +14。",
+      "next_action": "候选下一层：①RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用（需真实语料证明）；②Deployment 的 runDeploymentRoot 字段与 Deployment 记录一致性（已被现有 header 检查覆盖，需先复核）；③继续独立维护项/下一层结构不变量。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T00:12:00+08:00"
+    },
+    {
+      "id": "W6-113ay",
+      "title": "第三十二层：RunInfo 时间戳必须属于具名失败行的行窗（W6-113ay）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r52",
+      "branch": "feature/windows-w6-113ay-runinfo-row-time",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,423 -> 2,474 lines, 141,834 -> 145,306 B, 51 insertions / 0 deletions, sha256 be0627691778cc7867ca1052ea6471cbd4e7554121b114e96cf1c3ecb3421daa; old sha256 16fcef0a631c44fa95179e42aa3c4900f01d50f60cb2af9033d03791544a53bf; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites runInfoRowClock=0/0 and runInfoTextCanonical=0/0; combined tests=2077; log D:/mh-verify/r53/gate-real-r53.log.",
+        "Real failing TRX (total=767, failed=6): runInfoRowClock=6/6 and runInfoTextCanonical=6/6; only final 6 test(s) failed; log D:/mh-verify/r53/gate-real-failing-r53.log.",
+        "Negative matrix: clean-green and fail-with-runinfo OLD=0/NEW=0; runinfo-row-time-after and runinfo-row-time-before OLD=0/NEW=1; oldAllZero=true, eachRedExactlyOneClockRow=true; results D:/mh-verify/r53/results-all.json.",
+        "Code commit 92a0bf1eac2247f18872fcdcd5c8907e93c6bf37 (ci(windows): a failure log timestamp must sit on its own row (W6-113ay)); windows-ci 44572615891 (push) success, 44572841414 (pull_request) success; Android CI 44572841276 success."
+      ],
+      "notes": "第三十二层：RunInfo timestamp 必须落在 canonical Text 命名的 Failed/Error 行自己的 [start-1s, end+5s] 时间窗；真实 xUnit 2.9.3 在行结束后 13-97ms 写 RunInfo，因此保留 5s 上界。第 29/30 层只校验名字，第 31 层只校验元素归属，均不读 timestamp 与结果行的时间关系。",
+      "next_action": "候选第 33 层：①RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用（需真实失败语料证明）；②Deployment 的 runDeploymentRoot 字段与 Deployment 记录一致性（需先复核是否已被 header 检查覆盖）；③继续独立维护项。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T01:38:00+08:00"
+    },
+    {
+      "id": "W6-113az",
+      "title": "第三十三层：失败日志必须按运行顺序读取（W6-113az）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r53",
+      "branch": "feature/windows-w6-113az-runinfo-chronology",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,474 -> 2,532 lines, 145,306 -> 149,280 B, 58 insertions / 0 deletions, sha256 dec21a2517990e2061aee403916e59ed6817b3e1590356d2337e50756df99096; old sha256 be0627691778cc7867ca1052ea6471cbd4e7554121b114e96cf1c3ecb3421daa; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites runInfoChronology=0/0 and runInfoRowClock=0/0 and runInfoTextCanonical=0/0; combined tests=2077; log D:/mh-verify/r54/gate-real-r54-final.log.",
+        "Real failing TRX (total=767, failed=6): runInfoChronology=6/6, runInfoRowClock=6/6, runInfoTextCanonical=6/6; only final 6 test(s) failed; log D:/mh-verify/r54/gate-real-failing-r54-final.log.",
+        "Negative matrix: clean-green, fail-with-runinfo, clean-two-errors OLD=0/NEW=0 (clean-two newChron=2/2); bad-clock, bad-order, bad-timestamp OLD=0/NEW=1 with newChron=1/2 and chronologyProblems=1; oldAllZero=true; results D:/mh-verify/r54/results-all.json.",
+        "Code commit e9ba2f5fcd420f091c6854e91277e2d6bafa67b2 (ci(windows): a failure log must read in the order it ran (W6-113az)); windows-ci 44590929480 (push) success, 44591032497 (pull_request) success; Android CI 44591032591 success."
+      ],
+      "notes": "第三十三层：ResultSummary/RunInfos 的每个 RunInfo 的 canonical Text clock 与 timestamp 必须按列表顺序非递减；第 32 层只校验单条 timestamp 的行窗，交换两条或改一条 Text 时钟仍可通过。",
+      "next_action": "候选下一层：①RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用（真实语料中 ErrorInfo/StackTrace 不含测试名，当前不可行）；②Deployment/runDeploymentRoot 复核（已由 header 检查覆盖）；③继续侦察下一独立结构不变量。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T03:22:00+08:00"
+    },
+    {
+      "id": "W6-113ba",
+      "title": "第三十四层：phase 账本必须读自己的时钟（W6-113ba）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r54",
+      "branch": "feature/windows-w6-113ba-phase-clock",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,532 -> 2,613 lines, 149,280 -> 154,515 B, 81 insertions / 0 deletions, sha256 e960021ab6dd3ec410457ad0ace976a301b0a4e883ee914ae455cac250634d01; old sha256 dec21a2517990e2061aee403916e59ed6817b3e1590356d2337e50756df99096; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 and phaseLedger=4/4 ordered=1; combined tests=2077; log D:/mh-verify/r55/gate-real-r55.log.",
+        "Real failing TRX (total=767, failed=6): phaseClock=4/4 ordered=1 finishedAfterRunInfo=1, runInfoChronology=6/6, runInfoRowClock=6/6; only final 6 test(s) failed; log D:/mh-verify/r55/gate-real-failing-r55.log.",
+        "Negative matrix 7 cases: clean-real, clean-two-errors, clean-green, fail-with-runinfo OLD=0/NEW=0; bad-phase-order, bad-finished-before-runinfo, bad-runinfo-clock-after-finished OLD=0/NEW=1 with exactly one new phase-clock problem; oldAllZero=true; results D:/mh-verify/r55/results-all.json.",
+        "Code commit 1984beb76d4c382783af6b85ec805fa46623af0d (ci(windows): the phase ledger must read its own clocks (W6-113ba)); windows-ci 44606617816 (push) success, 44606767243 (pull_request) success; Android CI 44606767401 success."
+      ],
+      "notes": "第三十四层：StdOut 四个 phase 行必须各带 canonical [xUnit.net hh:mm:ss.ff] 时钟、非递减，且 Finished 不早于最后一条 RunInfo canonical Text 时钟；第 24 层只读名称/位置，第 29-33 层只处理 RunInfo。",
+      "next_action": "候选第 35 层：继续从真实失败语料侦察可证的结构不变量；候选① RunInfo 与 ErrorInfo/StackTrace 文本交叉引用已因真实语料不含测试名而不可行，候选② Deployment/runDeploymentRoot 已由 header 检查覆盖。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T04:54:00+08:00"
+    },
+    {
+      "id": "W6-113bb",
+      "title": "第三十五层：phase 时钟必须落在运行窗口内（W6-113bb）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r55",
+      "branch": "feature/windows-w6-113bb-phase-window",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,613 -> 2,637 lines, 154,515 -> 156,156 B, 29 insertions / 5 deletions, sha256 e48317d9d00dcc1daa72537845b9e67939d4d524f0a492f3ea3f28dba0d602d9; old sha256 e960021ab6dd3ec410457ad0ace976a301b0a4e883ee914ae455cac250634d01; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1; combined tests=2077; log D:/mh-verify/r56/gate-real-r56.log.",
+        "Real failing TRX (total=767, failed=6): phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1, runInfoChronology=6/6; only final 6 test(s) failed; log D:/mh-verify/r56/gate-real-failing-r56.log.",
+        "Negative matrix 5 cases: clean-real, clean-two-errors, clean-green, fail-with-runinfo OLD=0/NEW=0; bad-finished-beyond-window OLD=0/NEW=1 with withinRun=0 and exactly one run-window problem; oldAllZero=true; results D:/mh-verify/r56/results-all.json.",
+        "Code commit 497562a7a2b7bdfcb784ebedc504d4012e49615c (ci(windows): a phase clock must fit inside the run window (W6-113bb)); windows-ci 44622315539 (push) success, 44622330127 (pull_request) success; Android CI 44622330132 success."
+      ],
+      "notes": "第三十五层：StdOut 四个 phase 行的 canonical [xUnit.net hh:mm:ss.ff] 时钟必须 <= TestRun/Times.finish - Times.start；第 34 层只比较 phase 时钟彼此与最后 RunInfo，未读绝对运行窗口。",
+      "next_action": "候选第 36 层：继续从真实失败语料侦察可证结构不变量；RunInfo Text 时钟与 TRX @timestamp 存在约 +0.48s 常量偏移，不能直接按 Times.start 对齐；RunInfo/ErrorInfo 文本交叉引用仍不可行。W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T06:25:00+08:00"
+    },
+    {
+      "id": "W6-113bc",
+      "title": "第三十六层：RunInfo 时钟与时间戳必须描述同一次运行（W6-113bc）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r56",
+      "branch": "feature/windows-w6-113bc-runinfo-offset",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,637 -> 2,702 lines, 156,156 -> 160,608 B, 65 insertions / 0 deletions, sha256 90bdf991f8c4caf5c501ece6fc683aab30be604e80316fc5244d0233efcf1548; old sha256 e48317d9d00dcc1daa72537845b9e67939d4d524f0a492f3ea3f28dba0d602d9; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites runInfoOffset=0/0 and phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1; combined tests=2077; log D:/mh-verify/r57/gate-real-r57.log.",
+        "Real failing TRX (total=767, failed=6): runInfoOffset=6/6 (offsets 0.4897/0.4793/0.4789/0.4840/0.4830/0.4796 s, max spread 10.8 ms), runInfoChronology=6/6; only final 6 test(s) failed; log D:/mh-verify/r57/gate-real-failing-r57.log.",
+        "Negative matrix 5 cases: clean-real 0/0, clean-two-errors 2/2, clean-green 0/0, fail-with-runinfo 1/1 (all OLD=0/NEW=0); bad-runinfo-offset OLD=0/NEW=1 with runInfoOffset=1/2 and exactly one has-offset problem; oldAllZero=true; results D:/mh-verify/r57/results-all.json.",
+        "Code commit 11a11c3a2b8dc8c3c59c85abc7930fc676971409 (ci(windows): the failure-log clock and timestamp must describe one run (W6-113bc)); windows-ci 44634075916 (push) success, 44634139804 (pull_request) success; Android CI 44634139760 success."
+      ],
+      "notes": "第三十六层：每项 RunInfo 的 canonical Text clock 与 @timestamp 是同一事件的两个视图；timestamp - Times.start - Text clock 在一次运行内必须落在首项 100 ms 内。第 35 层只检查 phase 窗口；第 33 层只检查顺序。",
+      "next_action": "候选第 37 层：继续从真实失败语料侦察可证结构不变量；现有 offset 检查在只有 1 项 RunInfo 时无跨项对照；RunInfo/ErrorInfo 文本交叉引用仍不可行；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T07:55:00+08:00"
+    },
+    {
+      "id": "W6-113bd",
+      "title": "第三十七层：Starting 不得晚于最早结果行（W6-113bd）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r57",
+      "branch": "feature/windows-w6-113bd-phase-start-bound",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,702 -> 2,743 lines, 160,608 -> 162,959 B, 43 insertions / 2 deletions, sha256 5f9cb1dfe544706e9b3dcd8da144a5511dedc3b45a02d8dd1973c4b62cd022d2; old sha256 90bdf991f8c4caf5c501ece6fc683aab30be604e80316fc5244d0233efcf1548; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1; combined tests=2077; log D:/mh-verify/r58/gate-real-r58.log.",
+        "Real failing TRX (total=767, failed=6): firstRowAfterStart=1, runInfoChronology=6/6, runInfoOffset=6/6; only final 6 test(s) failed; log D:/mh-verify/r58/gate-real-failing-r58.log.",
+        "Negative matrix 5 cases: clean-real 0/0, clean-two-errors 0/0, clean-green 0/0, fail-with-runinfo 0/0, each firstRowAfterStart=1; bad-starting-after-first-row OLD=0/NEW=1, firstRowAfterStart=0, exactly one comes-after-first-result-row problem; oldAllZero=true; results D:/mh-verify/r58/results-all.json.",
+        "Code commit 5ad8ff57128f3f885eb53d8a14c9855f603ef319 (ci(windows): the host cannot start after the first row (W6-113bd)); windows-ci 44646121700 (push) success, 44646185495 (pull_request) success; Android CI 44646185437 success."
+      ],
+      "notes": "第三十七层：Starting 是宿主宣布测试开始的位置，最早 UnitTestResult/@startTime 是行自己记录的开始；前者不得晚于后者。第 34-36 层只比较 phase 时钟和 RunInfo，不读结果行起始。",
+      "next_action": "候选第 38 层：继续侦察可证结构不变量；可评估 Finished 与最后一行结束时间的上界，但真实语料行尾比 Finished 晚约 0.59 s，需先确认真实分布与容差；RunInfo/ErrorInfo 文本交叉引用仍不可行；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T08:56+08:00"
+    },
+    {
+      "id": "W6-113be",
+      "title": "第三十八层：运行窗口必须说明时区（W6-113be）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r58",
+      "branch": "feature/windows-w6-113be-times-offset",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,743 -> 2,770 lines, 162,959 -> 164,762 B, 32 insertions / 5 deletions, sha256 d83cc5470825048914f93b1a1adefcc77055dfdfcc12017129efca102934f739; old sha256 5f9cb1dfe544706e9b3dcd8da144a5511dedc3b45a02d8dd1973c4b62cd022d2; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites windowOffsets=2/2 and phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1; combined tests=2077; log D:/mh-verify/r59/logs/real-green.log.",
+        "Real failing TRX (total=767, failed=6): windowOffsets=2/2, RunInfo chronology/offset/rowClock 6/6; only final 6 test(s) failed; log D:/mh-verify/r59/logs/real-failing.log.",
+        "Negative matrix 5 cases: clean-real 0/0, clean-two-errors 0/0, clean-green 0/0, fail-with-runinfo 0/0, windowOffsets [2,2]; bad-finish-offset OLD=0/NEW=1, windowOffsets=1/2, exactly one carries-no-explicit-UTC-offset problem; oldAllZero=true; results D:/mh-verify/r59/results-all.json.",
+        "Code commit d959d8a4be3317bebde9d19848a1e63b22f426a2 (ci(windows): the run window must say which zone it is in (W6-113be)); windows-ci 44661323482 (push) success, 44661419649 (pull_request) success; Android CI 44661419404 success."
+      ],
+      "notes": "第三十八层：Times/@start 与 Times/@finish 必须携带显式 UTC offset。Convert-ToInstant 用 DateTimeOffset.Parse，无 offset 时按宿主本地时区解释；同一 TRX 在不同机器上会界定不同窗口，而计数与行序不变。creation/queuing 原有 offset 检查未变。",
+      "next_action": "候选第 39 层：继续从真实语料侦察可证结构不变量（如 Counters total 与实际 UnitTestResult 行数的等式）；避免 duration 与 start/end 严格等值（真实最大差 51 ms，已有 1 s 容差 warning）；Finished 与最后一行结束时间的上界需要容差，暂不选；RunInfo/ErrorInfo 文本交叉引用仍不可行；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T11:10:00+08:00"
+    },
+    {
+      "id": "W6-113bf",
+      "title": "第三十九层：每个结果行都必须说明时区（W6-113bf）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r59",
+      "branch": "feature/windows-w6-113bf-row-time-offset",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,770 -> 2,792 lines, 164,762 -> 166,387 B, 26 insertions / 4 deletions, sha256 1512335643e22714e41cde09b2cf6909161f20689ab1a85fd42b70b7c207be99; old sha256 d83cc5470825048914f93b1a1adefcc77055dfdfcc12017129efca102934f739; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites rowTimeOffsets=3946/3946 and 208/208, phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1; combined tests=2077; log D:/mh-verify/r60/logs/real-green.log.",
+        "Real failing TRX (total=767, failed=6): rowTimeOffsets=1534/1534 and 208/208, RunInfo chronology/offset/rowClock 6/6; only final 6 test(s) failed; log D:/mh-verify/r60/logs/real-failing.log.",
+        "Negative matrix 5 cases: clean-real 0/0, clean-two-errors 0/0, clean-green 0/0, fail-with-runinfo 0/0, rowTimeOffsets [3946,208]; bad-row-time-offset OLD=0/NEW=1, exactly one result-row-instant-carries-no-explicit-UTC-offset problem; oldAllZero=true; results D:/mh-verify/r60/results-all.json.",
+        "Code commit 41a89eee986c35a4b2240f8b0c5e8aff54847769 (ci(windows): every result row must say which zone it is in (W6-113bf)); windows-ci 44669931770 (push) success, 44669969563 (pull_request) success; Android CI 44669969519 success."
+      ],
+      "notes": "第三十九层：每个 UnitTestResult 的 startTime/endTime 必须携带显式 UTC offset。Convert-ToInstant 用 DateTimeOffset.Parse，无 offset 时按宿主本地时区解释；同一 TRX 的同一行在不同机器上会落在不同瞬间，而计数、行序、duration 与 phase 可全部不变。空/不可读时刻仍由既有 row metadata 条目处理。",
+      "next_action": "候选第 40 层：继续从真实失败语料侦察可证的结构不变量；结果行 offset 已覆盖；duration 严格等值（真实最大差 51 ms，已有 1 s 容差 warning）、Finished 与最后一行结束时间的上界（需容差）、RunInfo/ErrorInfo 文本交叉引用（缺测试名）均暂不选；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T12:05:00+08:00"
+    },
+    {
+      "id": "W6-113bg",
+      "title": "第四十层：失败日志条目必须说明时区（W6-113bg）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r60",
+      "branch": "feature/windows-w6-113bg-runinfo-zone",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,792 -> 2,815 lines, 166,387 -> 167,786 B, 25 insertions / 2 deletions, sha256 d2e1fe0d82d7d98f741e1903302c9fc5125019837dbb43626bd402d6bcf028b8; old sha256 1512335643e22714e41cde09b2cf6909161f20689ab1a85fd42b70b7c207be99; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites runInfos=0 and timestampOffsets=0/0, phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1; combined tests=2077; log D:/mh-verify/r61/logs/real-green.log.",
+        "Real failing TRX (total=767, failed=6, 6 RunInfo items): runInfos=6 matched=6 timestampOffsets=6/6, runInfoChronology=6/6, runInfoOffset=6/6; only final 6 test(s) failed; log D:/mh-verify/r61/logs/real-failing.log.",
+        "Negative matrix 5 cases: clean-real 0/0, clean-two-errors 0/0 with timestampOffsets 2/2, clean-green 0/0, fail-with-runinfo 0/0 with 1/1; bad-runinfo-zone OLD=0/NEW=1, exactly one carries-no-explicit-UTC-offset problem; oldAllZero=true; results D:/mh-verify/r61/results-all.json.",
+        "Code commit 74039fc02fdd26990fc63e423a0f8cef17907f55 (ci(windows): every failure-log item must say which zone it is in (W6-113bg)); windows-ci 44679133745 (push) success, 44679166137 (pull_request) success; Android CI 44679166122 success."
+      ],
+      "notes": "第四十层：ResultSummary/RunInfos/RunInfo/@timestamp 必须携带显式 UTC offset。Convert-ToInstant 用 DateTimeOffset.Parse，无 offset 时按宿主本地时区解释；同一失败日志在不同机器上把条目摆到不同瞬间，而条目数量、顺序、行窗口与 clock/timestamp offset 可全部不变。空/不可读 timestamp 仍由既有 unreadable-timestamp 条目处理。",
+      "next_action": "候选第 41 层：继续从真实语料侦察可证的结构不变量；五处显式 offset（creation/queuing/start/finish/结果行/RunInfo）已全部覆盖；duration 严格等值（真实最大差 51 ms，已有 1 s 容差 warning）、Finished 与最后一行结束时间的上界（需容差）、RunInfo/ErrorInfo 文本交叉引用（缺测试名）均暂不选；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T13:05:00+08:00"
+    },
+    {
+      "id": "W6-113bh",
+      "title": "第四十一层：运行报告的各节只有一个顺序（W6-113bh）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r61",
+      "branch": "feature/windows-w6-113bh-run-section-order",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,815 -> 2,851 lines, 167,786 -> 170,342 B, 37 insertions / 1 deletion, sha256 06d5306098a69accae7663e66314fed5072706ec59c9f9b7bdb5138adaa4f1e6; old sha256 d2e1fe0d82d7d98f741e1903302c9fc5125019837dbb43626bd402d6bcf028b8; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites structure=7/7 and runSections=7/7, phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1; MediaHub.Tests total=1973 baseline=1973, WebDav 104, combined tests=2077; log D:/mh-verify/r62/logs/real-green.log.",
+        "Real failing TRX (total=767, failed=6): exit 1; structure=7/7 runSections=7/7, timestampOffsets=6/6, runInfoChronology=6/6, runInfoOffset=6/6; only final 6 test(s) failed; log D:/mh-verify/r62/logs/real-failing.log.",
+        "Negative matrix 5 cases: clean-real 0/0, clean-two-errors 0/0, clean-green 0/0, fail-with-runinfo 0/0 all with runSections=7/7; bad-run-child-order OLD=0/NEW=1 with exactly one section-order problem naming both sequences; oldAllZero=true; results D:/mh-verify/r62/results-all.json.",
+        "Code commit f9213eb22874e652292fd1d0729d707c3b8de8f6 (ci(windows): the sections of a run report have one order (W6-113bh)); windows-ci 44688934804 (push) success, 44689004658 (pull_request) success; Android CI 44689004671 success."
+      ],
+      "notes": "第四十一层：TestRun 直接子元素必须恰为 Times,TestSettings,Results,TestDefinitions,TestEntries,TestLists,ResultSummary。既有 section 检查只数出现次数（六名白名单 + TestSettings 单独计数），从不读位置，因此重排节块后所有计数、配对、行时间与 phase 行不变。台阶行 structure 末尾新增 runSections=<n>/7。",
+      "next_action": "候选第 42 层：继续从真实语料侦察可证的结构不变量；已覆盖六处显式 offset、section 计数与顺序、行序与 entry 序、Counters 算术与行复现、executionId 配对、RunInfo 布局与文本；duration 严格等值（真实最大差 51 ms，已有 1 s 容差 warning）、Finished 与最后一行结束时间上界（需容差）、RunInfo/ErrorInfo 文本交叉引用（缺测试名）、ResultFiles（全部语料为空）均暂不选；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T14:45:00+08:00"
+    },
+    {
+      "id": "W6-113bi",
+      "title": "第四十二层：每一行的时长保持写出时的形状（W6-113bi）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r62",
+      "branch": "feature/windows-w6-113bi-duration-shape",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,851 -> 2,878 lines, 170,342 -> 171,849 B, 29 insertions / 3 deletions, sha256 a8cb9628ddc7fdc1a08ab7d6c90326ffe382c3810a70f126e0108a4e67955a55; old sha256 06d5306098a69accae7663e66314fed5072706ec59c9f9b7bdb5138adaa4f1e6; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites durationShape=1973/1973 and 104/104, rowTimeOffsets=3946/3946 and 208/208, phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1; MediaHub.Tests total=1973 baseline=1973, WebDav 104, combined tests=2077; log D:/mh-verify/r63/logs/real-green.log.",
+        "Real failing TRX (total=767, failed=6): exit 1; durationShape=767/767, timestampOffsets=6/6, runInfoChronology=6/6, runInfoOffset=6/6; only final 6 test(s) failed; log D:/mh-verify/r63/logs/real-failing.log.",
+        "Corpus census: 4,043 result rows across 7 real corpora all carry 16-character canonical durations (length set exactly {16}); max 00:00:05.3670676, min 00:00:00.0000008.",
+        "Negative matrix 5 cases: clean-real 0/0, clean-two-errors 0/0, clean-green 0/0, fail-with-runinfo 0/0 all with durationShape full; bad-duration-shape OLD=0/NEW=1 with exactly one shape problem (1 row(s) carry a duration that is not written as hh:mm:ss.fffffff); oldAllZero=true; results D:/mh-verify/r63/results-all.json.",
+        "Code commit 7eee35e3197355fe7ced2306f5c229d2767c4514 (ci(windows): every row duration keeps the shape the writer gives it (W6-113bi)); windows-ci 44699199883 (push) success, 44699247427 (pull_request) success; Android CI 44699247182 success."
+      ],
+      "notes": "第四十二层：每条 UnitTestResult/@duration 的文本形状必须恰为 hh:mm:ss.fffffff。既有 Convert-ToMillis 用 [TimeSpan]::Parse，宽容接受 0:0:1、00:00:01、000:00:01、00:00:01.5、1.00:00:00，所以被改写的 duration 读得通、不触发 unreadable/negative 与 1 秒 drift 告警、也不动台阶行。台阶行 rowAttributes 末尾新增 durationShape=<n>/<rows>。",
+      "next_action": "候选第 43 层：继续从真实语料侦察可证的结构不变量；已覆盖六处显式 offset、section 计数与顺序、行序与 entry 序、Counters 算术与行复现、executionId 配对、RunInfo 布局与文本、duration 书写形状；duration 严格等值（真实最大差 51 ms，已有 1 s 容差 warning）、Finished 与最后一行结束时间上界（需容差）、RunInfo/ErrorInfo 文本交叉引用（缺测试名）、ResultFiles（全部语料为空）、UnitTestResult/@resultType（100% 缺失）均暂不选；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T16:05:00+08:00"
+    },
+    {
+      "id": "W6-113bj",
+      "title": "第四十三层：任何元素都不得携带写出器不会写的属性（W6-113bj）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r63",
+      "branch": "feature/windows-w6-113bj-attribute-vocabulary",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,878 -> 2,961 lines, 171,849 -> 176,830 B, 84 insertions / 1 deletion, sha256 5f6c31437d4e61dd72dc5026044d218b975f538c53bf1e8c972c4edd370dc7cd; old sha256 a8cb9628ddc7fdc1a08ab7d6c90326ffe382c3810a70f126e0108a4e67955a55; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites attributeVocabulary=9883/9883 and 534/534, phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1; MediaHub.Tests total=1973 baseline=1973, WebDav 104, combined tests=2077; log D:/mh-verify/r64/logs/real-green.log.",
+        "Real failing TRX (total=767, failed=6): exit 1; attributeVocabulary=3886/3886, timestampOffsets=6/6, runInfoChronology=6/6, runInfoOffset=6/6; only final 6 test(s) failed; log D:/mh-verify/r64/logs/real-failing.log.",
+        "Corpus census: 55 element/attribute pairs across 7 real corpora, each element carrying exactly one attribute-set variant; structural elements (ErrorInfo/Message/Output/Results/RunInfos/StackTrace/StdOut/TestDefinitions/TestEntries/TestLists/Text) carry none.",
+        "Negative matrix 5 cases: clean-real 0/0, clean-two-errors 0/0, clean-green 0/0, fail-with-runinfo 0/0 all with attributeVocabulary full; bad-extra-attribute OLD=0/NEW=1 with exactly one problem (UnitTestResult carries foo); oldAllZero=true; results D:/mh-verify/r64/results-all.json.",
+        "Code commit c23bbbb2d4a316e8f0130f692b52cc167a6d847c (ci(windows): an element may not carry an attribute the writer never emits (W6-113bj)); windows-ci 44710743527 (push) success, 44710839921 (pull_request) success; Android CI 44710839943 success."
+      ],
+      "notes": "第四十三层：元素的属性名必须落在写出器固定词汇表内。既有闸门只在三处遍历属性——TestRun 的 xmlns、Counters 属性循环（未知名只 warning）、TestSettings/Deployment 属性循环（只挑 id/name/runDeploymentRoot，其余静默忽略）——其余按名取值，因此给任意元素追加属性不改变任何计数、配对、行序与台阶行。台阶行 structure 末尾新增 attributeVocabulary=<n>/<elements>；未知元素名只 warning 不 red。",
+      "next_action": "候选第 44 层：继续从真实语料侦察可证的结构不变量；已覆盖六处显式 offset、section 计数与顺序、行序与 entry 序、Counters 算术与行复现、executionId 配对、RunInfo 布局与文本、duration 书写形状、元素属性词汇表；属性取值类（testType 恒为 13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b）尚未 pin，但需权衡未来 VSTest 版本风险；duration 严格等值（真实最大差 51 ms，已有 1 s 容差 warning）、Finished 上界（需容差）、ResultFiles（全部语料为空）、UnitTestResult/@resultType（100% 缺失）均暂不选；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T17:20:00+08:00"
+    },
+    {
+      "id": "W6-113bk",
+      "title": "第四十四层：同一份结果文件里的时间戳只有一个时区（W6-113bk）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r64",
+      "branch": "feature/windows-w6-113bk-run-zone",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,960 -> 2,995 lines, 176,830 -> 179,584 B, 36 insertions / 1 deletion, sha256 54724ad067603802cddd574fb13bf97559b5372272dc00631516f58fdea2522f; old sha256 5f6c31437d4e61dd72dc5026044d218b975f538c53bf1e8c972c4edd370dc7cd; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; MediaHub.Tests runZones=1 zoneStamps=3950, WebDav runZones=1 zoneStamps=212, phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1; combined tests=2077; log D:/mh-verify/r65/logs/real-green.log.",
+        "Real failing TRX (total=767, failed=6): exit 1; runZones=1 zoneStamps=1544, attributeVocabulary=3886/3886, timestampOffsets=6/6, runInfoChronology=6/6, runInfoOffset=6/6; only final 6 test(s) failed; log D:/mh-verify/r65/logs/real-failing.log.",
+        "Corpus census: each of the seven real corpora holds exactly one distinct UTC offset within the file (gate windows 3950 +08:00, webdav 212 +08:00; real TRX windows 1544 +00:00, webdav 212 +08:00; clean-two-errors 3952, clean-green 3950, fail-with-runinfo 3951 all +08:00).",
+        "Negative matrix 5 cases: clean-real 0/0, clean-two-errors 0/0, clean-green 0/0, fail-with-runinfo 0/0 all with runZones=1 on both suites; bad-mixed-zone OLD=0/NEW=1 with exactly one problem (the instants in windows-tests.trx are written in 2 different UTC offsets); oldAllZero=true; results D:/mh-verify/r65/results-all.json.",
+        "Code commit b10b118e355f041cd7122a0d6b392f36c9fe184b (ci(windows): every instant in one run report is in one zone (W6-113bk)); windows-ci 44722267860 (push) success, 44722413160 (pull_request) success; Android CI 44722413273 success."
+      ],
+      "notes": "第四十四层：一份 TRX 内全部整戳属性必须写成同一个 UTC offset。既有四处 offset 检查（Times 窗口、行 start/end、RunInfo/@timestamp、RunInfo 100 ms 排序钟）都只问单个戳带没带 offset，从不相问彼此是否一致；把某行整段时间换算成另一 offset 后 instant、时长、行序与全部台阶行不变。台阶行 structure 末尾新增 runZones=<distinct>/zoneStamps=<n>。",
+      "next_action": "候选第 45 层：继续从真实语料侦察可证的结构不变量；已覆盖六处显式 offset 与同文件时区唯一、section 计数与顺序、行序与 entry 序、Counters 算术与行复现、executionId 配对、RunInfo 布局与文本、duration 书写形状、元素属性词汇表；属性取值 pin（testType 恒为 13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b）仍待权衡 VSTest 版本风险；ResultFiles 全语料为空、resultType 100% 缺失、duration 严格等值不可行（真实最大差 51 ms，已有 1 s 容差）；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T18:40:00+08:00"
+    },
+    {
+      "id": "W6-113bl",
+      "title": "第四十五层：元素不能包含写出器不会放在该父节点下的子元素（W6-113bl）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r65",
+      "branch": "feature/windows-w6-113bl-child-nesting",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,995 -> 3,072 lines, 179,584 -> 184,181 B, 78 insertions / 1 deletion, sha256 f4b7954c1d645e3698f6c4e6f1c309f8b5c1702c79f4cc9b193bfd2ca1ed3f8c; old sha256 54724ad067603802cddd574fb13bf97559b5372272dc00631516f58fdea2522f; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; MediaHub.Tests childVocabulary=9882/9882 attributeVocabulary=9883/9883 runZones=1 zoneStamps=3950; WebDav childVocabulary=533/533 attributeVocabulary=534/534; phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1; combined tests=2077; log D:/mh-verify/r66/logs/real-green.log.",
+        "Real failing TRX (total=767, failed=6): exit 1; childVocabulary=3885/3885, attributeVocabulary=3886/3886, runZones=1 zoneStamps=1544, timestampOffsets=6/6, runInfoChronology=6/6, runInfoOffset=6/6; only final 6 test(s) failed; log D:/mh-verify/r66/logs/real-failing.log.",
+        "Corpus census: every parent element has exactly one distinct child-name set across the seven real corpora (TestRun 7 sections; TestSettings Deployment; Results UnitTestResult; UnitTestResult Output; Output StdOut|ErrorInfo; ErrorInfo Message|StackTrace; ResultSummary Counters|Output|RunInfos; RunInfos RunInfo; RunInfo Text; TestDefinitions UnitTest; UnitTest Execution|TestMethod; TestEntries TestEntry; TestLists TestList; 11 leaf elements).",
+        "Negative matrix 5 cases: clean-real 0/0, clean-two-errors 0/0, clean-green 0/0, fail-with-runinfo 0/0 with childVocabulary full on both suites (windows 9882/9895/9882/9889, webdav 533 each); bad-child-nesting OLD=0/NEW=1 with exactly one problem (TestList inside TestEntries); oldAllZero=true; results D:/mh-verify/r66/results-all.json.",
+        "Code commit 6f4cd333037106f4a7ac006ff91b2cbc3fce93f1 (ci(windows): an element may not nest a child the writer never puts there (W6-113bl)); windows-ci 44733162187 (push) success, 44733247638 (pull_request) success; Android CI 44733247593 success."
+      ],
+      "notes": "第四十五层：每个元素的子元素必须属于写出器在该父节点下的固定集合。第 41 层只钉 TestRun 直接子元素顺序、第 43 层只钉属性；其余容器一律按路径访问（xml.TestRun.Results.UnitTestResult 等），错位元素从不被读到，计数、配对、行时序、phase 行与台阶字段全都不变。台阶行 structure 末尾新增 childVocabulary=<known>/<child elements>。",
+      "next_action": "候选第 46 层：继续从真实语料侦察可证的结构不变量；已覆盖六处显式 offset 与同文件时区唯一、TestRun 子元素顺序、元素属性词汇表、元素子节点词汇表、行序与 entry 序、Counters 算术与行复现、executionId 配对、RunInfo 布局与文本、duration 书写形状；仍开放的方向：同一父下同名兄弟元素的先后顺序（当前只对 TestRun 直接子元素有）、叶子元素必须为空且无文本、属性取值 pin（testType 恒为 13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b，需权衡 VSTest 版本风险）；不可用方向：ResultFiles 全语料为空、resultType 100% 缺失、duration 严格等值（真实最大差 51 ms，已有 1 s 容差）、StdOut 无汇总行；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T20:05:00+08:00"
+    },
+    {
+      "id": "W6-113bm",
+      "title": "第四十六层：元素只能在自己被写出器赋文本的位置携带文本（W6-113bm）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r66",
+      "branch": "feature/windows-w6-113bm-text-vocabulary",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 3,072 -> 3,122 lines, 184,181 -> 187,530 B, 51 insertions / 1 deletion, sha256 c8143804aaac2f4ebcea0ad0d156d6e3e7cd99fa6b92ad9d872dee2dd0dffc87; old sha256 f4b7954c1d645e3698f6c4e6f1c309f8b5c1702c79f4cc9b193bfd2ca1ed3f8c; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; MediaHub.Tests textVocabulary=3/3 childVocabulary=9882/9882 attributeVocabulary=9883/9883 runZones=1 zoneStamps=3950; WebDav textVocabulary=1/1 childVocabulary=533/533 attributeVocabulary=534/534; phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1; combined tests=2077; log D:/mh-verify/r67/logs/real-green.log.",
+        "Real failing TRX (total=767, failed=6): exit 1; textVocabulary=19/19, childVocabulary=3885/3885, attributeVocabulary=3886/3886, runZones=1 zoneStamps=1544, timestampOffsets=6/6; only final 6 test(s) failed; log D:/mh-verify/r67/logs/real-failing.log.",
+        "Corpus census: the only element names carrying text of their own are StdOut, Message, StackTrace, Text; every other InnerText is inherited from descendants; Counters/Deployment/Execution/TestEntry/TestList/TestMethod/Times are always empty leaves; UnitTestResult is empty on every passing row (1971/1973 gate, 761/767 real failing); no CDATA anywhere.",
+        "Negative matrix 5 cases: clean-real 0/0, clean-two-errors 0/0, clean-green 0/0, fail-with-runinfo 0/0 with textVocabulary full on both suites (3+1, 9+1, 3+1, 6+1); bad-stray-text OLD=0/NEW=1 with exactly one problem (text inside TestEntries); oldAllZero=true; results D:/mh-verify/r67/results-all.json.",
+        "Code commit c9d78ffa377548be0d312386baf348f77099cba5 (ci(windows): an element may not carry text the writer never puts there (W6-113bm)); windows-ci 44743858321 (push) success, 44743939399 (pull_request) success; Android CI 44743939422 success."
+      ],
+      "notes": "第四十六层：元素只能在自己被写出器赋文本的位置携带文本。第 43 层只钉属性、第 45 层只钉子元素名，文本节点既不是元素也不带属性，容器又按路径访问，因此塞进容器的说明文字不改变任何计数、配对、行时序、phase 行与台阶字段。检查只累加直接子 Text/CDATA/SignificantWhitespace，绝不继承后代文本。台阶行 structure 末尾新增 textVocabulary=<carriers>/<elements>。",
+      "next_action": "候选第 47 层：继续从真实语料侦察可证的结构不变量；已覆盖显式 offset 六处与同文件时区唯一、TestRun 子元素顺序、元素属性词汇表、元素子节点词汇表、元素文本词汇表、行序与 entry 序、Counters 算术与行复现、executionId 配对、RunInfo 布局与文本、duration 书写形状；仍开放：同一父下同名兄弟元素的先后顺序（当前只对 TestRun 直接子元素有）、属性取值 pin（testType 恒为 13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b，需权衡 VSTest 版本风险）、Message/StackTrace 与行 outcome 的对应（Failed 必须有、Passed 必须无，已部分覆盖）；不可用：ResultFiles 全语料为空、resultType 100% 缺失、duration 严格等值（真实最大差 51 ms，已有 1 s 容差）、StdOut 无汇总行；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T21:25:00+08:00"
     }
   ]
 }

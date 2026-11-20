@@ -29,12 +29,13 @@
     {
       "file": "windows-tests.trx",
       "suite": "MediaHub.Tests",
-      "expected": 1959,
+      "expected": 1973,
       "classes": {
         "MediaHub.Tests.ArchiveAndroidInteropTests": 8,
         "MediaHub.Tests.ArchiveEdgeContractTests": 11,
         "MediaHub.Tests.ArchiveEncryptionTests": 41,
         "MediaHub.Tests.ArchiveNearLimitTests": 5,
+        "MediaHub.Tests.ArtworkDiskCacheTests": 10,
         "MediaHub.Tests.BackupAndroidExportArtifactTests": 7,
         "MediaHub.Tests.BackupCliTests": 19,
         "MediaHub.Tests.BackupContainerTests": 23,
@@ -76,6 +77,7 @@
         "MediaHub.Tests.MhBackupWriteOutlookTests": 9,
         "MediaHub.Tests.MockServerIntegrationTests": 23,
         "MediaHub.Tests.MpvHeaderFormattingTests": 6,
+        "MediaHub.Tests.MpvSubtitleStyleTests": 2,
         "MediaHub.Tests.NetworkPolicyTests": 6,
         "MediaHub.Tests.OriginScopedCredentialHandlerTests": 28,
         "MediaHub.Tests.PairedDeviceContractTests": 14,
@@ -92,7 +94,7 @@
         "MediaHub.Tests.PlaybackInfoShapeTests": 3,
         "MediaHub.Tests.PlaybackQueueTests": 14,
         "MediaHub.Tests.PlaybackSessionPolicyTests": 35,
-        "MediaHub.Tests.PlaylistStoreTests": 19,
+        "MediaHub.Tests.PlaylistStoreTests": 21,
         "MediaHub.Tests.ProviderCapabilityTests": 6,
         "MediaHub.Tests.ProviderPlaybackWriteTests": 6,
         "MediaHub.Tests.RedactionTests": 17,
@@ -213,6 +215,18 @@
           "TheReaderRefusesAnOversizedCiphertextBeforeDecryption": 1,
           "TheRecipeReproducesTheWindowsPayloadByteForByte": 1,
           "TheWriterAcceptsExactlyTheCeilingAndRefusesOneByteMore": 1
+        },
+        "MediaHub.Tests.ArtworkDiskCacheTests": {
+          "An_entry_larger_than_the_whole_cap_is_not_kept": 1,
+          "An_entry_older_than_the_ttl_is_not_returned_and_is_deleted": 1,
+          "Clear_removes_orphan_temp_files": 1,
+          "Clear_resets_the_tracked_size_to_zero": 1,
+          "Contains_treats_an_expired_entry_as_absent": 1,
+          "Reading_an_expired_entry_releases_its_bytes": 1,
+          "Rewriting_a_key_does_not_inflate_the_tracked_size": 1,
+          "Trim_removes_orphan_temp_files": 1,
+          "Writing_then_reading_returns_the_same_bytes": 1,
+          "Writing_when_over_the_cap_evicts_the_oldest_entry": 1
         },
         "MediaHub.Tests.BackupAndroidExportArtifactTests": {
           "The_android_export_round_trips_with_its_manifest_intact": 1,
@@ -748,6 +762,10 @@
           "Multiple_headers_are_comma_separated": 1,
           "No_headers_produces_an_empty_field_list": 1
         },
+        "MediaHub.Tests.MpvSubtitleStyleTests": {
+          "Every_subtitle_style_value_reaches_libmpv": 1,
+          "Out_of_range_style_values_are_clamped_before_they_reach_libmpv": 1
+        },
         "MediaHub.Tests.NetworkPolicyTests": {
           "Auto_redirect_is_disabled_so_every_hop_can_be_inspected": 1,
           "Direct_mode_disables_proxy_resolution": 1,
@@ -1021,6 +1039,8 @@
           "RenameChangesTheNameAndUpdatesTheTimestamp": 1,
           "RenameRejectsBlankNamesWithoutTouchingThePlaylist": 1,
           "ReopeningTheStoreReadsBackWhatWasWritten": 1,
+          "ReorderItemsPersistsACompleteNewOrder": 1,
+          "ReorderItemsRejectsAnythingThatIsNotAPermutation": 1,
           "SaveFailureSurfacesAsIOExceptionAndKeepsThePreviousDocument": 1,
           "SavingLeavesNoTemporaryFilesBehind": 1,
           "UnknownDocumentVersionIsQuarantinedInsteadOfGuessedAt": 1
@@ -2645,7 +2665,7 @@
         "MediaHub.Tests.SyncCliTests.Parse_RejectsMalformedCommandLinesWithStableCodes": 1
       },
       "outcomes": {
-        "Passed": 1959
+        "Passed": 1973
       }
     },
     {
