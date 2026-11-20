@@ -74,4 +74,16 @@ data class JellyfinItemDto(
     @SerialName("ProviderIds") val providerIds: Map<String, String>? = null,
     @SerialName("People") val people: List<JellyfinPersonDto> = emptyList(),
     @SerialName("Studios") val studios: List<JellyfinStudioDto> = emptyList(),
+    /** 详情端点返回的版本（MediaSources）与轨道；列表端点通常为空。 */
+    @SerialName("MediaSources") val mediaSources: List<JellyfinMediaSourceInfoDto> = emptyList(),
+    @SerialName("MediaStreams") val mediaStreams: List<JellyfinMediaStreamDto> = emptyList(),
+    @SerialName("Chapters") val chapters: List<JellyfinChapterInfoDto> = emptyList(),
+)
+
+/** 章节信息（详情页章节跳转）。 */
+@Serializable
+data class JellyfinChapterInfoDto(
+    @SerialName("StartPositionTicks") val startPositionTicks: Long? = null,
+    @SerialName("Name") val name: String? = null,
+    @SerialName("ChapterIndex") val chapterIndex: Int? = null,
 )

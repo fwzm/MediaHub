@@ -83,8 +83,17 @@ data class JellyfinMediaStreamDto(
     @SerialName("Height") val height: Int? = null,
     @SerialName("BitRate") val bitRate: Long? = null,
     @SerialName("Language") val language: String? = null,
+    @SerialName("Title") val title: String? = null,
     @SerialName("DisplayTitle") val displayTitle: String? = null,
+    @SerialName("Channels") val channels: Int? = null,
+    @SerialName("SampleRate") val sampleRate: Int? = null,
+    @SerialName("IsDefault") val isDefault: Boolean = false,
+    @SerialName("IsForced") val isForced: Boolean = false,
+    @SerialName("Profile") val profile: String? = null,
+    @SerialName("Level") val level: Int? = null,
     @SerialName("VideoRange") val videoRange: String? = null,
+    @SerialName("ExtendedVideoType") val extendedVideoType: String? = null,
+    @SerialName("ExtendedVideoSubType") val extendedVideoSubType: String? = null,
 )
 
 // ---- 进度上报（/Sessions/Playing[/Progress|/Stopped]，官方 SessionsController） ----
