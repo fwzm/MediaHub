@@ -7,15 +7,16 @@ import com.mediahub.model.MediaServer
 import com.mediahub.provider.api.MediaDetailProvider
 import com.mediahub.provider.jellyfin.JellyfinProviderSupport
 import com.mediahub.provider.jellyfin.api.JellyfinApiClient
+import com.mediahub.provider.jellyfin.mapper.JellyfinDetailMapper
 import com.mediahub.provider.jellyfin.mapper.JellyfinImageMapper
-import com.mediahub.provider.jellyfin.mapper.JellyfinItemMapper
 import com.mediahub.provider.jellyfin.session.JellyfinSessionStore
 
 /**
  * Jellyfin 条目详情（Phase 1G-B）：GET /Items/{itemId}?UserId=…（现代端点，单条目全量）。
  *
  * - Movie/Series/Season/Episode 共用同一端点与映射；Series 的季/集继续走
- *   library 链（ParentId 浏览），MediaDetail 列表字段 v1 core parity 保持空。
+ *   library 链（ParentId 浏览）。MediaSources/MediaStreams/Chapters 映射为版本/轨道/章节；
+ *   seasons/similarItems 仍保持空（由 library 链与后续切片补齐）。
  * - 映射含 People/Studios/ProviderIds/UserData（跨源身份必备）。
  */
 class JellyfinDetailProvider(
@@ -30,12 +31,12 @@ class JellyfinDetailProvider(
         val (token, userId) = JellyfinProviderSupport.requireSession(server, tokenStore, sessionStore)
         return try {
             val dto = api.getItemDetail(token, userId, itemId)
-            val item = JellyfinItemMapper.map(dto, server.id)
+            val detail = JellyfinDetailMapper.mapDetail(dto, server.id)
                 ?: throw com.mediahub.provider.api.ProviderException.Parse(
                     server.id,
                     IllegalStateException("详情响应缺少有效条目 Id"),
                 )
-            var enriched = JellyfinImageMapper.enrich(item, api, dto.imageTags, dto.backdropImageTags)
+            var enriched = JellyfinImageMapper.enrich(detail.item, api, dto.imageTags, dto.backdropImageTags)
             // People 图片：mapper 保持纯函数，PrimaryImageTag 在 DTO 上，按 Id 回填 URL
             val personImageTags = dto.people.associate { it.id to it.primaryImageTag }
             enriched = enriched.copy(
@@ -47,7 +48,7 @@ class JellyfinDetailProvider(
                     } ?: person
                 },
             )
-            MediaDetail(item = enriched)
+            detail.copy(item = enriched)
         } catch (e: Exception) {
             throw JellyfinProviderSupport.mapError(server.id, e)
         }

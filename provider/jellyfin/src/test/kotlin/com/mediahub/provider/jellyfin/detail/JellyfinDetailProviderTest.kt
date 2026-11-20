@@ -7,7 +7,9 @@ import com.mediahub.core.network.HttpClientFactory
 import com.mediahub.core.security.SecretStorage
 import com.mediahub.core.security.StoredToken
 import com.mediahub.core.security.TokenStore
+import com.mediahub.model.HdrType
 import com.mediahub.model.MediaServer
+import com.mediahub.model.MediaStream
 import com.mediahub.model.Person
 import com.mediahub.model.ServerType
 import com.mediahub.provider.api.ProviderException
@@ -136,6 +138,83 @@ class JellyfinDetailProviderTest {
             fail("必须抛 Parse")
         } catch (_: ProviderException.Parse) {
         }
+    }
+
+    // ---- 2：详情元数据——版本/流/音轨/字幕/章节（Phase 1G-B parity） ----
+
+    @Test
+    fun `detail maps versions streams tracks and chapters from media sources`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"Id":"m1","Name":"Fargo","Type":"Movie","Container":"mkv",
+                     "MediaSources":[{"Id":"src1","Name":"4K HDR10","Container":"mkv","Size":123,
+                       "Bitrate":1000000,"SupportsDirectStream":true,
+                       "MediaStreams":[
+                         {"Index":0,"Type":"Video","Codec":"hevc","Width":3840,"Height":2160,
+                          "BitRate":8000000,"VideoRange":"HDR10","Profile":"Main 10",
+                          "Level":153,"IsDefault":true},
+                         {"Index":1,"Type":"Audio","Codec":"eac3","Channels":6,
+                          "SampleRate":48000,"Language":"eng","IsDefault":true},
+                         {"Index":2,"Type":"Subtitle","Codec":"srt","Language":"chi",
+                          "IsForced":true}]}],
+                     "Chapters":[{"StartPositionTicks":0,"Name":"开场"},
+                       {"StartPositionTicks":6000000000,"Name":"高潮"}]}"""
+            )
+        )
+
+        val detail = provider().getItemDetail("m1")
+
+        assertEquals(1, detail.versions.size)
+        assertEquals("src1", detail.versions[0].id)
+        assertEquals("4K HDR10", detail.versions[0].name)
+        assertEquals(3840, detail.versions[0].width)
+        assertEquals(2160, detail.versions[0].height)
+        assertEquals(HdrType.HDR10, detail.versions[0].hdrType)
+        assertEquals(1_000_000L, detail.versions[0].bitrate)
+        assertEquals(123L, detail.versions[0].sizeBytes)
+
+        assertEquals(3, detail.streams.size)
+        assertEquals(MediaStream.StreamType.VIDEO, detail.streams[0].type)
+        assertEquals("hevc", detail.streams[0].codec)
+        assertEquals("Main 10", detail.streams[0].profile)
+        assertEquals("153", detail.streams[0].level)
+        assertEquals(HdrType.HDR10, detail.streams[0].hdrType)
+
+        assertEquals(1, detail.audioTracks.size)
+        assertEquals(1, detail.audioTracks[0].index)
+        assertEquals(6, detail.audioTracks[0].channels)
+        assertEquals(48000, detail.audioTracks[0].sampleRate)
+        assertEquals("eng", detail.audioTracks[0].language)
+        assertTrue(detail.audioTracks[0].isDefault)
+
+        assertEquals(1, detail.subtitles.size)
+        assertEquals("srt", detail.subtitles[0].format)
+        assertEquals("chi", detail.subtitles[0].language)
+        assertTrue(detail.subtitles[0].isForced)
+
+        assertEquals(2, detail.chapters.size)
+        assertEquals("开场", detail.chapters[0].name)
+        assertEquals("高潮", detail.chapters[1].name)
+        assertEquals(600_000L, detail.chapters[1].startMs)
+    }
+
+    @Test
+    fun `detail maps dolby vision extended video metadata`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"Id":"m1","Name":"DV","Type":"Movie",
+                     "MediaStreams":[
+                       {"Index":0,"Type":"Video","Codec":"hevc","Width":3840,"Height":2160,
+                        "ExtendedVideoType":"DolbyVision","ExtendedVideoSubType":"DoviProfile81"}]}"""
+            )
+        )
+
+        val detail = provider().getItemDetail("m1")
+
+        assertEquals(1, detail.streams.size)
+        assertEquals(HdrType.DOLBY_VISION, detail.streams[0].hdrType)
     }
 
     private class FakeSecretStorage : SecretStorage {
