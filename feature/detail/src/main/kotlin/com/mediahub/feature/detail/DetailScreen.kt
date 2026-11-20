@@ -123,20 +123,12 @@ fun DetailRoute(
         },
     ) { padding ->
         when (val s = state) {
-            DetailUiState.Loading -> Box(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentAlignment = Alignment.Center,
-            ) { CircularProgressIndicator() }
-
-            is DetailUiState.Error -> Box(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(s.message, color = MaterialTheme.colorScheme.error)
-                    TextButton(onClick = viewModel::load) { Text("重试") }
-                }
-            }
+            // 视觉审计 D2/D3：加载/错误态统一走 core/ui 的 MediaHubStatus 三态组件
+            DetailUiState.Loading, is DetailUiState.Error -> DetailStatusPane(
+                state = s,
+                onRetry = viewModel::load,
+                modifier = Modifier.padding(padding),
+            )
 
             is DetailUiState.Content -> Column(
                 modifier = Modifier.fillMaxSize().padding(padding),
