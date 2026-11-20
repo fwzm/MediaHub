@@ -222,7 +222,14 @@ fun DetailBody(
                         contentDescription = item.title,
                         modifier = Modifier.width(104.dp),
                     )
-                    Column(modifier = Modifier.weight(1f).padding(top = 24.dp)) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(top = 24.dp)
+                            // 审计 D4：标题列自带局部 scrim，避免亮 backdrop 上白字对比度不足
+                            .background(brush = detailTitleScrimBrush(), shape = RoundedCornerShape(12.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                    ) {
                         Text(
                             item.title,
                             style = MaterialTheme.typography.headlineSmall,
