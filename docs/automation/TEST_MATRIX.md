@@ -1422,3 +1422,612 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 
 ### exact-head CI 验收
 - 代码 head 1fb7dd4909a4fac72f4b2a83ed2e24d0f51de46c：windows-ci 41868713607 = success，台阶行与 licence 行见 RUNLOG round 40 小节；Android 41868713321 = success。
+
+## 6.27 第二十二层口径：失败证据必须与自己的 verdict 一致（W6-113an，2026-11-19）
+
+### 口径
+| 判据 | 读自 | 违反 |
+| --- | --- | --- |
+| Failed/Error 行必须恰好携带一个 Output/ErrorInfo，其 Message 非空白 | 结果行的 Output 子树 | RED |
+| Passed 行不得携带 ErrorInfo | 同上 | RED |
+| 同一 Output 内多于一个 ErrorInfo | 同上 | RED |
+| Message 文本必须按 local name 读取 | Message 子节点 | 读法错误会把真实文本读成空串（实现事故，已修） |
+
+### 为什么前二十一层看不见
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 2-5、13-19 层 | 计数、类/方法、参数行、outcome 桶、身份、运行头、程序集、词表、运行自述 | 全部按 id 与计数建表，Output 子树从未进入任何比较 |
+| 第 21 层 | Results 与 TestEntries 的位置对应 | 行内容仍然只比较 id |
+| 全层 | — | ErrorInfo / StackTrace / RunInfos / StdOut 在脚本里引用计数为 0 |
+
+### 依据（EXECUTED）
+- 真实 767 行失败语料：6 个 Failed 行全部带非空 Message+StackTrace，761 个 Passed 行全部无 ErrorInfo；6 条 RunInfo 与失败行同数，时间戳都在 [start, finish] 内。
+- 七例负向对照：clean-green 与 error-with-evidence 双绿，五个变异（Passed 带证据、Passed 带重复证据、Error 空白 Message、Error 无证据、Error 带重复证据）新闸门 RED 而旧闸门 PASS。
+- 两代 PowerShell 解析 0 error；真实语料双套件台阶行分别为 0/0 与 0/0（全部通过语料）。
+
+### 数据源与规模
+- check-test-suite-baseline.ps1 109,291 → 113,800 B，1,913 → 1,987 行，0 非 ASCII，sha256 26428d0621b8f7e81792da727da1f94e911bbb1e9528381c41d12866a4b632e6。
+- 台阶行：failureEvidence=<rows> failed=<with>/<failed> passed=<with>/<passed> blankMessages=<n> duplicates=<n>。
+
+### 负向对照
+- 七例矩阵全按预期；实现态 sha256 在对照前后一致，对照后 clean-green 复跑仍绿；旧闸门在五个变异上保持 PASS，证明新层不是旧层的重复。
+
+### 残留限制
+- 只要求 Message 非空白；不要求 StackTrace 非空（真实语料的 6 条都有，但生产者可能省略栈）。
+- ErrorInfo 的文本不做内容比对，也不与 RunInfos 的 [FAIL] 行交叉验证（后者列为下一层候选）。
+- 语料必须英文 UI 生成，否则第 20 层的列表词表判据先 RED。
+
+### exact-head CI 验收
+- 代码 head 1762cd35f40d529f443cdaaaea848f4ac79a1246：windows-ci 44465809330（push）/ 44465888575（pull_request）= success，台阶行 `failureEvidence=0 failed=0/0 passed=0/1973` 与 `…/104`；同 head Android CI 44465888544 = success（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+
+## 6.28 第二十三层口径：失败日志必须一一描述失败行（W6-113ao）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| RunInfo 条数等于 Failed/Error 行数 | ResultSummary/RunInfos 与 Results | RED |
+| 每个 Failed/Error 行恰被一个 RunInfo 的 Text 命名 | RunInfo/Text 与 row testName | RED |
+| RunInfo 不得命名 Passed 行 | 同上 | RED |
+| 同一失败行不得被命名两次 | 同上 | RED |
+| timestamp 可解析且落在 [Times.start, Times.finish] 内 | RunInfo/@timestamp 与 TestRun/Times | RED |
+| computerName 与行一致 | RunInfo/@computerName | RED |
+| outcome 非空且不是成功 verdict | RunInfo/@outcome | RED |
+
+### 为什么前二十二层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 15 层 | Counters 桶与结果行 outcome | RunInfos 不是 outcome 桶 |
+| 第 21 层 | Results 与 TestEntries 的位置对应 | 行内容仍只比较 id |
+| 第 22 层 | 每行 Output/ErrorInfo 与 verdict | ResultSummary 的失败日志子树 |
+| 全层 | — | RunInfos 在脚本里引用计数为 0 |
+
+### 依据（EXECUTED）
+- 真实 767 行失败语料：6 个 Failed 行、6 条 RunInfo，Text 都含 [FAIL]，时间戳都在 [start, finish] 内。
+- 十例对照：clean-green 与 fail-with-runinfo 双绿；八个变异 old=0/new=1，各自触发本层的一个条件。
+- duplicate 夹具修正前把第二个 RunInfo 写在包装外，台阶行 runInfos=1，新层保持绿；修正为包装内两个子元素后才 RED。
+
+### 数据源与规模
+- check-test-suite-baseline.ps1 113,800 → 121,162 B，1,987 → 2,121 行，0 非 ASCII，sha256 20e3c53cda1cfd8f90ac1057b2819657e1fb3dc5c561bdd3fefe8390bc75826a。
+- 台阶行：runInfos=<n> failedRows=<n> matched=<n> passed=<n> unmatched=<n> duplicateMatches=<n> outside=<n> blankText=<n> wrongMachine=<n> badOutcome=<n>。
+
+### 负向对照
+- 十例矩阵全按预期；实现态 sha256 在对照前后一致，矩阵后 clean-green 复跑仍绿；旧层在八个变异上保持 PASS，证明新层不是旧层的重复。
+- 负向对照必须同时核对台阶行的 runInfos 计数，确认变异确实进入新层；只看 exit code 会被夹具结构错误骗过。
+
+### 残留限制
+- Text 用 longest-name substring 匹配；若两个测试名互为前后缀且 Text 被截断，可能匹配到较长者。真实 runner 的 [FAIL] 文本是完整 testName，当前语料无此歧义。
+- 不要求 RunInfo 的 outcome 只能是 Error（Warning 等非成功值接受）；不交叉比对 ErrorInfo/StackTrace 文本。
+- 零失败时允许没有 RunInfos；不要求文件必须声明该块。
+
+### exact-head CI 验收
+- 代码 head c99ac346c8cdb248a55995c0f82d243d5461cd10：windows-ci 44475518066（push）/ 44475570854（pull_request）= success，push 日志台阶行 runInfos=0 … badOutcome=0（两套件）；同 head Android CI 44475570962 在取证时仍 in_progress（CI_PENDING）；本提交只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承。
+
+## 6.29 第二十四层口径：控制台输出必须命名自己的套件（W6-113ap）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| ResultSummary 恰有 1 个直接子节点 Output | ResultSummary | RED |
+| Output 内恰有 1 个 StdOut | ResultSummary/Output | RED |
+| StdOut 文本非空白 | StdOut | RED |
+| StdOut 必须命名本套件（MediaHub.Tests / MediaHub.WebDav.Tests） | StdOut 与 baseline suite | RED |
+
+### 为什么前二十三层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 15 层 | Counters 桶与结果行 outcome | StdOut 不是 outcome 桶 |
+| 第 22 层 | 每行 Output/ErrorInfo 与 verdict | ResultSummary 的控制台输出 |
+| 第 23 层 | ResultSummary/RunInfos 与 Failed/Error 行 | 同一 ResultSummary 下的 Output/StdOut |
+| 全层 | — | ResultSummary/Output/StdOut 在脚本里引用计数为 0 |
+
+### 依据（EXECUTED）
+- 真实失败 767 行语料：StdOut 7,084 B，6 个 Failed testName 全部出现，761 个 Passed testName 0 个出现；绿色 windows/webdav 语料分别 504/556 B，各自含自己的套件名。
+- 七例对照：clean-green 双绿；stdout-missing、stdout-blank、stdout-duplicate、stdout-wrong-suite、output-missing、output-duplicate 六个变异 old=0/new=1，各自触发本层的一个条件。
+
+### 数据源与规模
+- check-test-suite-baseline.ps1 121,162 → 124,609 B，2,121 → 2,176 行，0 非 ASCII，sha256 b9c7e10b59db94e5d0f0c224c4374f26c6208f200e3ed21f9606e5b5e8b4d532。
+- 台阶行：summaryOutput=<n> stdout=<n> nonBlank=<0|1> suiteNamed=<0|1>。
+
+### 负向对照
+- 七例矩阵全按预期；实现态 sha256 在对照前后一致，矩阵后 clean-green 复跑仍绿；旧层在六个变异上保持 PASS，证明新层不是旧层的重复。
+
+### 残留限制
+- 只要求 StdOut 含套件名，不要求 StdOut 必须包含所有失败 testName；message-only failure 没有栈时会出现假红。
+- 不核对 Output/StdOut 与 RunInfos 的文本交叉引用；不要求 StdOut 的发现/完成时间与 Times 精确对齐。
+- 语料必须英文 UI 生成，否则第 20 层的列表词表判据先 RED。
+
+### exact-head CI 验收
+- 代码 head 781d102421ea9f8ea322e5e72e9968d48d3e2da5：windows-ci 44479925035（push）success、44479988695（pull_request）success；同 head Android CI in_progress（CI_PENDING，仅改 windows/tools，按 ADR-AUTO-001 继承）（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+
+## 6.30 第二十五层口径：运行名与创建时刻必须同一个瞬间（W6-113aq）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| TestRun/@name 的日期时间与 Times/@creation 的 yyyy-MM-dd HH:mm:ss 逐字相等 | TestRun/@name、Times/@creation | RED |
+| 若 name 不是 canonical 形状，不进入本层（由既有 header 规则处理） | TestRun/@name | 既有规则 |
+| 比较使用 InvariantCulture，保留原始秒级文本 | Times/@creation | RED |
+
+### 为什么前二十四层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 15/16 层 | Times/@creation、@queuing 的格式、顺序与窗口 | name 里的日期时间 |
+| 第 20 层 | name 的 user@machine 形状、runUser、machine、deploymentRoot 派生 | name 的日期时间 |
+| 第 22/23/24 层 | 行 verdict、失败证据、RunInfos、StdOut | header 的两个创建时刻自述 |
+| 全层 | — | TestRun/@name 与 Times/@creation 的文本一致性 |
+
+### 依据（EXECUTED）
+- 真实语料：green windows name=55160@INKCHOI 2026-11-19 13:17:39 vs creation=2026-11-19T13:17:39.6311170+08:00；failing artifact name=runneradmin@runnervmm7ud1 2026-11-17 16:02:17 vs creation=2026-11-17T16:02:17.6256719+00:00，均秒级一致。
+- 三例对照：clean-green OLD=0 NEW=0；creation-shift 与 name-shift 均 OLD=0 NEW=1，且 new ladder nameStamp=0 点名两个不同时刻。
+
+### 数据源与规模
+- check-test-suite-baseline.ps1 124,609 → 126,138 B，2,176 → 2,202 行（+1,529 B，+27/-1 行），0 非 ASCII，sha256 a075ac386e331f88c918c0c01824f49c56114ff5ca13b31d2203d0447ac18b20。
+- 台阶行：runHeader=<n>/3 ... nameStamp=<0|1> ...。
+
+### 负向对照
+- 三例矩阵全按预期；实现态 sha256 在对照前后一致，矩阵后 clean-green 复跑仍绿；旧层在两个变异上保持 PASS，证明新层不是旧层的重复。
+
+### 残留限制
+- 只比较 name 与 Times/@creation 的秒级文本；不比较 Times/@queuing、@start、@finish 与 name 的关系。
+- name 不是 canonical 形状时本层不触发，仍有既有 header 规则负责。
+- 无法证明该时间戳与真实机器时钟一致；只证明报告自身两个字段互相一致。
+
+### exact-head CI 验收
+- 代码 head eb073088d7504924a37dcfaba1f028b6df87d5f3：windows-ci 44486463532（push）/ 44486549036（pull_request）= success；同 head Android CI 44486548899 = in_progress（CI_PENDING）（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+## 6.31 第二十六层口径：控制台输出必须命名自己的发现与运行阶段（W6-113ar）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| StdOut 中 Discovering、Discovered、Starting、Finished 四条阶段行各恰好 1 次，且每条都命名本套件 | ResultSummary/Output/StdOut | RED |
+| 四条阶段行按 Discovering < Discovered < Starting < Finished 的顺序出现 | ResultSummary/Output/StdOut | RED |
+| 缺失、重复、错套件、乱序任意一种都使整份报告 RED | ResultSummary/Output/StdOut | RED |
+| 台阶行记录 phaseLedger=<n>/4 ordered=<0|1> | ladder | 仅记录 |
+
+### 为什么前二十五层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 20 层 | 头部 name 的 user@machine 形状、runDeploymentRoot 派生 | StdOut 的阶段文本 |
+| 第 22/23 层 | 每行 ErrorInfo、RunInfos 与失败行的对应 | StdOut 的阶段文本 |
+| 第 24 层 | Output/StdOut 存在、非空、任意位置出现套件名 | 四条阶段行的存在、唯一、归属与顺序 |
+| 第 25 层 | TestRun/@name 与 Times/@creation 的秒级一致 | StdOut 的阶段文本 |
+| 全层 | — | Discovering / Discovered / Starting / Finished 阶段账本 |
+
+### 依据（EXECUTED）
+- 真实绿色语料 D:/mh-w6-r41/windows/artifacts/gate-corpus：新闸门 exit 0，两套件 phaseLedger=4/4 ordered=1，combined tests=2077，只有基线增长 warning。
+- 真实测试结果 D:/mh-w6-r41/windows/artifacts/test-results-r45：新闸门 exit 0，两套件 phaseLedger=4/4 ordered=1。
+- 五例矩阵：clean-green OLD=0 NEW=0；phase-missing / phase-duplicate / phase-out-of-order / phase-wrong-suite 均 OLD=0 NEW=1，且分别点名缺失阶段、重复阶段、顺序错误、错套件。
+
+### 数据源与规模
+- check-test-suite-baseline.ps1 126,138 → 129,275 B，2,202 → 2,250 行（+1,137 B，+48/-0 行），0 非 ASCII，sha256 c40b83b59c48e293ddca3cea9c40bb98abd7c6b1e767e99c3eb23d6791163c0a。
+- 台阶行：summaryOutput=<n> stdout=<n> nonBlank=<0|1> suiteNamed=<0|1>，随后 phaseLedger=<n>/4 ordered=<0|1>。
+
+### 负向对照
+- 五例矩阵全按预期；实现态 sha256 在对照前后一致，矩阵后 clean-green 复跑仍绿；旧层在四个变异上保持 PASS，证明新层不是旧层的重复。
+
+### 残留限制
+- 只读取四条 literal 阶段行；不要求 StdOut 的时间戳与 Times/@creation 精确对齐。
+- 依赖测试主机输出阶段的英文词；宿主版本改变阶段词表时，本层会 RED，需要同步更新阶段词表。
+- 不核对 Output/StdOut 与 RunInfos 的文本交叉引用；英文 UI 语料仍是前提，否则第 20 层列表词表判据先 RED。
+
+### exact-head CI 验收
+- 代码 head bad8b42a9210aa1d895f2ed84d86e1af3184639d：windows-ci 44491834447（push）success / 44491896251（pull_request）success；同 head Android CI 44491896189 = in_progress（CI_PENDING，17:07 取证）（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+## 6.32 第二十七层口径：失败日志必须装在一个 RunInfos 容器里（W6-113as）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| 有 Failed/Error 行时，ResultSummary 下必须恰有 1 个 RunInfos 块 | ResultSummary 的直接子节点 | RED |
+| 没有 Failed/Error 行时，ResultSummary 下最多 1 个 RunInfos 块 | ResultSummary 的直接子节点 | RED |
+| 整份 TRX 中任何 RunInfos 块都不得出现在 ResultSummary 之外 | //*[local-name()=RunInfos] | RED |
+| 台阶行记录 runInfoBlocks=<n> strayRunInfoBlocks=<n> | ladder | 仅记录 |
+
+### 为什么前二十六层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 23 层 | 把所有直接 ResultSummary/RunInfos 里的 RunInfo 扁平收集并逐项核对 | 容器数量、空包装、RunInfos 的放置位置 |
+| 第 24 层 | Output/StdOut 存在、非空、出现套件名、四条阶段行 | RunInfos 包装块 |
+| 第 25 层 | TestRun/@name 与 Times/@creation 秒级一致 | RunInfos 包装块 |
+| 第 26 层 | StdOut 的 Discovering/Discovered/Starting/Finished 阶段账本 | RunInfos 包装块 |
+| 全层 | — | 失败日志的单一容器 |
+
+### 依据（EXECUTED）
+
+- 真实绿色语料 D:/mh-w6-r41/windows/artifacts/gate-corpus：新闸门 exit 0，两套件 runInfoBlocks=0 strayRunInfoBlocks=0，combined tests=2077，只有基线增长 warning。
+- 四例矩阵：clean-green 与 fail-with-runinfo 均 OLD=0 NEW=0；runinfos-extra-empty-block 与 runinfos-stray-deployment 均 OLD=0 NEW=1，且分别点名“2 RunInfos block(s) for 1 Failed/Error row(s)”与“2 RunInfos block(s) but only 1 directly under ResultSummary”。
+
+### 数据源与规模
+
+- check-test-suite-baseline.ps1 129,275 → 131,885 B，2,250 → 2,283 行（+2,610 B，+33/-0 行），0 非 ASCII，sha256 45d6ff72ded3bed62bb41c0cbffefcb687f654c2de9d3cec6c6f17509f9cc95e。
+- 台阶行：runInfos=... 之后追加 runInfoBlocks=<n> strayRunInfoBlocks=<n>。
+
+### 负向对照
+
+- 四例矩阵全按预期；实现态 sha256 在对照前后一致，矩阵后 clean-green 复跑仍绿；旧层在两个变异上保持 PASS，证明新层不是旧层的重复。
+
+### 残留限制
+
+- 只统计 RunInfos 包装块的数量与位置；不比较不同 RunInfos 块之间的内容合并语义。
+- 允许没有失败行时存在一个空 RunInfos 块，避免误伤未来 producer 的空容器。
+- 不核对 RunInfos 与 Output/StdOut 的文本交叉引用；英文 UI 语料仍是前提。
+
+### exact-head CI 验收
+
+- 代码 head 8c1d5de896b851177d1f989250020ca4f6dc5e34：windows-ci 44501175782（push）success / 44501257430（pull_request）success；同 head Android CI 44501257547 = in_progress（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+
+## 6.33 第二十八层口径：每个失败日志项只能有一个 Text（W6-113at）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| 每个 RunInfo 的直接子元素中 Text 必须恰好 1 个 | ResultSummary/RunInfos/RunInfo | RED |
+| 0 个或 2 个及以上 Text 均拒绝 | 同上 | RED |
+| 台阶行记录 runInfoTexts=<singular>/<total> | ladder | 仅记录 |
+
+### 为什么前二十七层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 23 层 | 把 RunInfos 里的 RunInfo 与失败行逐项对齐，读取第一个 Text 后 break | 第二个 Text、空 Text 兄弟 |
+| 第 27 层 | RunInfos 容器的数量与位置 | RunInfo 内部的 Text 子元素数量 |
+| 全层 | — | 失败日志项文本的单一性 |
+
+### 依据（EXECUTED）
+
+- 真实绿色语料 D:/mh-w6-r41/windows/artifacts/gate-corpus：新闸门 exit 0，两套件 runInfoTexts=0/0，combined tests=2077，只有基线增长 warning。
+- 四例矩阵：clean-green 与 fail-with-runinfo 均 OLD=0 NEW=0；runinfo-text-duplicate 与 runinfo-text-extra-empty 均 OLD=0 NEW=1，broken 均点名 `a RunInfo carries 2 Text child element(s)`。
+
+### 数据源与规模
+
+- check-test-suite-baseline.ps1 131,885 → 133,857 B，2,283 → 2,312 行（+1,972 B，+29/-0 行），0 非 ASCII，sha256 803d2f9c431a0b1b9dee768f84975b41c5a21fc1be251b23fddf00e3cad29493。
+- 台阶行：runInfoBlocks=... 之后追加 runInfoTexts=<n>/<n>。
+
+### 负向对照
+
+- 四例矩阵全按预期；实现态 sha256 在对照前后一致，矩阵后 clean-green 复跑仍绿；旧层在两个变异上保持 PASS，证明新层不是旧层的重复。
+
+### 残留限制
+
+- 只统计 RunInfo 的直接 Text 子元素数量；不比较 Text 内容与 ErrorInfo Message/StackTrace。
+- 不校验 Text 的非空性以外的格式；英文 UI 语料仍是前提。
+- 不改变基线 JSON 与 updater。
+
+### exact-head CI 验收
+
+- 代码 head 3cf422eb05a5f30519df4b1a393688ef794139b9：windows-ci 44510242835（push）success / 44510303586（pull_request）success；同 head Android CI 44510303772 = in_progress（CI_PENDING，19:03 取证）（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+## 6.34 第二十九层口径：失败日志行必须只命名一个测试（W6-113au）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| 每个 RunInfo 的第一个直接 Text 子元素必须只命名一个 Failed/Error 行 | ResultSummary/RunInfos/RunInfo | RED |
+| 文本先剥离 `[xUnit.net <时间>]` 前缀与 `[FAIL]` 后缀，再与 testName 逐字比较 | 同上 | RED |
+| 归一化后为空、包含额外文本或不在失败行列表中均拒绝 | 同上 | RED |
+| 台阶行记录 runInfoTextExact=<exact>/<failedRows> | ladder | 仅记录 |
+
+### 为什么前二十八层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 23 层 | 把 RunInfos 条目与失败行逐项对齐，用 `IndexOf(..., Ordinal)` 做子串匹配 | 测试名前后的多余文本、外层噪声 |
+| 第 28 层 | 每个 RunInfo 的直接 Text 子元素数量 | Text 内容是否只命名一个测试 |
+| 全层 | — | 失败日志行与 testName 的逐字身份 |
+
+### 依据（EXECUTED）
+
+- 真实绿色语料 D:/mh-w6-r41/windows/artifacts/gate-corpus：新闸门 exit 0，两套件 runInfoTextExact=0/0，combined tests=2077，只有基线增长 warning。
+- 真实失败语料 D:/mh-verify/r41-art/test-results/windows-tests.trx：6 个 RunInfo 的 xUnit 外壳归一化后 6/6 与 Failed/Error 行 testName 精确相等（exactRowHit=1）。
+- 五例矩阵：clean-green 与 fail-with-runinfo 均 OLD=0 NEW=0；runinfo-text-prefix、runinfo-text-suffix、runinfo-text-outside 均 OLD=0 NEW=1。
+
+### 数据源与规模
+
+- check-test-suite-baseline.ps1 133,857 → 136,513 B，2,312 → 2,351 行（+2,656 B，+39/-0 行），0 非 ASCII，sha256 b91c6aaa85c9aa31978d8952a476103737b5b0da2345137fd1ee9030da28cb58。
+- 台阶行：runInfoTexts=... 之后追加 runInfoTextExact=<n>/<n>。
+
+### 负向对照
+
+- 五例矩阵全按预期；实现态 sha256 在对照前后一致，矩阵后 clean-green 复跑仍绿；旧层在三个变异上保持 PASS，证明新层不是旧层的重复。
+
+### 残留限制
+
+- 只比较 RunInfo Text 与 Failed/Error 行 testName；不比较 ErrorInfo Message/StackTrace 的内容。
+- xUnit 外壳按已知 writer 格式归一化；其他 writer 的包装格式仍未覆盖。
+- 不改变基线 JSON 与 updater。
+
+### exact-head CI 验收
+
+- 代码 head 5780dc20e9cf87084e0f8ae5f5535f5d469e5cfc：windows-ci 44518473191（push）success / 44518540460（pull_request）success；同 head Android CI 44518540327 = in_progress（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+
+## 6.35 第三十层口径：失败日志行必须保持 xUnit 写入器外壳（W6-113av）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| 每个 RunInfo 的第一个直接 Text 必须完整匹配 canonical xUnit 行 | ResultSummary/RunInfos/RunInfo | RED |
+| 时间必须是 `[xUnit.net hh:mm:ss.ff]`（两位小时、00–59 分/秒、两位小数） | 同上 | RED |
+| 时间后恰好 5 个 ASCII 空格；测试名首尾非空白 | 同上 | RED |
+| 测试名后恰好 1 个 ASCII 空格 + `[FAIL]`；整行锚定 | 同上 | RED |
+| 台阶行记录 runInfoTextCanonical=<canonical>/<RunInfos> | ladder | 仅记录 |
+
+### 为什么前二十九层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 29 层 | 用 `[0-9:.]+` 与 `\s+` 剥壳后比较测试名 | 裸名、4/6 空格、tab、1 位小数、秒 60、`[FAIL]` 前双空格、尾随换行 |
+| 全层 | — | 整行是否就是 xUnit 写入器产生的那一行 |
+
+### 依据（EXECUTED）
+
+- 真实绿色语料 D:/mh-w6-r41/windows/artifacts/gate-corpus：新闸门 exit 0，两套件 runInfoTextCanonical=0/0，combined tests=2077，只有基线增长 warning。
+- 真实失败语料 D:/mh-verify/r41-art/test-results/windows-tests.trx：6 个 RunInfo，最终正则 runInfos=6 canonical=6。
+- 十例矩阵：clean-green 与 fail-with-runinfo 均 OLD=0 NEW=0；8 个变异例均 OLD=0 NEW=1，且每例恰好 1 条 broken。
+
+### 数据源与规模
+
+- check-test-suite-baseline.ps1 136,513 → 138,932 B，2,351 → 2,383 行（+2,419 B，+32/-0 行），0 非 ASCII，sha256 eaf8151e5469621ff56cffed262d14c80be2f59116fedc516a328f7f58f4177a。
+- 台阶行：runInfoTextExact=... 之后追加 runInfoTextCanonical=<n>/<n>。
+
+### 负向对照
+
+- 十例矩阵全按预期；实现态 sha256 在对照前后一致；旧层在 8 个变异上保持 PASS，证明新层不是旧层的重复。
+- 初版正则 ` {5}.+?` 会把 6 空格中的第 6 个空格吞进测试名，仍 MATCH；改用 ` {5}\S(?:.*\S)?` 后才拒绝 6 空格与 `[FAIL]` 前双空格。
+
+### 残留限制
+
+- 只认证 xUnit 2.9.3 的已知 writer 外壳；其他 writer 的格式仍未覆盖。
+- 不比较 ErrorInfo Message/StackTrace 的内容。
+- 不改变基线 JSON 与 updater。
+
+### exact-head CI 验收
+
+- 代码 head 27ec4f5f7f8995899a5e4cc36998e2490abfdd0a：windows-ci 44530232205（push）success / 44530355825（pull_request）success；同 head Android CI 44530355822 = in_progress。
+## 6.36 第三十一层口径：失败日志条目与 Deployment 必须各归其主（W6-113aw）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| 所有 RunInfo 必须是唯一 ResultSummary/RunInfos 的直接子元素 | ResultSummary/RunInfos | RED |
+| RunInfo 出现在 Deployment、TestSettings 或其他位置 | 整棵 XML | RED |
+| 所有 Deployment 必须是唯一 TestSettings 的直接子元素 | TestSettings | RED |
+| 多余 Deployment 出现在 ResultSummary/RunInfos | 整棵 XML | RED |
+| 台阶行记录 runInfoBoundary=<direct>/<all> 与 deploymentBoundary=<direct>/<all> | ladder | 仅记录 |
+
+### 为什么前三十层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 27 层 | ResultSummary/RunInfos 容器数量 | 容器外或嵌套的 RunInfo 元素 |
+| 第 30 层 | 唯一 RunInfos 的直接子 RunInfo 的 Text 外壳 | Deployment 内 / TestSettings 内的额外 RunInfo |
+| 全层 | — | Deployment 元素是否只有一个合法 owner |
+
+### 依据（EXECUTED）
+
+- 真实绿色语料 D:/mh-w6-r41/windows/artifacts/gate-corpus：新闸门 exit 0，两套件 runInfoBoundary=0/0、deploymentBoundary=1/1，combined tests=2077，只有基线增长 warning。
+- 真实失败语料 D:/mh-verify/r41-art/test-results/windows-tests.trx：runInfoAny=6 runInfoOwner=6，deploymentAny=1 deploymentOwner=1。
+- 七例矩阵：clean-green 与 fail-with-runinfo 均 OLD=0 NEW=0；5 个变异例均 OLD=0 NEW=1，且每例恰好 1 条 broken。
+
+### 数据源与规模
+
+- check-test-suite-baseline.ps1 138,932 → 141,834 B，2,383 → 2,423 行（+2,902 B，+40/-0 行），0 非 ASCII，sha256 16fcef0a631c44fa95179e42aa3c4900f01d50f60cb2af9033d03791544a53bf。
+- 台阶行：runInfoTextCanonical=... 之后追加 runInfoBoundary=<n>/<n>、deploymentBoundary=<n>/<n>。
+
+### 负向对照
+
+- 七例矩阵全按预期；实现态 sha256 在对照前后一致；旧层在 5 个变异上保持 PASS，证明新层不是旧层的重复。
+- 变异覆盖：RunInfo 放 Deployment、RunInfo 嵌套 RunInfo、RunInfo 放 TestSettings、Deployment 放 ResultSummary、Deployment 放 RunInfos。
+
+### 残留限制
+
+- 只认证每类节点的归属；不比较 RunInfo Text 与 ErrorInfo/StackTrace 的文本交叉引用。
+- 不改变基线 JSON 与 updater。
+- 不验证 Deployment 的 runDeploymentRoot 字段语义。
+
+### exact-head CI 验收
+
+- 代码 head 7e9cef7933bc105bc03a95ef978ea037148072f6：windows-ci 44541458120（push）success / 44541577847（pull_request）success；同 head Android CI 44541577966 = success。
+## 6.37 基线刷新（W6-113ax）
+
+| 条目 | 旧基线 | 新基线 | 证据 |
+|---|---:|---:|---|
+| `MediaHub.Tests` expected | 1959 | 1973 | `gate-new-baseline.log`: `total=1973 baseline=1973` |
+| `MediaHub.Tests` classes | 113 | 115 | `ArtworkDiskCacheTests`（10）、`MpvSubtitleStyleTests`（2） |
+| `MediaHub.Tests` methods | — | 1656 | `methods=1656 baseline=method table 1656 methods` |
+| `MediaHub.Tests` outcomes.Passed | 1959 | 1973 | `outcomes=1 baseline=outcome table 1 outcomes` |
+| `MediaHub.WebDav.Tests` expected | 104 | 104 | `total=104 baseline=104`（未变） |
+| 基线与闸门逻辑 | 第 31 层 `16fcef0a...` | 第 31 层 `16fcef0a...` | 只改 JSON，闸门代码未动 |
+
+**为什么现在刷新**：旧基线连续产生 4 条增长 warning；这次把已由真实绿色语料证明的 14 个新增 case 固定进基线，避免 warning 常态化、并用 `total < baseline -> red` 继续挡住未来删 test 的情况。
+
+**验证**：旧基线 `::warning::` 5 条 → 新基线 1 条；两套件合计 `combined tests=2077`；`git diff --check` 干净。
+
+**额外自洽反例（EXECUTED）**：新基线 `expected` 改为 1974 而 outcome 表仍 1973 -> exit 1（`outcome table adds up to 1973 but expected is 1974`）；基线字段与结果表必须自洽。
+
+**边界**：真机 / 两机 / Windows GUI `NOT_RUN`；`W6-P1-E2E` 仍 `BLOCKED`；Draft，`G7=DO_NOT_MERGE`。
+## 6.38 第三十二层口径：RunInfo 时间戳必须属于具名失败行的行窗（W6-113ay）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | 每个 `ResultSummary/RunInfos/RunInfo` 的 `timestamp` 与它 canonical Text 所命名的 Failed/Error 结果行 | 第 30 层只保证 Text 命名唯一行；第 31 层只保证元素归属唯一 `RunInfos` |
+| 通过条件 | `row.startTime - 1s <= RunInfo.timestamp <= row.endTime + 5s` | 真实 xUnit 2.9.3 写入器在行结束后 13–97 ms 写 RunInfo |
+| 台阶行 | `runInfoRowClock=<bound>/<items>` | 真实绿色语料两套件 `0/0`；真实失败 TRX `6/6` |
+| 负向对照 | 时间戳取 runFinish（最早结束行 + 约 7.47 s）或 runStart（最晚开始行 − 约 8.47 s）→ RED；clean-green 与 canonical RunInfo → GREEN | `D:/mh-verify/r53/results-all.json`：`oldAllZero=true`、两绿两红、每红恰好 1 条时钟行 |
+| 规模 | `check-test-suite-baseline.ps1` 2,423→2,474 行、141,834→145,306 B、+51/−0、sha256 `be062769...` | 双 shell PARSE-OK；纯 ASCII、无 BOM/CRLF |
+| 残留限制 | 只校验时间窗归属，不校验 timestamp 的时区/格式或 RunInfo 与结果行的机器名交叉；不证明 TRX 真实产生 | 仍需真实失败语料与真实 CI 作为下游证据 |
+
+**为什么前三十一层看不见**：第 29/30 层把 Text 归一化后只比较名字，第 31 层只数字元素位置；均不读 `RunInfo/@timestamp` 与具名结果行的 `startTime/endTime` 关系。
+
+**边界**：真机 / 两机 / Windows GUI `NOT_RUN`；`W6-P1-E2E` 仍 `BLOCKED`；Draft，`G7 = DO_NOT_MERGE`。
+## 6.39 第三十三层口径：失败日志必须按运行顺序读取（W6-113az）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | 每个 `ResultSummary/RunInfos/RunInfo` 的 canonical Text `clock` 与 `@timestamp`，按列表顺序比较 | 第 32 层 row-clock 只逐项比对行窗，不比较相邻项的前后顺序 |
+| 通过条件 | Text 时钟非递减，且 item timestamp 非递减 | 真实 xUnit 2.9.3 的失败日志按运行时间递增写出 |
+| 台阶行 | `runInfoChronology=<bound>/<items>` | 真实绿色语料两套件 `0/0`；真实失败 TRX `6/6`；clean-two `2/2` |
+| 负向对照 | 交换两条 RunInfo、或把第一项 Text 时钟从 1.82 改为 5.00、或把第一项 timestamp 改到第二项之后 → RED；clean-green、fail-with-runinfo、clean-two-errors → GREEN | `D:/mh-verify/r54/results-all.json`：`oldAllZero=true`，三个 bad 例均 OLD=0/NEW=1、new `runInfoChronology=1/2`、`chronologyProblems=1` |
+| 规模 | `check-test-suite-baseline.ps1` 2,474→2,532 行、145,306→149,280 B、+58/−0、sha256 `dec21a25...` | 双 shell PARSE-OK；纯 ASCII、无 BOM/CRLF |
+| 残留限制 | 只校验失败日志在文件中的顺序，不证明 TRX 真实产生；不覆盖 RunInfo 与 ErrorInfo/StackTrace 的文本交叉引用（真实语料中 ErrorInfo/StackTrace 不含测试名，无法作为名字来源） | 仍需真实失败语料与真实 CI 作为下游证据 |
+
+**为什么前三十二层看不见**：第 29/30 层只比较 Text 名字，第 31 层只校验元素归属，第 32 层只校验单条 timestamp 的行窗；都没有读取相邻 `RunInfo` 的 Text 时钟与 timestamp 是否保持运行顺序。
+
+**边界**：真机 / 两机 / Windows GUI `NOT_RUN`；`W6-P1-E2E` 仍 `BLOCKED`；Draft，`G7 = DO_NOT_MERGE`。
+## 6.40 第三十四层口径：phase 账本必须读自己的时钟（W6-113ba）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | `ResultSummary/Output/StdOut` 中 `Discovering`、`Discovered`、`Starting`、`Finished` 四个阶段行各自的 canonical `[xUnit.net hh:mm:ss.ff]` 时钟 | 第 24 层 phase 检查只读名称、出现次数与相对位置，不读时钟 |
+| 通过条件 | 每个 phase 恰好一行 canonical 时钟；四个时钟按阶段顺序非递减；`Finished` 不早于最后一条 RunInfo 的 canonical Text 时钟 | 真实绿色 gate-corpus 两套件均 `phaseClock=4/4 ordered=1 finishedAfterRunInfo=1`；真实失败 TRX 亦然 |
+| 台阶行 | `phaseClock=<found>/4 ordered=0或1 finishedAfterRunInfo=0或1`，原 `phaseLedger` 行保持不变 | 绿色两套件 `4/4`、`ordered=1`、`finishedAfterRunInfo=1` |
+| 负向对照 | 改 `Discovered` 时钟为 `.03`、改 `Finished` 为 `1.00`、把最后 RunInfo Text 改为 `9.99` → RED；clean-real、clean-two-errors、clean-green、fail-with-runinfo → GREEN | `D:/mh-verify/r55/results-all.json`：`oldAllZero=true`，三个 bad 例均 OLD=0/NEW=1 且恰好 1 条新问题；四个 clean 例均 OLD=0/NEW=0 |
+| 规模 | `check-test-suite-baseline.ps1` 2,532→2,613 行、149,280→154,515 B、+81/−0、sha256 `e960021a...` | 双 shell PARSE-OK；纯 ASCII、无 BOM/CRLF |
+| 残留限制 | 只校验 phase 账本与最后一条 RunInfo 的时钟互证，不证明 TRX 由 xUnit 真实产生；不覆盖 phase 时钟与 `TestRun/Times` 的绝对时间换算 | 仍需真实失败语料与真实 CI 作为下游证据 |
+
+**为什么前三十三层看不见**：第 24 层 phase 检查只读名称/位置，第 29–33 层只处理 RunInfo 的名称、归属、行窗与相邻顺序；没有任何一层读取 phase 行自身的时钟，也没有把 `Finished` 与最后一条失败日志的时钟钉在一起。
+
+**边界**：真机 / 两机 / Windows GUI `NOT_RUN`；`W6-P1-E2E` 仍 `BLOCKED`；Draft，`G7 = DO_NOT_MERGE`。
+## 6.41 第三十五层口径：phase 时钟必须落在运行窗口内（W6-113bb）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | `TestRun/Times.start` / `finish` 与四个 `StdOut` phase 行 | 第 34 层 phaseClock 块 |
+| 通过条件 | 每个 phase clock ≤ `Times.finish - Times.start` | 真实三份语料 |
+| 台阶行 | `phaseClock=<found>/4 ordered=<0或1> finishedAfterRunInfo=<0或1> withinRun=<0或1>` | `gate-real-r56.log` |
+| 负向对照 | `Finished` 7.88→9.99；旧层 0，新层 1，恰好 1 条 window 问题 | `results-all.json` |
+| 规模 | 2,613→2,637 行；154,515→156,156 B；+29/−5 | sha256 e48317d9... |
+| 残留限制 | phase clock 仍只与 `Times` 窗口互证，不证明绝对墙钟/NTP 对齐；RunInfo 与 xUnit clock 有 ~+0.48s 常量偏移 | 真实语料观察 |
+
+**为什么第三十四层看不见**：第 34 层只比较 phase 时钟彼此和 `Finished` 与最后一条 RunInfo；修改 `Finished` 到 9.99 时所有相对关系仍成立，但已经超出 `Times.finish - Times.start` 的 8.6177s。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+## 6.42 第三十六层口径：RunInfo 时钟与时间戳必须描述同一次运行（W6-113bc）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | 每项 RunInfo 的 canonical Text clock、`@timestamp` 与 `Times.start` | 第 36 层 offset 块 |
+| 通过条件 | 所有 `timestamp - Times.start - Text clock` 落在首项 100 ms 内 | 真实 6 项最大差 10.8 ms；clean 2 项 2.8 ms |
+| 台阶行 | `runInfoOffset=<bound>/<items>` | `gate-real-r57.log` |
+| 负向对照 | 第二项 timestamp +250 ms；旧层 0，新层 1，`runInfoOffset=1/2`，恰好 1 条 offset 问题 | `results-all.json` |
+| 规模 | 2,637→2,702 行；156,156→160,608 B；+65/−0 | sha256 90bdf991... |
+| 残留限制 | 只证明两项描述同一运行，不证明绝对墙钟/NTP 对齐；一次运行仅 1 项时无跨项对照 | 真实语料观察 |
+
+**为什么第三十五层看不见**：第 35 层只比较 phase 相对时钟与 `Times` 窗口，RunInfo 的 Text clock 和 timestamp 各自都能通过行窗、顺序和 canonical 检查；把第二项 timestamp 后移 250 ms 时，两者不再描述同一瞬间，但旧层仍全绿。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+## 6.43 第三十七层口径：Starting 不得晚于最早结果行（W6-113bd）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | `Starting` phase clock 与所有 `UnitTestResult/@startTime` 的最早值（相对 `Times.start`） | phaseClock 块 |
+| 通过条件 | `earliestRowStart - Times.start >= Starting clock`，空结果行集视为通过 | 真实 earliest 1.133/0.931/1.819/4.442/0.849 s vs Starting 0.46/0.42/0.46/0.46/0.19 |
+| 台阶行 | `phaseClock=<n>/4 ordered=<0或1> finishedAfterRunInfo=<0或1> withinRun=<0或1> firstRowAfterStart=<0或1>` | gate-real-r58.log |
+| 负向对照 | clean-two-errors 只把 Starting .46 改 2.00；旧层 0，新层 1，`firstRowAfterStart=0`，恰好 1 条 comes-after-first-row | results-all.json |
+| 规模 | 2,702→2,743 行；160,608→162,959 B；+43/−2 | sha256 5f9cb1df... |
+| 残留限制 | 只证明 Starting 不晚于最早行；不约束 Finished 与行尾（真实语料行尾比 Finished 晚约 0.59 s，需要容差才有意义） | 真实语料观察 |
+
+**为什么第三十六层看不见**：第 34/35 层只比较 phase 时钟彼此、run 窗口和最后 RunInfo；第 36 层只比较 RunInfo 的 Text clock 与 timestamp。把 Starting 移到 2.00 时所有 phase 时钟仍递增、仍在 `Times` 窗口内、Finished 仍晚于最后 RunInfo，但最早行 1.819 已开始，旧层无法发现。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+
+## 6.44 第三十八层口径：运行窗口必须说明时区（W6-113be）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | `Times/@start` 与 `Times/@finish` 的显式 UTC offset（`+hh:mm`/`-hh:mm`/`Z`） | declaration 块 |
+| 通过条件 | 两个窗口字段均有显式 offset；窗口 raw 为空时跳过（沿用只警告语义） | 真实语料 windowOffsets=2/2 |
+| 台阶行 | `windowOffsets=<n>/2`（与 `runDeclarations` 同行） | gate-real-r59(logs/real-green.log) |
+| 负向对照 | clean-two-errors 只去掉 finish 的 `+08:00`；旧层 0，新层 1，恰好 1 条 carries-no-explicit-UTC-offset | results-all.json |
+| 规模 | 2,743→2,770 行；162,959→164,762 B；+32/−5 | sha256 d83cc547... |
+| 残留限制 | 只校准窗口字段；`creation`/`queuing` 原有 offset 检查未变，且不约束窗口起止与 creation/queuing 的大小关系 | 真实语料创建晚于 start 约 1.06 s |
+
+**为什么第三十七层看不见**：第 37 层读的是 phase 时钟与最早结果行，全部通过 `Convert-ToInstant` 得到已解析的瞬间；缺 offset 时解析结果由宿主时区决定，计数、窗口、行序、phase 都可以不变。因此去掉 finish 的 offset 后，+08 主机上旧闸门 exit 0，而同一文件在 UTC 机器上会落在另一段时间。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+
+## 6.45 第三十九层口径：每个结果行都必须说明时区（W6-113bf）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | 每个 `UnitTestResult/@startTime` 与 `@endTime` 的显式 UTC offset（`+hh:mm`/`-hh:mm`/`Z`） | row 循环 |
+| 通过条件 | 每个非空结果行时刻均有显式 offset；空/不可读时刻仍由既有 row metadata 条目处理 | 真实语料 rowTimeOffsets=3946/3946、208/208 |
+| 台阶行 | `rowTimeOffsets=<n>/<2n>`（与 `rowAttributes` 同行） | logs/real-green.log |
+| 负向对照 | clean-two-errors 只去掉一条 startTime 的 `+08:00`；旧层 0，新层 1，恰好 1 条 result-row-instant-carries-no-explicit-UTC-offset | results-all.json |
+| 规模 | 2,770→2,792 行；164,762→166,387 B；+26/−4 | sha256 15123356... |
+| 残留限制 | 只校准结果行时刻的声明；不建立行时刻与 phase 时钟或 `Times.creation` 的交叉约束 | 真实语料 creation 晚于 start 约 1.06 s |
+
+**为什么第三十八层看不见**：第 38 层只读 `Times/@start`/`@finish` 两个窗口字段的 offset，结果行的时刻仍经同一 `DateTimeOffset.Parse` 读取；缺 offset 时由宿主时区补全，+08 主机上解析出同一瞬间，窗口、行序、duration 与 phase 都可以全部通过。因此去掉一行 startTime 的 offset 后，旧闸门 exit 0，而同一文件在 UTC 机器上会把该行平移八小时。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+
+## 6.46 第四十层口径：失败日志条目必须说明时区（W6-113bg）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | 每个 `ResultSummary/RunInfos/RunInfo/@timestamp` 的显式 UTC offset（`+hh:mm`/`-hh:mm`/`Z`） | RunInfo 循环 |
+| 通过条件 | 每个非空 RunInfo timestamp 均有显式 offset；空/不可读时刻仍由既有 unreadable-timestamp 条目处理 | 真实语料 timestampOffsets=6/6 与 0/0 |
+| 台阶行 | `timestampOffsets=<n>/<items>`（与 `runInfos` 同行） | logs/real-failing.log |
+| 负向对照 | clean-two-errors 只去掉第二条 RunInfo 的 `+08:00`；旧层 0，新层 1，恰好 1 条 carries-no-explicit-UTC-offset | results-all.json |
+| 规模 | 2,792→2,815 行；166,387→167,786 B；+25/−2 | sha256 d2e1fe0d... |
+| 残留限制 | 只校准失败日志条目的时刻声明；不建立条目 timestamp 与 RunInfo Text 时钟的绝对时区交叉约束 | 真实语料 runInfoOffset=6/6 已覆盖相对偏移 |
+
+**为什么第三十九层看不见**：第 39 层只读结果行 `startTime`/`endTime` 的 offset，RunInfo 条目仍经同一 `DateTimeOffset.Parse` 读取；缺 offset 时由宿主时区补全，+08 主机上解析出同一瞬间，条目数量、顺序、行窗口与 clock/timestamp offset 都可以全部通过。因此去掉一条 RunInfo 的 offset 后，旧闸门 exit 0，而同一文件在 UTC 机器上会把该条目平移八小时。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+
+## 6.47 第四十一层口径：运行报告的各节只有一个顺序（W6-113bh）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | `TestRun` 直接子元素的文档顺序，必须恰为 `Times,TestSettings,Results,TestDefinitions,TestEntries,TestLists,ResultSummary` | `$runChildOrder` / `$runSectionOrder` |
+| 通过条件 | 子元素数量等于 7 且逐位相同；否则 `$structureLost` 追加 `TestRun declares its direct children as <实际> while the writer emits <期望>` | 真实语料 runSections=7/7 |
+| 台阶行 | `structure=7/7 ... runSections=<n>/7` | logs/real-green.log |
+| 负向对照 | clean-two-errors 只把 `<TestSettings>` 整块搬到 `</Results>` 之后（164 B 位移，文件长度不变）；旧层 0，新层 1，恰好 1 条顺序问题 | results-all.json |
+| 规模 | 2,815→2,851 行；167,786→170,342 B；+37/−1 | sha256 06d53060... |
+| 残留限制 | 只校准节的顺序与集合，不建立各节内容与节位置的交叉约束（如 `Results` 里的行是否与其物理位置相符） | 行序与 entry 顺序已由既有 rowOrder 检查覆盖 |
+
+**为什么第四十层看不见**：第 40 层只给 `RunInfo/@timestamp` 增加显式 offset 要求，第 39 层及更早的 `$sectionBlocks` 只对六个节名做出现次数计数、`TestSettings` 单独计数，没有任何检查读取 `TestRun` 子元素的位置。因此重排节块后，总数、类/方法计数、参数行、结果分布、行时间、phase 行与全部配对都不变，旧闸门 exit 0。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+
+## 6.48 第四十二层口径：每一行的时长保持写出时的形状（W6-113bi）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | 每条 `UnitTestResult/@duration` 的文本形状，必须恰为 `hh:mm:ss.fffffff`（两位时、两位分、两位秒、七位小数） | `$durShapeOk` / `$durShapeLost` / `$rdurRaw` |
+| 通过条件 | 逐行 `-cmatch '^[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{7}$'` 命中；否则 `$rowAttrLost` 追加 `<n> row(s) carry a duration that is not written as hh:mm:ss.fffffff` | 真实语料 durationShape 全满 |
+| 台阶行 | `rowAttributes=... durationShape=<n>/<rows>` | logs/real-green.log |
+| 负向对照 | clean-two-errors 只把一条行 duration 改成 `0:00:00.0795122`（同一 tick 数、少 1 字符）；旧层 0，新层 1，恰好 1 条形状问题 | results-all.json |
+| 规模 | 2,851→2,878 行；170,342→171,849 B；+29/−3 | sha256 a8cb9628... |
+| 残留限制 | 只校准 duration 的书写形状，不建立 duration 与 start/end 的严格等值（真实语料最大差 51 ms，已有 1 秒容差告警） | 既有 `$durDrift` warning 保留 |
+
+**为什么第四十一层看不见**：第 41 层只读 `TestRun` 直接子元素的位置序列，从不解析 duration 文本；更早的 `Convert-ToMillis` 用 `[TimeSpan]::Parse`，把 `0:0:1`、`1.00:00:00`、`00:00:01.5` 一律读成合法毫秒。因此改写一条 duration 的形状后，总数、类/方法计数、参数行、结果分布、行时间、phase 行与全部配对都不变，旧闸门 exit 0。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+
+## 6.49 第四十三层口径：任何元素都不得携带写出器不会写的属性（W6-113bj）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | 每个元素的属性名必须落在 `$AttributeVocabulary` 给出的固定集合内（元素本地名 → 写出器会写的属性） | `$attrOk` / `$attrStray` / `$attrUnknown` |
+| 通过条件 | `$xml.SelectNodes('//*')` 逐元素逐属性做 `-notcontains` 判定；多出属性时 throw `an element carries an attribute the writer does not emit`，明细形如 `UnitTestResult carries foo` | 真实语料 attributeVocabulary 全满 |
+| 台阶行 | `structure=... attributeVocabulary=<n>/<elements>` | logs/real-green.log |
+| 负向对照 | clean-two-errors 只给第一个 `<UnitTestResult ` 加 ` foo="1"`（2,697,714 → 2,698,048 B）；旧层 0，新层 1，恰好 1 条 `UnitTestResult carries foo` | results-all.json |
+| 规模 | 2,878→2,961 行；171,849→176,830 B；+84/−1 | sha256 5f6c3143... |
+| 残留限制 | 只校准属性名的词汇表，不校验属性取值（如 testType 的 GUID、computerName 的机器名）是否等于写出器常量 | 取值类不变量留给后续层 |
+
+**为什么第四十二层看不见**：第 42 层及更早只按属性名取值，唯一的属性遍历在 Counters（未知名只 warning）与 TestSettings/Deployment（只挑三个属性、其余静默忽略）。因此给任意元素追加一个属性后，总数、类/方法计数、行序、配对、phase 行与全部台阶行都不变，旧闸门 exit 0。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
