@@ -1,7 +1,7 @@
 {
   "schema": "mediahub-queue/1",
-  "updated_at": "2026-11-20T13:05:00+08:00",
-  "updated_by": "lead-W6-113-r60",
+  "updated_at": "2026-11-20T14:45:00+08:00",
+  "updated_by": "lead-W6-113-r61",
   "note": "机器可读任务队列。状态词口径见 TEST_MATRIX.md §3。每条必须带 evidence 或 blocker，不接受空证据。",
   "tasks": [
     {
@@ -1287,6 +1287,24 @@
       "notes": "第四十层：ResultSummary/RunInfos/RunInfo/@timestamp 必须携带显式 UTC offset。Convert-ToInstant 用 DateTimeOffset.Parse，无 offset 时按宿主本地时区解释；同一失败日志在不同机器上把条目摆到不同瞬间，而条目数量、顺序、行窗口与 clock/timestamp offset 可全部不变。空/不可读 timestamp 仍由既有 unreadable-timestamp 条目处理。",
       "next_action": "候选第 41 层：继续从真实语料侦察可证的结构不变量；五处显式 offset（creation/queuing/start/finish/结果行/RunInfo）已全部覆盖；duration 严格等值（真实最大差 51 ms，已有 1 s 容差 warning）、Finished 与最后一行结束时间的上界（需容差）、RunInfo/ErrorInfo 文本交叉引用（缺测试名）均暂不选；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
       "closed_at": "2026-11-20T13:05:00+08:00"
+    },
+    {
+      "id": "W6-113bh",
+      "title": "第四十一层：运行报告的各节只有一个顺序（W6-113bh）",
+      "priority": "P1",
+      "status": "EXECUTED_PASS",
+      "owner": "lead-W6-113-r61",
+      "branch": "feature/windows-w6-113bh-run-section-order",
+      "evidence": [
+        "windows/tools/check-test-suite-baseline.ps1 2,815 -> 2,851 lines, 167,786 -> 170,342 B, 37 insertions / 1 deletion, sha256 06d5306098a69accae7663e66314fed5072706ec59c9f9b7bdb5138adaa4f1e6; old sha256 d2e1fe0d82d7d98f741e1903302c9fc5125019837dbb43626bd402d6bcf028b8; dual-shell PARSE-OK.",
+        "Real green gate-corpus: exit 0; both suites structure=7/7 and runSections=7/7, phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1; MediaHub.Tests total=1973 baseline=1973, WebDav 104, combined tests=2077; log D:/mh-verify/r62/logs/real-green.log.",
+        "Real failing TRX (total=767, failed=6): exit 1; structure=7/7 runSections=7/7, timestampOffsets=6/6, runInfoChronology=6/6, runInfoOffset=6/6; only final 6 test(s) failed; log D:/mh-verify/r62/logs/real-failing.log.",
+        "Negative matrix 5 cases: clean-real 0/0, clean-two-errors 0/0, clean-green 0/0, fail-with-runinfo 0/0 all with runSections=7/7; bad-run-child-order OLD=0/NEW=1 with exactly one section-order problem naming both sequences; oldAllZero=true; results D:/mh-verify/r62/results-all.json.",
+        "Code commit f9213eb22874e652292fd1d0729d707c3b8de8f6 (ci(windows): the sections of a run report have one order (W6-113bh)); windows-ci 44688934804 (push) success, 44689004658 (pull_request) success; Android CI 44689004671 success."
+      ],
+      "notes": "第四十一层：TestRun 直接子元素必须恰为 Times,TestSettings,Results,TestDefinitions,TestEntries,TestLists,ResultSummary。既有 section 检查只数出现次数（六名白名单 + TestSettings 单独计数），从不读位置，因此重排节块后所有计数、配对、行时间与 phase 行不变。台阶行 structure 末尾新增 runSections=<n>/7。",
+      "next_action": "候选第 42 层：继续从真实语料侦察可证的结构不变量；已覆盖六处显式 offset、section 计数与顺序、行序与 entry 序、Counters 算术与行复现、executionId 配对、RunInfo 布局与文本；duration 严格等值（真实最大差 51 ms，已有 1 s 容差 warning）、Finished 与最后一行结束时间上界（需容差）、RunInfo/ErrorInfo 文本交叉引用（缺测试名）、ResultFiles（全部语料为空）均暂不选；W6-P1-E2E 仍需维护者 >=1200s 空闲窗口 + 真机。",
+      "closed_at": "2026-11-20T14:45:00+08:00"
     }
   ]
 }

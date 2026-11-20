@@ -1468,3 +1468,34 @@
 
 - CLAIM run-id `w6-113-round21-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
 - W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。
+
+## Round 61（W6-113bh，2026-11-19）：运行报告的各节只有一个顺序
+
+### 动机
+
+第 40 层之前，闸门已经逐个点名六个节（`ResultSummary`、`Times`、`TestDefinitions`、`TestEntries`、`TestLists`、`Results`）各必须出现一次，`TestSettings` 也单独计数。但这些检查只读**数量**，从不读**位置**：把 `Results` 提到 `Times` 之前，或把 `TestSettings` 挪到 `ResultSummary` 之后，总数、每个类与方法计数、参数行、结果分布、每行时间、每条 phase 行和全部配对都可以完全不变，文件却已不是 VSTest 写出的形状——它被手工合并或重排过。
+
+### 变更
+
+- `windows/tools/check-test-suite-baseline.ps1`：2,815 → 2,851 行，167,786 → 170,342 B，`+37 / -1`，sha256 `06d5306098a69accae7663e66314fed5072706ec59c9f9b7bdb5138adaa4f1e6`（父层 `d2e1fe0d82d7d98f741e1903302c9fc5125019837dbb43626bd402d6bcf028b8`）。
+- 新增 `$runChildOrder`（`System.Collections.Generic.List[string]`），在既有 `foreach ($child in @($xml.TestRun.ChildNodes))` 循环里按文档顺序记录 Element 子节点名。
+- 新增 `$runSectionOrder = @('Times','TestSettings','Results','TestDefinitions','TestEntries','TestLists','ResultSummary')` 与 `$runSectionMatches`；长度不等或逐位不等即向 `$structureLost` 追加 `TestRun declares its direct children as <实际> while the writer emits <期望>`。
+- 台阶行 `structure=` 末尾追加 `runSections=<n>/7`；头注释与 SEMANTICS 各补一段。
+- 双 shell PARSE-OK（pwsh 7.6.10、Windows PowerShell 5.1.26100.10003）；纯 ASCII（nonAscii 0）、LF、无 BOM；`git diff --check` exit 0。
+
+### 验证（EXECUTED）
+
+- 真实绿色 gate-corpus：exit 0；两套件 `structure=7/7 ... runSections=7/7`，`phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1`，`MediaHub.Tests total=1973 baseline=1973`、WebDav 104、`combined tests=2077`；日志 `D:/mh-verify/r62/logs/real-green.log`。
+- 真实失败 TRX（total=767，failed=6）：exit 1；`structure=7/7 ... runSections=7/7`、`timestampOffsets=6/6`、`runInfoChronology=6/6`、`runInfoOffset=6/6`，唯一 throw `MediaHub.Tests: 6 test(s) failed`；日志 `D:/mh-verify/r62/logs/real-failing.log`。
+- 5 例矩阵：clean-real / clean-two-errors / clean-green / fail-with-runinfo 旧新均 exit 0、两套件 `runSections=7/7`、problems=0；`bad-run-child-order` **旧 0 / 新 1**，恰好 1 条顺序问题，throw 同时列出实际序列与期望序列；`oldAllZero=true`、`cleanOk=true`、`redOk=true`；结果 `D:/mh-verify/r62/results-all.json`。
+- 夹具：从 `D:/mh-verify/r54/cases/clean-two-errors` 复制到 `D:/mh-verify/r62/cases/bad-run-child-order`，只把 `<TestSettings ...>...</TestSettings>` 整块（164 B）搬到 `</Results>` 之后，文件总长不变（2,697,714 B）；旧第 40 层在该夹具上 exit 0，证明重排此前完全不可见。
+
+### 提交与 exact-head CI
+
+- 代码提交 `f9213eb22874e652292fd1d0729d707c3b8de8f6`（`ci(windows): the sections of a run report have one order (W6-113bh)`）；Draft PR #193，base main，stacked on #190，G7 DO_NOT_MERGE。
+- 代码 head CI：windows-ci `44688934804`（push）`success`、`44689004658`（pull_request）`success`；Android CI `44689004671` `success`。
+
+### 锁与边界
+
+- CLAIM run-id `w6-113-round22-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
+- W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。

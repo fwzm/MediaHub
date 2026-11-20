@@ -1986,3 +1986,18 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 **为什么第三十九层看不见**：第 39 层只读结果行 `startTime`/`endTime` 的 offset，RunInfo 条目仍经同一 `DateTimeOffset.Parse` 读取；缺 offset 时由宿主时区补全，+08 主机上解析出同一瞬间，条目数量、顺序、行窗口与 clock/timestamp offset 都可以全部通过。因此去掉一条 RunInfo 的 offset 后，旧闸门 exit 0，而同一文件在 UTC 机器上会把该条目平移八小时。
 
 **边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+
+## 6.47 第四十一层口径：运行报告的各节只有一个顺序（W6-113bh）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | `TestRun` 直接子元素的文档顺序，必须恰为 `Times,TestSettings,Results,TestDefinitions,TestEntries,TestLists,ResultSummary` | `$runChildOrder` / `$runSectionOrder` |
+| 通过条件 | 子元素数量等于 7 且逐位相同；否则 `$structureLost` 追加 `TestRun declares its direct children as <实际> while the writer emits <期望>` | 真实语料 runSections=7/7 |
+| 台阶行 | `structure=7/7 ... runSections=<n>/7` | logs/real-green.log |
+| 负向对照 | clean-two-errors 只把 `<TestSettings>` 整块搬到 `</Results>` 之后（164 B 位移，文件长度不变）；旧层 0，新层 1，恰好 1 条顺序问题 | results-all.json |
+| 规模 | 2,815→2,851 行；167,786→170,342 B；+37/−1 | sha256 06d53060... |
+| 残留限制 | 只校准节的顺序与集合，不建立各节内容与节位置的交叉约束（如 `Results` 里的行是否与其物理位置相符） | 行序与 entry 顺序已由既有 rowOrder 检查覆盖 |
+
+**为什么第四十层看不见**：第 40 层只给 `RunInfo/@timestamp` 增加显式 offset 要求，第 39 层及更早的 `$sectionBlocks` 只对六个节名做出现次数计数、`TestSettings` 单独计数，没有任何检查读取 `TestRun` 子元素的位置。因此重排节块后，总数、类/方法计数、参数行、结果分布、行时间、phase 行与全部配对都不变，旧闸门 exit 0。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
