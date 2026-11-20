@@ -296,9 +296,8 @@ fun DetailBody(
         // 演员表（只显示 ACTOR）
         val cast = item.people.filter { it.role == com.mediahub.model.Person.Role.ACTOR }
         if (cast.isNotEmpty()) {
-            Text(
+            DetailSectionHeader(
                 "演员",
-                style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
             LazyRow(
@@ -349,10 +348,9 @@ fun DetailBody(
 
         // ---- Series 季/集浏览（1B-3.1） ----
         if (item.type == MediaType.SERIES) {
-            Spacer(Modifier.height(16.dp))
-            Text(
+            Spacer(Modifier.height(DETAIL_SECTION_SPACING_DP.dp))
+            DetailSectionHeader(
                 "季",
-                style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
             if (seriesState.libraryUnavailable) {
@@ -384,7 +382,7 @@ fun DetailBody(
             } else {
                 LazyRow(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(DETAIL_SEASON_CHIP_SPACING_DP.dp),
                 ) {
                     items(seriesState.seasons, key = { it.id }) { season ->
                         val seasonLabel = season.seasonNumber?.let { n ->
@@ -435,7 +433,7 @@ fun DetailBody(
         item.overview?.takeIf(String::isNotBlank)?.let { overview ->
             var expanded by remember { mutableStateOf(false) }
             Column(modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
-                com.mediahub.core.ui.MediaHubSectionHeader("剧情简介", modifier = Modifier.padding(bottom = 10.dp))
+                DetailSectionHeader("剧情简介", modifier = Modifier.padding(bottom = 10.dp))
                 Text(
                     overview,
                     style = MaterialTheme.typography.bodyMedium,
