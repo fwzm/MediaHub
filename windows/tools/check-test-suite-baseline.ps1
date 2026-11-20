@@ -251,6 +251,14 @@
 #   is red. The ladder line records
 #   phaseClock=<n>/4 ordered=<0|1> finishedAfterRunInfo=<0|1> withinRun=<0|1>.
 
+#   Those clocks are compared with each other, the run window and the last
+#   failure-log clock, but not with the result rows. A Starting clock moved later
+#   than the first row's own start keeps every phase line in place, every clock
+#   nondecreasing and the run window intact while the console says the host
+#   started after a test had already begun. The gate now also requires the
+#   Starting clock to sit at or before the earliest result row's start relative
+#   to Times.start. The ladder line records firstRowAfterStart=<0|1>.
+
 #   That clock and each RunInfo clock are relative to the run's start, while every
 #   RunInfo also carries an absolute timestamp. The writer emits the item a little
 #   after the test ends, so timestamp - Times.start - Text clock is a constant for
@@ -337,6 +345,10 @@
 #     (Times.finish - Times.start) -> red: the relative console clock and the
 #     absolute run window are two records of one run, and the phase ledger above
 #     only compares the clocks with each other and with the last failure-log clock.
+#   a Starting phase clock later than the earliest result row's own start
+#     -> red: the phase ledger only compares the clocks with each other, the run
+#     window and the last failure-log clock, so the host can claim it started
+#     after a row already began while every phase line and count stays intact.
 #   a RunInfo Text clock and its item timestamp whose offset from Times.start
 #     differs by more than 100 ms from the run's first item -> red: the row-clock
 #     and chronology checks read each item on its own and only in order, so a
@@ -2093,8 +2105,11 @@ foreach ($e in $baseline.suites) {
   $summaryPhaseClockFound = 0
   $summaryPhaseClockOrdered = 0
   $summaryFinishedAfterRunInfo = 0
+  $summaryFirstRowAfterStart = 1
   $summaryPhaseWithinRun = 1
   $summaryPhaseRunDuration = $null
+  $summaryPhaseStartingClock = $null
+  $summaryPhaseStartingClockText = ''
   $summaryPhaseFinishedClock = $null
   $summaryPhaseFinishedClockText = ''
   if ($summaryPhaseProblems.Count -eq 0) {
@@ -2141,6 +2156,10 @@ foreach ($e in $baseline.suites) {
         }
         $phaseClockOrdered = 0
       }
+      if ($phaseName -eq 'Starting') {
+        $summaryPhaseStartingClock = $phaseClock
+        $summaryPhaseStartingClockText = $phaseClockText
+      }
       if ($phaseName -eq 'Finished') {
         $summaryPhaseFinishedClock = $phaseClock
         $summaryPhaseFinishedClockText = $phaseClockText
@@ -2160,9 +2179,31 @@ foreach ($e in $baseline.suites) {
         $summaryPhaseClockProblems += "the Finished clock '$summaryPhaseFinishedClockText' precedes the last failure-log clock '$previousRunInfoClockText'"
       }
     }
+    if ($summaryPhaseClockOrdered -eq 1 -and $null -ne $summaryPhaseStartingClock -and $null -ne $phaseRunStart) {
+      $earliestRowStart = $null
+      $earliestRowName = ''
+      foreach ($row in @($xml.TestRun.Results.UnitTestResult)) {
+        $rowStart = Convert-ToInstant([string]$row.startTime)
+        if ($null -eq $rowStart) { continue }
+        if ($null -eq $earliestRowStart -or $rowStart -lt $earliestRowStart) {
+          $earliestRowStart = $rowStart
+          $earliestRowName = [string]$row.testName
+        }
+      }
+      if ($null -ne $earliestRowStart) {
+        if (($earliestRowStart - $phaseRunStart) -ge $summaryPhaseStartingClock) {
+          $summaryFirstRowAfterStart = 1
+        } else {
+          $summaryFirstRowAfterStart = 0
+          if ($summaryPhaseClockProblems.Count -lt 12) {
+            $summaryPhaseClockProblems += "the Starting clock '$summaryPhaseStartingClockText' comes after the first result row '$earliestRowName' started at '$([string]$earliestRowStart)'"
+          }
+        }
+      }
+    }
   }
   if ($summaryPhaseClockProblems.Count -gt 0) {
-    throw "$($e.suite): the StdOut phase clock ledger in $($e.file) does not read forward while the total was $total (phaseClock=$($summaryPhaseClockFound)/$($summaryPhaseNames.Count) ordered=$($summaryPhaseClockOrdered) finishedAfterRunInfo=$($summaryFinishedAfterRunInfo) withinRun=$($summaryPhaseWithinRun)) - the phase ledger above only checks where each line sits, so an edited clock, two clocks in the wrong order, or a failure log whose last clock runs past Finished keeps every phase line in place while the console text no longer reads in the order the host reported. expected one canonical [xUnit.net hh:mm:ss.ff] clock per phase, nondecreasing in phase order, Finished not earlier than the last RunInfo Text clock, and every phase clock at or before Times.finish - Times.start. broken: $($summaryPhaseClockProblems -join ', '). A TRX whose phase clocks were hand-merged or patched; regenerate it from a clean test run."
+    throw "$($e.suite): the StdOut phase clock ledger in $($e.file) does not read forward while the total was $total (phaseClock=$($summaryPhaseClockFound)/$($summaryPhaseNames.Count) ordered=$($summaryPhaseClockOrdered) finishedAfterRunInfo=$($summaryFinishedAfterRunInfo) withinRun=$($summaryPhaseWithinRun) firstRowAfterStart=$($summaryFirstRowAfterStart)) - the phase ledger above only checks where each line sits, so an edited clock, two clocks in the wrong order, a Starting clock after the first result row, or a failure log whose last clock runs past Finished keeps every phase line in place while the console text no longer reads in the order the host reported. expected one canonical [xUnit.net hh:mm:ss.ff] clock per phase, nondecreasing in phase order, Starting not later than the earliest result row's start, Finished not earlier than the last RunInfo Text clock, and every phase clock at or before Times.finish - Times.start. broken: $($summaryPhaseClockProblems -join ', '). A TRX whose phase clocks were hand-merged or patched; regenerate it from a clean test run."
   }
 
   if ($summaryPhaseProblems.Count -gt 0) {
@@ -2385,7 +2426,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): runInfoOffset=$runInfoOffsetBound/$(@($runInfoNodes).Count)"
   "$($e.suite): summaryOutput=$summaryOutputBlocks stdout=$summaryStdOutBlocks nonBlank=$summaryOutputNonBlank suiteNamed=$summaryOutputNamesSuite"
   "$($e.suite): phaseLedger=$summaryPhaseFound/4 ordered=$summaryPhaseOrdered"
-  "$($e.suite): phaseClock=$summaryPhaseClockFound/4 ordered=$summaryPhaseClockOrdered finishedAfterRunInfo=$summaryFinishedAfterRunInfo withinRun=$summaryPhaseWithinRun"
+  "$($e.suite): phaseClock=$summaryPhaseClockFound/4 ordered=$summaryPhaseClockOrdered finishedAfterRunInfo=$summaryFinishedAfterRunInfo withinRun=$summaryPhaseWithinRun firstRowAfterStart=$summaryFirstRowAfterStart"
   "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot nameStamp=$nameStampMatches bound rows=$boundRows header id collisions=$headerCollisions"
   "$($e.suite): assemblyDeclaration=$assemblyPairs storage/codeBase pairs=$($assemblyPairs - $assemblyPairLostCount) same file adapters=$($adapterValues.Count)"
   "$($e.suite): listVocabulary=$listKnown/$listCount canonical names=$listCanonical distinct names=$($listNames.Count - $listNameBlank - $listNameDuplicates.Count) unreferenced lists=$($unreferencedLists.Count)"
