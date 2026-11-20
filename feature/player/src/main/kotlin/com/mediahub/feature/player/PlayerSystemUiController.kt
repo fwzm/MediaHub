@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.util.Log
+import android.view.WindowManager
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -23,6 +24,7 @@ class PlayerSystemUiController(private val activity: Activity) {
 
     private var originalOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     private var originalConfigOrientation = Configuration.ORIENTATION_UNDEFINED
+    private var originalKeepScreenOn = false
     private var entered = false
 
     fun enterPlayback(autoLandscape: Boolean, immersiveBars: Boolean) {
@@ -31,6 +33,10 @@ class PlayerSystemUiController(private val activity: Activity) {
         // 保存进入播放器前的方向（用户可能原本就是横屏/反向横屏，退出不能强制竖屏）
         originalOrientation = activity.requestedOrientation
         originalConfigOrientation = activity.resources.configuration.orientation
+        // 播放期间保持屏幕常亮（#104）：记录进入前状态，退出时按原值恢复。
+        originalKeepScreenOn = activity.window.attributes.flags and
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0
+        activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         Log.d("MediaHub/SYSUI", "enterPlayback originalOrientation=" + originalOrientation + " config=" + originalConfigOrientation)
         if (autoLandscape) {
             activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
@@ -53,6 +59,11 @@ class PlayerSystemUiController(private val activity: Activity) {
     fun exitPlayback() {
         if (!entered) return
         entered = false
+        if (originalKeepScreenOn) {
+            activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
         controller().show(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
         WindowCompat.setDecorFitsSystemWindows(activity.window, true)
         val restoreOrientation = resolveRestoreOrientation()
