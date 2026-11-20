@@ -25,6 +25,9 @@ object SyncUrlNormalizer {
     /** 只接受本端来源真的能携带的 scheme；集合之外的 scheme 拒绝而不是猜测。 */
     private val SUPPORTED_SCHEMES = setOf("http", "https", "smb", "file")
 
+    /** TCP 端口的合法上界；显式写出的越界端口不是"可拨号地址"，必须拒绝而不是修好。 */
+    private const val MAX_PORT: Int = 65535
+
     /** 规范化地址；null 表示这不是一个可拨号的绝对地址。 */
     fun normalize(url: String?): String? {
         if (url == null || url.isBlank()) return null
@@ -57,16 +60,20 @@ object SyncUrlNormalizer {
         // "file:///C:/media" 是合法的无 host 绝对地址；其它受支持的 scheme 必须给出 host。
         if (scheme != "file" && host.isEmpty()) return null
 
+        // 显式端口先过范围闸门：0 与 >65535 都不是可拨号端口，也不能被"修好"成默认端口
+        // （那会把写错的地址伪装成合法身份，故障被推迟到真正建连时才暴露）。
+        val rawPort = uri.port
+        if (rawPort != -1 && rawPort !in 1..MAX_PORT) return null
+
         val authority: String = when {
             isHttp -> {
                 // 输入省略端口时在这里补全——与 Windows 客户端相反，这是有意的（D4）。
-                val port = if (uri.port == -1) (if (scheme == "https") 443 else 80) else uri.port
-                if (port <= 0) return null
+                val port = if (rawPort == -1) (if (scheme == "https") 443 else 80) else rawPort
                 host.lowercase() + ":" + port
             }
-            uri.port > 0 -> {
+            rawPort > 0 -> {
                 // smb/file 没有默认端口，因此不发明一个；输入显式写了就保留。
-                host.lowercase() + ":" + uri.port
+                host.lowercase() + ":" + rawPort
             }
             else -> host.lowercase()
         }
