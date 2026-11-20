@@ -25,11 +25,20 @@ class DefaultProviderRegistry @Inject constructor(
     private val registrations = factories.map { it.descriptor to it }
 
     init {
-        require(registrations.map { it.first.serverType }.toSet().size == registrations.size) {
-            "Duplicate provider server type"
+        // 装配期不变量：同一 ServerType / 同一 provider id 只允许注册一次。
+        // 失败信息必须点名冲突的类型与双方 id —— 基线只有固定串 "Duplicate provider server type"，
+        // 装配方无从判断是哪个数据源被重复 @IntoSet 贡献，只能逐个模块翻代码。
+        val duplicateTypes = registrations.groupBy { it.first.serverType }.filterValues { it.size > 1 }
+        require(duplicateTypes.isEmpty()) {
+            "重复的 Provider serverType：" + duplicateTypes.entries.sortedBy { it.key.name }
+                .joinToString("; ") { (type, group) ->
+                    "$type <- " + group.joinToString(", ") { it.first.id }
+                } + "；每个 ServerType 只允许一个 Factory（请检查 @IntoSet 多绑定是否重复贡献）"
         }
-        require(registrations.map { it.first.id }.toSet().size == registrations.size) {
-            "Duplicate provider stable id"
+        val duplicateIds = registrations.groupBy { it.first.id }.filterValues { it.size > 1 }
+        require(duplicateIds.isEmpty()) {
+            "重复的 Provider id：" + duplicateIds.keys.sorted().joinToString(", ") +
+                "；provider id 是稳定标识，不允许两个 Factory 共用"
         }
     }
 
