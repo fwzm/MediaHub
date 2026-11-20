@@ -212,6 +212,13 @@
 #   gate now walks every element in the document and refuses an attribute outside
 #   the writer's vocabulary; the structure ladder line adds
 #   attributeVocabulary=<elements with only known attributes>/<elements>.
+#   The tree below TestRun was never checked either: every container is read by
+#   path, so an element moved under the wrong parent - a declared list nested in
+#   the entries, a deployment nested in the results - is never visited and keeps
+#   every count, every pairing, every row time and every phase line identical. The
+#   gate now walks every element, names its parent and refuses a child the writer
+#   does not put there; the structure ladder line adds
+#   childVocabulary=<children in a known place>/<child elements>.
 #   The instants also have to agree with one another, and nothing above read that:
 #   every offset check visits one stamp at a time, so a row copied in from another
 #   run keeps a readable instant, a plausible duration and the same order while the
@@ -531,6 +538,11 @@
 #     a readable instant, a plausible duration and the same order while the file
 #     stops describing one moment in one place; the structure ladder line records
 #     runZones=<distinct offsets> zoneStamps=<stamps read>.
+#   an element nests a child the writer does not place there -> red. Every container
+#     below TestRun is read by path, so a moved element keeps every count, every
+#     pairing and every ladder line identical while the tree is no longer the one
+#     VSTest writes; the structure ladder line records
+#     childVocabulary=<children in a known place>/<child elements>.
 
 #   the row at position N of Results does not name the test that position N of
 #     TestEntries declares -> red. The two sections are emitted from one ordered
@@ -623,6 +635,37 @@ $AttributeVocabulary['TestDefinitions'] = @()
 $AttributeVocabulary['TestEntries'] = @()
 $AttributeVocabulary['TestLists'] = @()
 $AttributeVocabulary['Text'] = @()
+# Every element is also read by path, so an element moved under the wrong parent
+# keeps every count, pairing, row time and phase line identical - the only place
+# the tree itself was checked is TestRun's own section order. Keep the children
+# the writer puts in each container; anything else is a shape VSTest never writes.
+# Elements the writer leaves empty are listed with no children at all, so a child
+# appearing under one of them is refused rather than skipped.
+$ChildVocabulary = @{}
+$ChildVocabulary['TestRun'] = @('Times', 'TestSettings', 'Results', 'TestDefinitions', 'TestEntries', 'TestLists', 'ResultSummary')
+$ChildVocabulary['TestSettings'] = @('Deployment')
+$ChildVocabulary['Results'] = @('UnitTestResult')
+$ChildVocabulary['UnitTestResult'] = @('Output')
+$ChildVocabulary['Output'] = @('StdOut', 'ErrorInfo')
+$ChildVocabulary['ErrorInfo'] = @('Message', 'StackTrace')
+$ChildVocabulary['ResultSummary'] = @('Counters', 'Output', 'RunInfos')
+$ChildVocabulary['RunInfos'] = @('RunInfo')
+$ChildVocabulary['RunInfo'] = @('Text')
+$ChildVocabulary['TestDefinitions'] = @('UnitTest')
+$ChildVocabulary['UnitTest'] = @('Execution', 'TestMethod')
+$ChildVocabulary['TestEntries'] = @('TestEntry')
+$ChildVocabulary['TestLists'] = @('TestList')
+$ChildVocabulary['Times'] = @()
+$ChildVocabulary['Deployment'] = @()
+$ChildVocabulary['Execution'] = @()
+$ChildVocabulary['TestMethod'] = @()
+$ChildVocabulary['TestEntry'] = @()
+$ChildVocabulary['TestList'] = @()
+$ChildVocabulary['Counters'] = @()
+$ChildVocabulary['Message'] = @()
+$ChildVocabulary['StackTrace'] = @()
+$ChildVocabulary['StdOut'] = @()
+$ChildVocabulary['Text'] = @()
 
 # Sorted copy of one method's argument rows, duplicates kept. A row is the
 # display-name suffix from the first "(", i.e. the argument text of one
@@ -1719,6 +1762,40 @@ foreach ($e in $baseline.suites) {
   if ($runZoneStamps -gt 0 -and $runZoneList.Count -gt 1) {
     throw "$($e.suite): the instants in $($e.file) are written in $($runZoneList.Count) different UTC offsets while the total was $total - every check above reads one instant at a time, so a stamp copied in from another run keeps a readable instant, a plausible duration and the same order while the file stops describing one moment in one place. found: $($runZoneShown -join ', '). A TRX whose instants were collected in different zones was hand-merged or patched; regenerate it from a clean test run."
   }
+  # Every element also contains only the children the writer puts in it. The order
+  # of TestRun's own sections is checked above, and everything else is read by
+  # path, so an element moved under the wrong parent - a declared list nested in
+  # the entries, a deployment nested in the results, a second method nested in a
+  # test - is never visited and keeps every count, every pairing, every row time
+  # and every phase line identical while the file stops being the tree VSTest
+  # writes. Walk every element, take its parent's name and require the child to be
+  # one that parent is written with.
+  $childEdges = 0
+  $childOk = 0
+  $childStray = @()
+  $childUnknownParent = @()
+  foreach ($cen in @($xml.SelectNodes('//*'))) {
+    $childParent = $cen.ParentNode
+    if ($null -eq $childParent -or $childParent.NodeType -ne 'Element') { continue }
+    $childParentName = [string]$childParent.LocalName
+    if (-not $ChildVocabulary.ContainsKey($childParentName)) {
+      if ($childUnknownParent.Count -lt 12) { $childUnknownParent += $childParentName }
+      continue
+    }
+    $childEdges++
+    $childName = [string]$cen.LocalName
+    if (@($ChildVocabulary[$childParentName]) -contains $childName) {
+      $childOk++
+    } elseif ($childStray.Count -lt 12) {
+      $childStray += "$childName inside $childParentName"
+    }
+  }
+  if ($childUnknownParent.Count -gt 0) {
+    Write-Host "::warning::$($e.suite): $($childUnknownParent.Count) parent element name(s) this gate does not know ($(@($childUnknownParent) -join ', ')) - their children were not checked"
+  }
+  if ($childStray.Count -gt 0) {
+    throw "$($e.suite): an element nests a child the writer does not place there while the total was $total - every container below TestRun is read by path, so an element moved under the wrong parent keeps every count, every pairing, every row time and every phase line identical. broken: $($childStray -join ', '). A TRX whose tree was rearranged by hand was hand-merged or patched; regenerate it from a clean test run."
+  }
   # A declared list is a vocabulary entry, not just an id in a set. The structure
   # check above asks a list id to exist, be unique and be used, and the row metadata
   # check asks every row to name one list, so the name - the only part a reader ever
@@ -2662,7 +2739,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): outcomes=$($actualOutcomes.Count) baseline=outcome table $(@($e.outcomes.PSObject.Properties.Name).Count) outcomes"
   "$($e.suite): identities=$pairedIds named=$namedRows unique test ids shared by both halves"
   "$($e.suite): rowAttributes=$rowCount unique execution ids=$($execIdCounts.Count) ordered row times=$timeOrdered rows within the run window=$inWindow uniform row fields=$uniformFields rowTimeOffsets=$rowTimeOffsets/$($rowCount*2) durationShape=$durShapeOk/$rowCount"
-  "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount runSections=$runSectionMatches/7 attributeVocabulary=$attrOk/$attrElements runZones=$($runZoneList.Count) zoneStamps=$runZoneStamps"
+  "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount runSections=$runSectionMatches/7 attributeVocabulary=$attrOk/$attrElements runZones=$($runZoneList.Count) zoneStamps=$runZoneStamps childVocabulary=$childOk/$childEdges"
   "$($e.suite): executionIds=$($execByDefId.Count) distinct declared ids=$($defExecCounts.Count) paired rows=$pairedRowExecs paired result directories=$pairedRowDirs"
   "$($e.suite): displayNames=$displayNameChecked declared prefixes=$($displayNameChecked - $displayNameLost.Count) mismatched=$($displayNameLost.Count)"
   "$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"
