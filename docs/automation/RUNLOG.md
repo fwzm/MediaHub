@@ -1378,3 +1378,33 @@
 
 - CLAIM run-id `w6-113-round18-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
 - W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。
+
+## Round 58（W6-113be，2026-11-19）：运行窗口必须说明时区
+
+### 动机
+
+第 38 层的 trigger 来自一个真实的确定性漏洞：`Times/@creation` 与 `Times/@queuing` 已被强制携带显式 UTC offset，但 `Times/@start` 与 `Times/@finish` 只经 `Convert-ToInstant` 的 `[DateTimeOffset]::Parse` 读取。无 offset 的字符串会被按**宿主本地时区**解释，同一个 TRX 在不同时区的机器上因此界定出不同的 run 窗口，而计数、结果行时序和 phase 判定可能全部不变。把 finish 的 `+08:00` 去掉后，本机（+08）上旧闸门 exit 0 —— 这正是漏洞：换一台 UTC 机器，同一份文件就会指向另一段时间。
+
+### 变更
+
+- `windows/tools/check-test-suite-baseline.ps1`：2,743 → 2,770 行，162,959 → 164,762 B，`+32 / -5`，sha256 `d83cc5470825048914f93b1a1adefcc77055dfdfcc12017129efca102934f739`（父层 `5f9cb1dfe544706e9b3dcd8da144a5511dedc3b45a02d8dd1973c4b62cd022d2`）。
+- 在 `$declarationLost` 块为 `Times/@start` 与 `Times/@finish` 增加显式 offset 检查（`+hh:mm`/`-hh:mm`/`Z`）；缺失时追加 `Times.<name> '<raw>' carries no explicit UTC offset`。窗口 raw 为空时不报 red，沿用既有「无可用窗口只警告」语义。
+- 新增 `$declarationWindowOffsets`（0..2），只统计两个窗口字段的显式 offset；`$declarationFacts` 仍为 `/4`。throw 消息扩展为列出 `TestRun/@xmlns, Times/@creation, Times/@queuing, Times/@start or Times/@finish`；台阶行末尾追加 `windowOffsets=<n>/2`。
+- 顶部注释与 SEMANTICS 各补一段；双 shell PARSE-OK（pwsh 7.6.10、Windows PowerShell 5.1.26100.10003）；纯 ASCII、无 BOM/CRLF；`git diff --check` exit 0。
+
+### 验证（EXECUTED）
+
+- 真实绿色 gate-corpus：exit 0；两套件 `windowOffsets=2/2`，`phaseClock=4/4 ordered=1 finishedAfterRunInfo=1 withinRun=1 firstRowAfterStart=1`，`combined tests=2077`；日志 `D:/mh-verify/r59/logs/real-green.log`。
+- 真实失败 TRX（total=767，failed=6）：exit 1；`windowOffsets=2/2`，RunInfo chronology/offset/rowClock 均 6/6，唯一 throw `MediaHub.Tests: 6 test(s) failed`；日志 `D:/mh-verify/r59/logs/real-failing.log`。
+- 5 例矩阵：clean-real / clean-two-errors / clean-green / fail-with-runinfo 旧新均 exit 0，`windowOffsets=[2,2]`、problems=0；`bad-finish-offset` **旧 0 / 新 1**，`windowOffsets=1/2`、恰好 1 条 `Times.finish ... carries no explicit UTC offset`；`oldAllZero=true`、`cleanOk=true`、`redOk=true`；结果 `D:/mh-verify/r59/results-all.json`。
+- 夹具：从 `D:/mh-verify/r54/cases/clean-two-errors` 复制到 `D:/mh-verify/r59/cases/bad-finish-offset`，只把 windows-tests.trx 的 `finish="2026-11-19T13:17:47.0119045+08:00"` 改为无 offset（恰好 1 次；2,698,040 → 2,698,034 B）。旧第 37 层在该夹具上 exit 0，证明修复前缺失 offset 完全不被发现。
+
+### 提交与 exact-head CI
+
+- 代码提交 `d959d8a4be3317bebde9d19848a1e63b22f426a2`（`ci(windows): the run window must say which zone it is in (W6-113be)`）；Draft PR #183，base main，stacked on #179，G7 DO_NOT_MERGE。
+- 代码 head CI：windows-ci `44661323482`（push）`success`、`44661419649`（pull_request）`success`；Android CI `44661419404` `success`。
+
+### 锁与边界
+
+- CLAIM run-id `w6-113-round19-20261119`，owner lead，8 把锁（3 remote-ref + 5 worktree，含 D:/mh-w6-r41）；收尾 `release-plan` 后 status count=0。
+- W6-P1-E2E 仍 BLOCKED（需维护者 ≥1200s 空闲窗口 + 真机）；PR #39 归档 NOT_RUN；WinUI GUI 与两机均 NOT_RUN；G7=DO_NOT_MERGE。

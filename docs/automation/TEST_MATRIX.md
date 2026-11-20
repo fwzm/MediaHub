@@ -1941,3 +1941,18 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 **为什么第三十六层看不见**：第 34/35 层只比较 phase 时钟彼此、run 窗口和最后 RunInfo；第 36 层只比较 RunInfo 的 Text clock 与 timestamp。把 Starting 移到 2.00 时所有 phase 时钟仍递增、仍在 `Times` 窗口内、Finished 仍晚于最后 RunInfo，但最早行 1.819 已开始，旧层无法发现。
 
 **边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
+
+## 6.44 第三十八层口径：运行窗口必须说明时区（W6-113be）
+
+| 条目 | 口径 | 证据 |
+|---|---|---|
+| 检查对象 | `Times/@start` 与 `Times/@finish` 的显式 UTC offset（`+hh:mm`/`-hh:mm`/`Z`） | declaration 块 |
+| 通过条件 | 两个窗口字段均有显式 offset；窗口 raw 为空时跳过（沿用只警告语义） | 真实语料 windowOffsets=2/2 |
+| 台阶行 | `windowOffsets=<n>/2`（与 `runDeclarations` 同行） | gate-real-r59(logs/real-green.log) |
+| 负向对照 | clean-two-errors 只去掉 finish 的 `+08:00`；旧层 0，新层 1，恰好 1 条 carries-no-explicit-UTC-offset | results-all.json |
+| 规模 | 2,743→2,770 行；162,959→164,762 B；+32/−5 | sha256 d83cc547... |
+| 残留限制 | 只校准窗口字段；`creation`/`queuing` 原有 offset 检查未变，且不约束窗口起止与 creation/queuing 的大小关系 | 真实语料创建晚于 start 约 1.06 s |
+
+**为什么第三十七层看不见**：第 37 层读的是 phase 时钟与最早结果行，全部通过 `Convert-ToInstant` 得到已解析的瞬间；缺 offset 时解析结果由宿主时区决定，计数、窗口、行序、phase 都可以不变。因此去掉 finish 的 offset 后，+08 主机上旧闸门 exit 0，而同一文件在 UTC 机器上会落在另一段时间。
+
+**边界**：W6-P1-E2E BLOCKED；PR #39 NOT_RUN；GUI/两机 NOT_RUN；G7 DO_NOT_MERGE。
