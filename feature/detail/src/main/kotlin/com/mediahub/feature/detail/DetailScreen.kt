@@ -230,24 +230,13 @@ fun DetailBody(
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        val meta = buildList {
-                            item.year?.let { add(it.toString()) }
-                            item.runtimeMs?.let { ms ->
-                                val minutes = ms / 60_000
-                                if (minutes > 0) add("${minutes}分钟")
-                            }
-                            item.communityRating?.let { add("★ %.1f".format(it)) }
-                            item.container?.uppercase()?.let { add(it) }
-                        }
-                        if (meta.isNotEmpty()) {
-                            Text(
-                                meta.joinToString("  ·  "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.86f),
-                                modifier = Modifier.padding(top = 8.dp),
-                                maxLines = 2,
-                            )
-                        }
+                        DetailMetaLine(
+                            year = item.year,
+                            runtimeMs = item.runtimeMs,
+                            communityRating = item.communityRating,
+                            container = item.container,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
                     }
                 }
                 if (item.genres.isNotEmpty()) {
