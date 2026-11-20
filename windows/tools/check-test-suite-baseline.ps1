@@ -186,6 +186,15 @@
 #   count, phase line and duration stays identical. Every row's startTime and endTime
 #   now require an explicit UTC offset; the ladder line adds rowTimeOffsets=<n>/<2n>.
 
+#   The sections themselves also have an order, and nothing above read it: the six
+#   names are counted wherever they appear and TestSettings is counted on its own,
+#   so a file that moves TestSettings behind Results or lifts Results above Times
+#   keeps every count, every pairing, every row time and every phase line identical
+#   while it stops being the shape VSTest writes. The gate now walks the direct
+#   children of TestRun in document order, requires the canonical sequence Times,
+#   TestSettings, Results, TestDefinitions, TestEntries, TestLists, ResultSummary,
+#   and prints runSections=<n>/7 on the structure ladder line.
+
 #   The rows also carry an order, and nothing above read it: TestEntries and the
 #   Results section are written from one ordered pass, so the row at position N is
 #   the row of the entry at position N. Every check above keys the two halves by id,
@@ -472,6 +481,13 @@
 #     on another machine while the item list, its order, its row window and the
 #     clock/timestamp offset stay identical; the runInfos ladder line records
 #     timestampOffsets=<n>/<items>.
+#
+#   the direct children of TestRun are not the canonical sequence Times,
+#     TestSettings, Results, TestDefinitions, TestEntries, TestLists,
+#     ResultSummary in that order -> red: the sections are emitted in one pass, so
+#     a moved section means the file was reassembled while every count and every
+#     pairing above stays identical; the structure ladder line records
+#     runSections=<positions that agree>/7.
 
 #   the row at position N of Results does not name the test that position N of
 #     TestEntries declares -> red. The two sections are emitted from one ordered
@@ -930,8 +946,12 @@ foreach ($e in $baseline.suites) {
   $sectionBlocks = @{}
   foreach ($sbn in @('ResultSummary', 'Times', 'TestDefinitions', 'TestEntries', 'TestLists', 'Results')) { $sectionBlocks[$sbn] = 0 }
   $counterBlocks = 0
+  # The direct children of TestRun in document order, kept so the fixed sequence
+  # the writer emits can be checked (see the section-order check below).
+  $runChildOrder = New-Object System.Collections.Generic.List[string]
   foreach ($child in @($xml.TestRun.ChildNodes)) {
     $childName = [string]$child.LocalName
+    if ($child.NodeType -eq 'Element') { $runChildOrder.Add($childName) }
     if ($sectionBlocks.ContainsKey($childName)) { $sectionBlocks[$childName] = [int]$sectionBlocks[$childName] + 1 }
     if ($childName -eq 'ResultSummary') {
       foreach ($sub in @($child.ChildNodes)) { if ([string]$sub.LocalName -eq 'Counters') { $counterBlocks++ } }
@@ -1534,6 +1554,22 @@ foreach ($e in $baseline.suites) {
     $shownGhost = @($ghostLists | Sort-Object)
     if ($shownGhost.Count -gt 12) { $shownGhost = $shownGhost[0..11] + "... ($($ghostLists.Count) total)" }
     $structureLost += "result row(s) ran in a list that TestLists does not declare (testId $($shownGhost -join ', '))"
+  }
+  # The sections also have an order, and nothing above read it: the six names are
+  # counted wherever they appear and TestSettings is counted on its own, so a file
+  # that moves TestSettings behind Results or lifts Results above Times keeps every
+  # count, every pairing, every row time and every phase line identical while it
+  # stops being the shape VSTest writes. The writer emits one fixed sequence, so
+  # walk the direct children in document order and require exactly that sequence.
+  $runSectionOrder = @('Times', 'TestSettings', 'Results', 'TestDefinitions', 'TestEntries', 'TestLists', 'ResultSummary')
+  $runSectionMatches = 0
+  for ($si = 0; $si -lt $runSectionOrder.Count; $si++) {
+    if ($si -lt $runChildOrder.Count -and $runChildOrder[$si] -eq $runSectionOrder[$si]) { $runSectionMatches++ }
+  }
+  if ($runChildOrder.Count -ne $runSectionOrder.Count -or $runSectionMatches -ne $runSectionOrder.Count) {
+    $shownOrder = 'none'
+    if ($runChildOrder.Count -gt 0) { $shownOrder = $runChildOrder -join '>' }
+    $structureLost += "TestRun declares its direct children as $shownOrder while the writer emits $($runSectionOrder -join '>')"
   }
   if ($structureLost.Count -gt 0) {
     throw "$($e.suite): the TRX sections do not agree with each other while the total was $total - the summary, the definitions, the result rows, the entry map and the declared lists all come from this file, so one that drops a section, adds or removes entries, or pairs an entry with the wrong execution id can keep every count above identical. mismatched: $($structureLost -join ', '). A TRX whose sections disagree was hand-merged or patched; regenerate it from a clean test run."
@@ -2482,7 +2518,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): outcomes=$($actualOutcomes.Count) baseline=outcome table $(@($e.outcomes.PSObject.Properties.Name).Count) outcomes"
   "$($e.suite): identities=$pairedIds named=$namedRows unique test ids shared by both halves"
   "$($e.suite): rowAttributes=$rowCount unique execution ids=$($execIdCounts.Count) ordered row times=$timeOrdered rows within the run window=$inWindow uniform row fields=$uniformFields rowTimeOffsets=$rowTimeOffsets/$($rowCount*2)"
-  "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount"
+  "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount runSections=$runSectionMatches/7"
   "$($e.suite): executionIds=$($execByDefId.Count) distinct declared ids=$($defExecCounts.Count) paired rows=$pairedRowExecs paired result directories=$pairedRowDirs"
   "$($e.suite): displayNames=$displayNameChecked declared prefixes=$($displayNameChecked - $displayNameLost.Count) mismatched=$($displayNameLost.Count)"
   "$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"
