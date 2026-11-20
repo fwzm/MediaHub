@@ -35,12 +35,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -81,14 +83,23 @@ fun DetailRoute(
     val seriesState by viewModel.seriesState.collectAsStateWithLifecycle()
     val sourceState by viewModel.sourceState.collectAsStateWithLifecycle()
     val favoriteState by viewModel.favoriteState.collectAsStateWithLifecycle()
+    // 审计 D1：顶栏随内容滚动收起，标题强调度跟着折叠比例走
+    val topBarScrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
 
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarScrollBehavior.nestedScrollConnection),
         topBar = {
             TopAppBar(
                 title = {
-                    val displayTitle = (state as? DetailUiState.Content)?.detail?.item?.title ?: title
-                    Text(displayTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    DetailTopBarTitle(
+                        text = detailTopBarTitle(
+                            contentTitle = (state as? DetailUiState.Content)?.detail?.item?.title,
+                            routeTitle = title,
+                        ),
+                        collapsedFraction = topBarScrollBehavior.state.collapsedFraction,
+                    )
                 },
+                scrollBehavior = topBarScrollBehavior,
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "返回")
