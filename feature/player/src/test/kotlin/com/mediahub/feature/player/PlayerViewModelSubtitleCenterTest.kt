@@ -31,6 +31,7 @@ import com.mediahub.player.engine.PlaybackUiState
 import com.mediahub.player.engine.SeekMode
 import com.mediahub.player.engine.SubtitleCapabilities
 import com.mediahub.player.engine.TrackSelection
+import com.mediahub.player.engine.TrackSelectionResult
 import com.mediahub.provider.api.ConnectionStatus
 import com.mediahub.provider.api.DiscoveredSubtitle
 import com.mediahub.provider.api.MediaDetailProvider
@@ -120,9 +121,18 @@ class PlayerViewModelSubtitleCenterTest {
         override fun togglePlayPause() = Unit
         override fun seekTo(positionMs: Long, mode: SeekMode) = Unit
         override fun setSpeed(speed: Float) = Unit
-        override fun selectAudioTrack(selection: TrackSelection?) = Unit
+        var selectedAudio: TrackSelection? = null
+        var audioResult: TrackSelectionResult = TrackSelectionResult.APPLIED
+        override fun selectAudioTrack(selection: TrackSelection?): TrackSelectionResult {
+            selectedAudio = selection
+            return audioResult
+        }
         var selectedSubtitle: TrackSelection? = null
-        override fun selectSubtitleTrack(selection: TrackSelection?) { selectedSubtitle = selection }
+        var subtitleResult: TrackSelectionResult = TrackSelectionResult.APPLIED
+        override fun selectSubtitleTrack(selection: TrackSelection?): TrackSelectionResult {
+            selectedSubtitle = selection
+            return subtitleResult
+        }
         override suspend fun loadExternalSubtitle(subtitle: ExternalSubtitle): Boolean {
             loaded.add(subtitle)
             loadHook?.invoke(subtitle)
@@ -516,6 +526,44 @@ class PlayerViewModelSubtitleCenterTest {
             runCurrent()
             assertEquals("当前内核不支持字幕偏移", vm.subtitleCenter.value.notice)
             assertTrue(memory.entries.isEmpty())
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    // ---- 轨道选择拒绝提示（#80） ----
+
+    @Test
+    fun `audio selection rejected by engine surfaces notice`() = runTest(dispatcher) {
+        val engine = RecordingEngine()
+        val vm = buildVm(engine, Discovery(), MemoryStore())
+        try {
+            runCurrent()
+            runCurrent()
+            engine.audioResult = TrackSelectionResult.TRACK_UNAVAILABLE
+            vm.onAudioTrackSelected(TrackSelection(0, 0))
+            assertEquals("该音频轨道当前不可用", vm.trackNotice.value)
+            assertEquals(TrackSelection(0, 0), engine.selectedAudio)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `rejected embedded subtitle surfaces notice without manual takeover`() = runTest(dispatcher) {
+        val engine = RecordingEngine()
+        val vm = buildVm(engine, Discovery(), MemoryStore())
+        try {
+            runCurrent()
+            runCurrent()
+            engine.subtitleResult = TrackSelectionResult.TRACK_UNAVAILABLE
+            vm.onEmbeddedSubtitleSelected(TrackSelection(0, 0))
+            assertEquals("该字幕轨道当前不可用", vm.trackNotice.value)
+            assertEquals(TrackSelection(0, 0), engine.selectedSubtitle)
+            assertNull(vm.subtitleCenter.value.selectedExternalId)
+            assertFalse(vm.subtitleCenter.value.manualSelection)
         } finally {
             vm.stopAndFlush()
             runCurrent()

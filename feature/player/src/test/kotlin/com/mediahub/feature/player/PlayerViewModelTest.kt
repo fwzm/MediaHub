@@ -25,6 +25,7 @@ import com.mediahub.player.engine.PlaybackEvent
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.PlaybackUiState
 import com.mediahub.player.engine.TrackSelection
+import com.mediahub.player.engine.TrackSelectionResult
 import com.mediahub.player.engine.EngineKind
 import com.mediahub.provider.api.ConnectionStatus
 import com.mediahub.provider.api.MediaDetailProvider
@@ -584,8 +585,8 @@ class PlayerViewModelTest {
         override fun togglePlayPause() = Unit
         override fun seekTo(positionMs: Long, mode: com.mediahub.player.engine.SeekMode) = Unit
         override fun setSpeed(speed: Float) = Unit
-        override fun selectAudioTrack(selection: TrackSelection?) = Unit
-        override fun selectSubtitleTrack(selection: TrackSelection?) = Unit
+        override fun selectAudioTrack(selection: TrackSelection?): TrackSelectionResult = TrackSelectionResult.APPLIED
+        override fun selectSubtitleTrack(selection: TrackSelection?): TrackSelectionResult = TrackSelectionResult.APPLIED
         fun emitProgress(value: PlaybackProgress) { progressFlow.tryEmit(value) }
         override fun stop(): PlaybackProgress? {
             onStop()

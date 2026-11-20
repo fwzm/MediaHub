@@ -820,7 +820,7 @@ class SwitchablePlaybackEngineTest {
         override fun togglePlayPause() { toggled = true }
         override fun seekTo(positionMs: Long, mode: SeekMode) { seekedTo = positionMs }
         override fun setSpeed(speed: Float) { speedSet = speed }
-        override fun selectAudioTrack(selection: TrackSelection?) = Unit
+        override fun selectAudioTrack(selection: TrackSelection?): TrackSelectionResult = TrackSelectionResult.APPLIED
         val externalLoads = mutableListOf<ExternalSubtitle>()
         var loadGate: CompletableDeferred<Unit>? = null
         override suspend fun loadExternalSubtitle(subtitle: ExternalSubtitle): Boolean {
@@ -829,7 +829,7 @@ class SwitchablePlaybackEngineTest {
             gate?.await()
             return true
         }
-        override fun selectSubtitleTrack(selection: TrackSelection?) = Unit
+        override fun selectSubtitleTrack(selection: TrackSelection?): TrackSelectionResult = TrackSelectionResult.APPLIED
         override fun setAudioSpectrumEnabled(enabled: Boolean) {
             audioSpectrumEnabledHistory += enabled
             if (!enabled) audio.value = null

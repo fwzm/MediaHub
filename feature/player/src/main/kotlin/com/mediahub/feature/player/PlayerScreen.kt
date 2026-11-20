@@ -146,12 +146,20 @@ fun PlayerRoute(
     val artworkPalette by viewModel.artworkPalette.collectAsStateWithLifecycle()
     val engineKind by viewModel.engineKind.collectAsStateWithLifecycle()
     val subtitleCenter by viewModel.subtitleCenter.collectAsStateWithLifecycle()
+    val trackNotice by viewModel.trackNotice.collectAsStateWithLifecycle()
     val playbackSource by viewModel.playbackSource.collectAsStateWithLifecycle()
     val audioSpectrumBridge = rememberAudioSpectrumBridge(viewModel.engine.audioBands)
 
     // 兜底（系统返回手势/组合销毁）：异步 final flush；正常返回按钮走同步 stopAndFlush（ADR-023）。
     DisposableEffect(Unit) {
         onDispose { viewModel.stopAndFlushAsync() }
+    }
+
+    LaunchedEffect(trackNotice) {
+        if (trackNotice != null) {
+            delay(2_600)
+            viewModel.consumeTrackNotice()
+        }
     }
 
     // 自动横屏 + 沉浸式系统栏（Phase Player UX）：进入保存原方向并应用，退出恢复。
@@ -514,6 +522,20 @@ fun PlayerRoute(
             )
         }
 
+        // 轨道选择被引擎拒绝（#80）：顶层如实提示，不把用户点击静默吞掉。
+        trackNotice?.let { notice ->
+            Text(
+                notice,
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = if (engineSwitching) 108.dp else 64.dp)
+                    .background(Color.Black.copy(alpha = 0.65f))
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+
         when (resolve) {
             ResolveState.Resolving -> {
                 CircularProgressIndicator(
@@ -735,7 +757,7 @@ fun PlayerRoute(
                 onDismiss = { showAudioDialog = false },
                 onSelect = { track: AudioTrack ->
                     PlayerTrackSelection.addressOf(selectionSnapshot, track, selectionKind)
-                        ?.let(viewModel.engine::selectAudioTrack)
+                        ?.let(viewModel::onAudioTrackSelected)
                     showAudioDialog = false
                 },
             )

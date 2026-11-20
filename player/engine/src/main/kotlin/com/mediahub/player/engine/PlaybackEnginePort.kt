@@ -65,8 +65,9 @@ interface PlaybackEnginePort {
     /** Snapshot-bound requests must remain owned by the current engine; raw legacy addresses remain compatible. */
     fun isTrackSelectionCurrent(selection: TrackSelection?): Boolean =
         selection?.snapshotToken?.let { uiState.value.trackRowMap.matches(it) } ?: true
-    fun selectAudioTrack(selection: TrackSelection?)
-    fun selectSubtitleTrack(selection: TrackSelection?)
+    /** 返回真实结果；不得静默丢弃用户可见的轨道选择（#80）。 */
+    fun selectAudioTrack(selection: TrackSelection?): TrackSelectionResult
+    fun selectSubtitleTrack(selection: TrackSelection?): TrackSelectionResult
     /** Native subtitle renderers consume persisted presentation; Media3 uses its SubtitleView. */
     fun setSubtitlePresentation(style: SubtitleStyle, sizeSp: Int) = Unit
     /**

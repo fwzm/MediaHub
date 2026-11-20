@@ -41,6 +41,7 @@ import com.mediahub.player.compatibility.DevicePlaybackAssessment
 import com.mediahub.player.compatibility.DevicePlaybackAssessor
 import com.mediahub.player.engine.SwitchablePlaybackEngine
 import com.mediahub.player.engine.TrackSelection
+import com.mediahub.player.engine.TrackSelectionResult
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.DiscoveredSubtitle
 import com.mediahub.provider.api.ProviderException
@@ -199,6 +200,14 @@ class PlayerViewModel @Inject constructor(
 
     /** 当前内核（UI 徽标/诊断）。 */
     val engineKind: StateFlow<com.mediahub.player.engine.EngineKind> get() = switchableEngine.engineKind
+
+    /** 轨道选择被引擎拒绝时的如实提示（#80），展示后由 UI 消费。 */
+    private val _trackNotice = MutableStateFlow<String?>(null)
+    val trackNotice: StateFlow<String?> = _trackNotice.asStateFlow()
+
+    fun consumeTrackNotice() {
+        _trackNotice.value = null
+    }
 
 
     /**
@@ -375,14 +384,40 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    /** 音频轨手动选择：引擎拒绝时如实提示，不静默丢弃（#80）。 */
+    fun onAudioTrackSelected(selection: TrackSelection?) {
+        if (stopped) return
+        val result = engine.selectAudioTrack(selection)
+        if (result != TrackSelectionResult.APPLIED) {
+            _trackNotice.value = trackNoticeFor(result, "音频")
+        }
+    }
+
     /** 内嵌字幕轨手动选择：标记本会话手动优先，迟到的发现/记忆不再覆盖。 */
     fun onEmbeddedSubtitleSelected(selection: TrackSelection?) {
         if (stopped) return
-        if (!engine.isTrackSelectionCurrent(selection)) return
+        if (!engine.isTrackSelectionCurrent(selection)) {
+            _trackNotice.value = trackNoticeFor(TrackSelectionResult.STALE, "字幕")
+            return
+        }
+        // 先交给引擎；被拒绝时不得把本会话标记为“手动优先”（#80）。
+        val result = engine.selectSubtitleTrack(selection)
+        if (result != TrackSelectionResult.APPLIED) {
+            _trackNotice.value = trackNoticeFor(result, "字幕")
+            return
+        }
         beginManualSubtitleOperation()
-        engine.selectSubtitleTrack(selection)
         _subtitleCenter.update { it.copy(selectedExternalId = null) }
         persistMemory(subtitleId = null)
+    }
+
+    private fun trackNoticeFor(result: TrackSelectionResult, kind: String): String = when (result) {
+        TrackSelectionResult.APPLIED -> ""
+        TrackSelectionResult.STALE -> "${kind}列表已更新，请重新选择"
+        TrackSelectionResult.TRACKS_UNAVAILABLE -> "暂时读不到${kind}轨道，请稍后重试"
+        TrackSelectionResult.NO_RENDERER -> "当前内核不支持${kind}轨道切换"
+        TrackSelectionResult.TRACK_UNAVAILABLE -> "该${kind}轨道当前不可用"
+        TrackSelectionResult.ENGINE_NOT_READY -> "播放器尚未就绪"
     }
 
     /**

@@ -17,6 +17,30 @@ package com.mediahub.player.engine
  * [snapshotToken] 是生成该地址的轨道快照标识；[PlaybackEngine] 在应用前校验它，旧快照的
  * 行回调不会误选新快照中的同号轨道。null 表示调用方不绑定快照（测试与兼容路径）。
  */
+/**
+ * 轨道选择请求的真实结果（#80）。引擎不得静默丢弃用户选择：
+ * UI 依据本结果提示“列表已更新/轨道不可用”，而不是假装切换成功。
+ */
+enum class TrackSelectionResult {
+    /** 选择已下发并生效。 */
+    APPLIED,
+
+    /** 行来自旧快照（或引擎已替换），请求未下发。 */
+    STALE,
+
+    /** 引擎尚未发布可用的轨道映射（例如尚未 onTracksChanged）。 */
+    TRACKS_UNAVAILABLE,
+
+    /** 该轨道类型没有可用 renderer。 */
+    NO_RENDERER,
+
+    /** 组序号/轨序号在映射中不存在。 */
+    TRACK_UNAVAILABLE,
+
+    /** 引擎尚未就绪（无当前播放实例）。 */
+    ENGINE_NOT_READY,
+}
+
 data class TrackSelection(
     val groupIndex: Int,
     val trackIndex: Int,
