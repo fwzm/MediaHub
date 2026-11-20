@@ -13,6 +13,7 @@ import com.mediahub.model.ServerType
 import com.mediahub.provider.api.ConnectionStatus
 import com.mediahub.provider.api.ProviderException
 import java.io.IOException
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * 媒体服务器型 Provider 的共享基类（Emby / Jellyfin / Plex 等）。
@@ -40,6 +41,11 @@ abstract class BaseMediaServerProvider(
         try {
             block()
         } catch (e: ProviderException) {
+            throw e
+        } catch (e: CancellationException) {
+            // 协程取消必须原实例透传（全项目不可吞红线）：它 is Exception，
+            // 若落到末尾的 catch (e: Exception) 会被包装成 ProviderException.Unknown，
+            // 上层就无法区分「用户离开页面/超时」与「服务器真的出错」。
             throw e
         } catch (e: ApiException) {
             logger.w(LogTag.PROVIDER, e.toLogString())
