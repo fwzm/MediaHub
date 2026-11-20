@@ -201,6 +201,27 @@ class EmbyPlaybackProviderTest {
         assertEquals("mkv", source.container)
     }
 
+    // ---- 3b：审计 #11——源时长缺失/非正时回退到条目时长 ----
+    @Test
+    fun `missing or non-positive source runtime falls back to item runtime`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"PlaySessionId":"ps-1","MediaSources":[
+                    {"Id":"src1","Container":"mkv","RunTimeTicks":0,
+                     "SupportsDirectStream":true,
+                     "MediaStreams":[{"Index":0,"Type":"Video","Codec":"hevc"}]}]}"""
+            )
+        )
+
+        val source = provider().resolvePlayback(
+            movie.copy(runtimeMs = 3_600_000L),
+            PlaybackOptions(),
+        )
+
+        assertEquals(3_600_000L, source.durationMs)
+    }
+
     // ---- 4：ExtendedVideoType → Dolby Vision ----
     @Test
     fun `dolby vision detected via extended video type`() = runBlocking {

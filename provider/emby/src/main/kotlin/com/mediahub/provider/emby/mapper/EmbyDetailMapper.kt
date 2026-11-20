@@ -21,7 +21,13 @@ object EmbyDetailMapper {
 
     /** 条目映射失败（如 Id 缺失）返回 null，由调用方报错。 */
     fun mapDetail(dto: EmbyUserItemDto, serverId: String): MediaDetail? {
-        val item = EmbyMediaItemMapper.map(dto, serverId) ?: return null
+        val mappedItem = EmbyMediaItemMapper.map(dto, serverId) ?: return null
+        val item = mappedItem.copy(
+            runtimeMs = mappedItem.runtimeMs
+                ?: dto.mediaSources.firstNotNullOfOrNull { source ->
+                    source.runTimeTicks?.takeIf { it > 0L }?.div(TICKS_PER_MILLIS)
+                },
+        )
         return MediaDetail(
             item = item,
             versions = dto.mediaSources.map { mapVersion(it) },
