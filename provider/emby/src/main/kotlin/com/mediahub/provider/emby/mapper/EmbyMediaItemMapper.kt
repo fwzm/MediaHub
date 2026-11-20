@@ -70,7 +70,7 @@ object EmbyMediaItemMapper {
             overview = dto.overview,
             genres = dto.genres,
             year = dto.productionYear,
-            runtimeMs = dto.runTimeTicks?.div(TICKS_PER_MILLIS),
+            runtimeMs = dto.runTimeTicks?.takeIf { it > 0L }?.div(TICKS_PER_MILLIS),
             communityRating = dto.communityRating,
             criticRating = dto.criticRating,
             officialRating = dto.officialRating,

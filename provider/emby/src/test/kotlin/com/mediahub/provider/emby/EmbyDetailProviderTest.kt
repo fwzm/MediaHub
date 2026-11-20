@@ -164,6 +164,24 @@ class EmbyDetailProviderTest {
         assertTrue(thrown is ProviderException.Parse)
     }
 
+    @Test
+    fun `item without runtime falls back to first positive media source runtime`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"Id":"m1","Name":"电影A","Type":"Movie","Container":"mkv",
+                    "MediaSources":[
+                      {"Id":"src1","Container":"mkv","SupportsDirectStream":true},
+                      {"Id":"src2","Container":"mp4","RunTimeTicks":36000000000,
+                       "SupportsDirectStream":true}]}"""
+            )
+        )
+
+        val detail = provider().getItemDetail("m1")
+
+        assertEquals(3_600_000L, detail.item.runtimeMs)
+    }
+
     private class FakeSecretStorage : SecretStorage {
         private val map = mutableMapOf<String, String>()
         override suspend fun put(key: String, value: String) { map[key] = value }

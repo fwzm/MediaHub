@@ -66,3 +66,21 @@ class EmbyProviderIdsMappingTest {
         assertEquals("12", item.externalIds?.tvdb)
     }
 }
+
+// ---- 审计 #11：异常 RunTimeTicks 不得以 0/负值进入领域层 ----
+
+class EmbyRuntimeSanityTest {
+    @Test
+    fun `zero and negative runtime ticks map to null`() {
+        val zero = EmbyMediaItemMapper.map(
+            EmbyBaseItemDto(id = "m1", name = "零时长", type = "Movie", runTimeTicks = 0L),
+            "srv-1",
+        )!!
+        val negative = EmbyMediaItemMapper.map(
+            EmbyBaseItemDto(id = "m2", name = "负时长", type = "Movie", runTimeTicks = -10_000L),
+            "srv-1",
+        )!!
+        assertNull(zero.runtimeMs)
+        assertNull(negative.runtimeMs)
+    }
+}

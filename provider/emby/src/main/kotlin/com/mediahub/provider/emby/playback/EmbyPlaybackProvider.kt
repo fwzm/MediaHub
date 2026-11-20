@@ -103,7 +103,8 @@ class EmbyPlaybackProvider(
                     extendedVideoType = video?.extendedVideoType,
                     extendedVideoSubType = video?.extendedVideoSubType,
                 ),
-                durationMs = source.runTimeTicks?.div(TICKS_PER_MILLIS),
+                durationMs = source.runTimeTicks?.takeIf { it > 0L }?.div(TICKS_PER_MILLIS)
+                    ?: item.runtimeMs?.takeIf { it > 0L },
                 mode = PlaybackMode.DIRECT_STREAM,
                 // PlaybackInfo 真值（非空已校验）：进度上报三端点必需，
                 // 缺失时真实 Emby 4.x 回 400 null-key（1H 真机 + curl 矩阵实证）
