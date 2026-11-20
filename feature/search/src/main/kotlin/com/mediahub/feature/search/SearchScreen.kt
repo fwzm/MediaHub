@@ -44,6 +44,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.MediaHubCard
 import com.mediahub.core.ui.MediaHubLabel
 import com.mediahub.core.ui.MediaHubStatus
+import com.mediahub.core.ui.MediaHubThumbnailTokens
 import com.mediahub.core.ui.PosterImage
 import com.mediahub.core.ui.ThumbImage
 import com.mediahub.feature.search.engine.GlobalSearchState
@@ -249,13 +250,13 @@ private fun MultiSourceCard(
                 ThumbImage(
                     url = first.posterUrl,
                     contentDescription = first.title,
-                    modifier = Modifier.width(120.dp),
+                    modifier = Modifier.width(MediaHubThumbnailTokens.THUMB_16X9_WIDTH_DP.dp),
                 )
             } else {
                 PosterImage(
                     url = first.posterUrl,
                     contentDescription = first.title,
-                    modifier = Modifier.width(96.dp),
+                    modifier = Modifier.width(MediaHubThumbnailTokens.POSTER_WIDTH_DP.dp),
                 )
             }
             Spacer(Modifier.width(16.dp))
@@ -297,13 +298,13 @@ private fun SearchHitRow(hit: UnifiedSearchHit, onClick: () -> Unit) {
                 ThumbImage(
                     url = item.posterUrl,
                     contentDescription = item.title,
-                    modifier = Modifier.width(120.dp),
+                    modifier = Modifier.width(MediaHubThumbnailTokens.THUMB_16X9_WIDTH_DP.dp),
                 )
             } else {
                 PosterImage(
                     url = item.posterUrl,
                     contentDescription = item.title,
-                    modifier = Modifier.width(96.dp),
+                    modifier = Modifier.width(MediaHubThumbnailTokens.POSTER_WIDTH_DP.dp),
                 )
             }
             Spacer(Modifier.width(16.dp))
