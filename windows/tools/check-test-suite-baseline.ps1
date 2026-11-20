@@ -166,9 +166,42 @@
 #   the TeamTest 2010 namespace, a creation and a queueing instant that carry an
 #   explicit UTC offset and are readable, and creation before queueing; the ladder
 #   line records runDeclarations=<facts>/4 namespace=<ns> timestamps=<n> ordered=<0|1>
-#   explicit offsets=<n> outside window=<n>. A creation or queueing instant later
-#   than the run finished is a warning, not a red: clock skew between the writer and
-#   the runner is not something this gate can decide.
+#   explicit offsets=<n> outside window=<n> windowOffsets=<n>/2. A creation or queueing
+#   instant later than the run finished is a warning, not a red: clock skew between the
+#   writer and the runner is not something this gate can decide.
+#
+#   The window itself is declared by Times/@start and Times/@finish, and neither was
+#   required to carry an explicit offset. DateTimeOffset.Parse reads a bare local time
+#   as the host's own zone, so one results file bounds a different interval on every
+#   machine while every count, row timing and phase line stays identical; the offset
+#   requirement above covered only the two stamps. Both window instants now require an
+#   explicit UTC offset, and the ladder line adds windowOffsets=<n>/2. A window instant
+#   that is absent or unreadable stays a warning: a TRX without a usable window can be
+#   reported, but not placed.
+#
+#   The result rows also carry their own start and end instants, and neither was
+#   required to carry an explicit offset. The window check above compares them with
+#   Times/@start and Times/@finish, but a bare local time in a row is read in the
+#   host's own zone too: the same row moves by hours on another machine while every
+#   count, phase line and duration stays identical. Every row's startTime and endTime
+#   now require an explicit UTC offset; the ladder line adds rowTimeOffsets=<n>/<2n>.
+
+#   The sections themselves also have an order, and nothing above read it: the six
+#   names are counted wherever they appear and TestSettings is counted on its own,
+#   so a file that moves TestSettings behind Results or lifts Results above Times
+#   keeps every count, every pairing, every row time and every phase line identical
+#   while it stops being the shape VSTest writes. The gate now walks the direct
+#   children of TestRun in document order, requires the canonical sequence Times,
+#   TestSettings, Results, TestDefinitions, TestEntries, TestLists, ResultSummary,
+#   and prints runSections=<n>/7 on the structure ladder line.
+
+#   The durations have a shape as well, and nothing above read it: a duration is
+#   parsed with [TimeSpan]::Parse, which accepts 0:0:1, 00:00:01, 1.00:00:00 and
+#   00:00:01.5 as readily as the sixteen character form the writer emits. A row
+#   whose duration was rewritten by hand therefore reads as a perfectly good
+#   number, keeps every drift warning quiet and moves nothing on any ladder line.
+#   The gate now requires every row duration to be written as hh:mm:ss.fffffff
+#   and prints durationShape=<n>/<rows> on the row ladder line.
 
 #   The rows also carry an order, and nothing above read it: TestEntries and the
 #   Results section are written from one ordered pass, so the row at position N is
@@ -179,6 +212,101 @@
 #   the run in the order it wrote it. The gate now walks both lists position by
 #   position, requires the two to name the same test, and prints the ladder line
 #   rowOrder=<positions> aligned=<n> first mismatch=<none|n>.
+
+#   The rows also record the evidence behind a failure, and nothing above read it:
+#   a failed row carries Output/ErrorInfo with the message and stack the runner
+#   captured, a passing row carries none, and one row carries at most one such
+#   block. Every count above is read from outcome names and metadata, so a file
+#   whose failed rows lost their evidence, whose passing rows still carry a stale
+#   stack, or whose row carries the same failure twice keeps all of them identical
+#   while the report no longer explains what went wrong. The gate now requires
+#   Failed/Error rows to carry exactly one ErrorInfo with a non-blank Message,
+#   forbids ErrorInfo on a Passed row, and refuses a row with more than one
+#   ErrorInfo; the ladder line records failureEvidence=<rows> failed=<with>/<failed>
+#   passed=<with>/<passed> blankMessages=<n> duplicates=<n>. StackTrace is recorded
+#   but not required: a producer may report a message without a stack, and
+#   requiring it would accuse a shape this gate cannot prove.
+
+#   The runner also writes ResultSummary/RunInfos: one item per failure, carrying
+#   the failed test's display name in its Text. Nothing above reads it, so a file
+#   whose failure list was dropped, duplicated, or left behind by an earlier green
+#   run keeps every count and every ErrorInfo above identical. The gate now requires
+#   the list to describe the Failed/Error rows one for one: the same number of items
+#   as failed rows, every failed row named exactly once, no item naming a passing
+#   row, a non-blank Text, a timestamp inside the run window, a machine that matches
+#   the rows, and an outcome that does not claim success; the ladder line records
+#   runInfos=<n> failedRows=<n> matched=<n> passed=<n> unmatched=<n> outside=<n>
+#   blankText=<n> wrongMachine=<n>.
+
+#   The failure log is also one ordered list, not a bag of individually valid
+#   items. Two items can be swapped, or the [xUnit.net ...] clock in one Text
+#   edited, while every item keeps its own name, machine, outcome, row window and
+#   canonical envelope; the log then no longer reads in the order the run
+#   produced it. The gate now requires both the Text clock and the item
+#   timestamp to be nondecreasing in list order; the ladder line records
+#   runInfoChronology=<in-order>/<items>.
+
+#   The summary also carries the runner's own console output: ResultSummary/Output/
+#   StdOut is what the test host printed while it discovered and ran this suite.
+#   Nothing above reads it, so a file whose output block was dropped, duplicated,
+#   blanked or copied from another suite keeps every count, every ErrorInfo and
+#   every RunInfo identical while the report no longer shows what the host ran.
+#   The gate now requires exactly one Output and one StdOut, a non-blank StdOut,
+#   and a StdOut that names the suite it belongs to; the ladder line records
+#   summaryOutput=<n> stdout=<n> nonBlank=<0|1> suiteNamed=<0|1>.
+
+#   The run's name and its creation stamp are two descriptions of the same act.
+#   TestRun/@name carries "<user>@<machine> <date> <time>" and Times/@creation
+#   carries the machine instant, but no check above compared the two. A header
+#   whose creation stamp was shifted, or whose name was rewritten together with
+#   its deployment root, keeps every count, every row time and every header
+#   derivation identical while the report names a run that did not produce it.
+#   The gate now requires the name's date and time to match Times/@creation to
+#   the second; the ladder line records nameStamp=<0|1>.
+
+#   The console text is also a phase ledger: the host announces Discovering,
+#   Discovered, Starting and Finished for this suite, in that order, exactly once
+#   each. Layer 24 only asks whether the suite name appears somewhere in the
+#   text, so a StdOut copied from another suite and edited to mention this one
+#   can keep every count identical while the report no longer shows that this
+#   suite was discovered and run. The gate now requires one line per phase
+#   naming this suite, in that order, and the ladder line records
+#   phaseLedger=<n>/4 ordered=<0|1>.
+
+#   That ledger only reads where each phase line sits, not the clock in front of
+#   it. A clock edited to a different instant, two clocks in the wrong order, or a
+#   failure log whose last [xUnit.net ...] clock runs past Finished keeps every
+#   phase line in place while the console text stops reading in the order the host
+#   reported. The gate now requires one canonical clock per phase, nondecreasing in
+#   phase order, and Finished not earlier than the last RunInfo Text clock. The
+#   absolute run window is the other record: every phase clock must also sit at or
+#   before Times.finish - Times.start, so a Finished clock past the run's own end
+#   is red. The ladder line records
+#   phaseClock=<n>/4 ordered=<0|1> finishedAfterRunInfo=<0|1> withinRun=<0|1>.
+
+#   Those clocks are compared with each other, the run window and the last
+#   failure-log clock, but not with the result rows. A Starting clock moved later
+#   than the first row's own start keeps every phase line in place, every clock
+#   nondecreasing and the run window intact while the console says the host
+#   started after a test had already begun. The gate now also requires the
+#   Starting clock to sit at or before the earliest result row's start relative
+#   to Times.start. The ladder line records firstRowAfterStart=<0|1>.
+
+#   That clock and each RunInfo clock are relative to the run's start, while every
+#   RunInfo also carries an absolute timestamp. The writer emits the item a little
+#   after the test ends, so timestamp - Times.start - Text clock is a constant for
+#   one run. A Text clock copied from another run, or a timestamp moved from
+#   another failure, keeps order, row window and canonical envelope intact while
+#   the two views stop describing the same instant. The gate now requires every
+#   such offset to sit within 100 ms of the first; the ladder line records
+#   runInfoOffset=<bound>/<items>.
+
+#   Every RunInfo also carries an absolute timestamp, and no check above reads the
+#   zone it declares: an item written without one is parsed in the host's own zone,
+#   so the same failure log places its items hours apart on two machines while the
+#   item list, its order, its row window and the clock/timestamp offset all stay
+#   unchanged. The gate now requires every RunInfo timestamp to carry an explicit
+#   UTC offset; the runInfos ladder line records timestampOffsets=<n>/<items>.
 
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
@@ -201,6 +329,74 @@
 #     own results file -> red (the entry is wired to another suite's results)
 #   per-row outcomes disagree with the run's own Counters -> red
 #     (the summary is not trusted on its own; the rows are counted, total included)
+#   a Failed or Error row with no Output/ErrorInfo, an ErrorInfo whose Message is
+#     blank, a Passed row that carries Output/ErrorInfo, or one row carrying more
+#     than one ErrorInfo -> red: the row's own failure evidence contradicts the
+#     verdict it reports, and no count above reads the evidence block
+#   a ResultSummary/RunInfos list that does not describe the Failed/Error rows one
+#     for one - wrong item count, an item naming a passing row or no row, a blank
+#     Text, a timestamp outside Times, another machine, or an outcome that claims
+#     success - -> red: the failure log and the verdicts are two halves of the same
+#     report and no count above compares them
+#   a RunInfo that carries zero or more than one direct Text child -> red: the
+#     item's text is the only place its test name lives, and a duplicated or
+#     missing Text leaves the item list, timestamps and outcomes intact while
+#     the failure log no longer names one test per item.
+#   a RunInfo Text that is not exactly one Failed/Error row name once the
+#     writer's own [xUnit.net ...] prefix and [FAIL] suffix are removed -> red:
+#     the list check above only proves the name appears somewhere in the line,
+#     so extra text around it leaves the item count and every other field intact.
+#   a RunInfo Text whose envelope is not the canonical xUnit writer line -> red:
+#     the exact-name check strips whatever looks like an envelope, so a bare
+#     name, another clock precision, a tab or a wider gap still names the row
+#     while the failure log is no longer the writer's own line.
+#   a failure log split across more than one ResultSummary/RunInfos block, an
+#     empty RunInfos block beside the one that carries the items, or a RunInfos
+#     block outside ResultSummary -> red: the block is one container, and its
+#     placement is part of the summary's shape even when its item list is intact.
+#   a RunInfo item outside the one ResultSummary/RunInfos block, or a Deployment
+#     element outside TestSettings -> red: the block counts only see containers,
+#     so a parked item or a second deployment record keeps every count and its
+#     own text intact while the report assigns the run to two owners.
+#   a RunInfo timestamp that falls outside the named row's own start/end window
+#     (1 s before start through 5 s after end) -> red: the envelope and identity
+#     checks never compare the item clock to the row it names, so a timestamp
+#     moved from another failure keeps every item and name intact.
+#   the failure log no longer reads in chronological order - two RunInfo items
+#     swapped, or the [xUnit.net ...] clock in one Text edited, while every item
+#     keeps its own name, machine, outcome, row window and canonical envelope ->
+#     red: the log is one ordered list, and both its Text clock and its item
+#     timestamp must be nondecreasing.
+#   a ResultSummary/Output/StdOut block that is missing, duplicated, blank, or
+#     whose text does not name the suite the file belongs to -> red: the console
+#     output is the host's record of what it ran, and a summary whose output block
+#     was dropped, copied from another suite, or left stale keeps every count
+#     identical.
+#   the ResultSummary/Output/StdOut phase lines (Discovering / Discovered /
+#     Starting / Finished) are missing, repeated, name another suite, or appear
+#     out of order -> red: the console text still names the suite somewhere, but
+#     no longer shows that this host discovered, started and finished it.
+#   a phase line whose [xUnit.net ...] clock is missing or unreadable, phase
+#     clocks that are not nondecreasing in phase order, or a Finished clock
+#     earlier than the last RunInfo Text clock -> red: the phase ledger above
+#     only reads where the lines sit, so edited clocks keep every line in place
+#     while the console text stops reading in the order the host reported.
+#   a phase clock that runs past the run's own Times window
+#     (Times.finish - Times.start) -> red: the relative console clock and the
+#     absolute run window are two records of one run, and the phase ledger above
+#     only compares the clocks with each other and with the last failure-log clock.
+#   a Starting phase clock later than the earliest result row's own start
+#     -> red: the phase ledger only compares the clocks with each other, the run
+#     window and the last failure-log clock, so the host can claim it started
+#     after a row already began while every phase line and count stays intact.
+#   a RunInfo Text clock and its item timestamp whose offset from Times.start
+#     differs by more than 100 ms from the run's first item -> red: the row-clock
+#     and chronology checks read each item on its own and only in order, so a
+#     copied clock or a borrowed timestamp keeps every name, row window and order
+#     intact while the two views stop describing the same instant.
+#   the date and time embedded in TestRun/@name disagree with Times/@creation
+#     -> red: the run's two self-descriptions name different creation instants,
+#        even while every count and every row timing stays unchanged.
 #   an outcome kind the baseline did not have appears, or a baseline outcome
 #     reports fewer rows -> red; an outcome reporting more rows -> green + warning
 #   a test id that is not unique inside one TRX, a definition whose id has no
@@ -258,6 +454,55 @@
 #   the schema namespace is not the TeamTest 2010 one, or Times records no creation
 #     or no queueing instant, or either instant cannot be read or carries no explicit
 #     UTC offset, or the run is queued before it is created -> red
+#   Times/@start or Times/@finish carries no explicit UTC offset -> red: the window
+#     is then read in the host's own zone, so one file bounds a different interval on
+#     every machine while every count, row timing and phase line stays unchanged; the
+#     ladder line records windowOffsets=<n>/2. An absent or unreadable window remains
+#     a warning, because a run that records no window can be reported but not placed.
+#   a UnitTestResult/@startTime or @endTime carries no explicit UTC offset -> red: the
+#     row is then read in the host's own zone, so the same row moves by hours on another
+#     machine while every count, row timing and phase line stays unchanged; the ladder
+#     line records rowTimeOffsets=<n>/<2n>. An absent or unreadable row instant remains
+#     covered by the row metadata bullet above.
+#   a failed run that does not carry exactly one ResultSummary/RunInfos container,
+#     a run without Failed/Error rows that carries more than one, or any RunInfos
+#     block outside ResultSummary -> red
+#   a RunInfo whose direct Text children are not exactly one -> red (the item's
+#     only name was duplicated, split or dropped while the item itself survives)
+#   a RunInfo Text that, after the xUnit timestamp prefix and [FAIL] suffix are
+#     removed, is not exactly one Failed/Error row name -> red (the list check
+#     only proves containment, so a prefixed or suffixed line passed while the
+#     item no longer names one test).
+#   a RunInfo Text whose envelope is not the canonical xUnit writer line -> red
+#     (a bare name, another timestamp precision, a tab or a wider gap, or
+#     trailing text leaves the item list and the exact name intact when only
+#     the name is compared).
+#   a RunInfo item outside the one ResultSummary/RunInfos block, or a Deployment
+#     element outside TestSettings -> red (the block counts above only count the
+#     containers, so a parked item still leaves every count and its own Text
+#     intact while the report has two owners for the same run).
+#   a RunInfo timestamp that falls outside the named row's own start/end window
+#     (1 s before start through 5 s after end) -> red (the line can still name
+#     the right row while its clock belongs to a different execution).
+#   a RunInfo/@timestamp that carries no explicit UTC offset -> red: the item is
+#     then placed in the host's own zone, so the same failure log lands hours away
+#     on another machine while the item list, its order, its row window and the
+#     clock/timestamp offset stay identical; the runInfos ladder line records
+#     timestampOffsets=<n>/<items>.
+#
+#   the direct children of TestRun are not the canonical sequence Times,
+#     TestSettings, Results, TestDefinitions, TestEntries, TestLists,
+#     ResultSummary in that order -> red: the sections are emitted in one pass, so
+#     a moved section means the file was reassembled while every count and every
+#     pairing above stays identical; the structure ladder line records
+#     runSections=<positions that agree>/7.
+
+#   a UnitTestResult/@duration is not written as hh:mm:ss.fffffff -> red: the
+#     value is parsed with [TimeSpan]::Parse, which accepts 0:0:1, 00:00:01,
+#     1.00:00:00 and 00:00:01.5, so a duration rewritten by hand reads as a
+#     perfectly good number while every count, every drift warning and every
+#     ladder line stays identical. The row ladder line records
+#     durationShape=<rows in the canonical shape>/<rows>.
 
 #   the row at position N of Results does not name the test that position N of
 #     TestEntries declares -> red. The two sections are emitted from one ordered
@@ -627,6 +872,7 @@ foreach ($e in $baseline.suites) {
   $declarationFacts = 0
   $declarationOrdered = 0
   $declarationOffsets = 0
+  $declarationWindowOffsets = 0
   $declarationOutside = 0
   $declarationNamesOk = 0
   if ([string]::IsNullOrWhiteSpace($declarationSchema)) {
@@ -656,6 +902,18 @@ foreach ($e in $baseline.suites) {
     }
     $declarationOffsets++
   }
+  if ($xml.TestRun.Times) {
+    foreach ($stamp in @(@('start', [string]$xml.TestRun.Times.start), @('finish', [string]$xml.TestRun.Times.finish))) {
+      $stampName = [string]$stamp[0]
+      $stampRaw = [string]$stamp[1]
+      if ([string]::IsNullOrWhiteSpace($stampRaw)) { continue }
+      if ($stampRaw -notmatch '([+-][0-9]{2}:[0-9]{2}|Z)$') {
+        $declarationLost += "Times.$stampName '$stampRaw' carries no explicit UTC offset"
+        continue
+      }
+      $declarationWindowOffsets++
+    }
+  }
   if ($null -ne $declarationCreation -and $null -ne $declarationQueuing) {
     if ($declarationQueuing -lt $declarationCreation) {
       $declarationLost += "Times queues the run before it creates it (creation $declarationCreationRaw, queuing $declarationQueuingRaw)"
@@ -680,10 +938,16 @@ foreach ($e in $baseline.suites) {
   $execIdCounts = @{}
   $blankExecIds = 0
   $rowCount = 0
+  $rowTimeOffsets = 0
+  $rowOffsetLost = 0
   $timeOrdered = 0
   $badTimes = 0
   $timeReversed = 0
   $badDuration = 0
+  # How many row durations are written in the canonical sixteen character shape,
+  # and how many are readable but written some other way.
+  $durShapeOk = 0
+  $durShapeLost = 0
   $durDrift = 0
   $inWindow = 0
   $outOfWindow = 0
@@ -701,8 +965,12 @@ foreach ($e in $baseline.suites) {
   $sectionBlocks = @{}
   foreach ($sbn in @('ResultSummary', 'Times', 'TestDefinitions', 'TestEntries', 'TestLists', 'Results')) { $sectionBlocks[$sbn] = 0 }
   $counterBlocks = 0
+  # The direct children of TestRun in document order, kept so the fixed sequence
+  # the writer emits can be checked (see the section-order check below).
+  $runChildOrder = New-Object System.Collections.Generic.List[string]
   foreach ($child in @($xml.TestRun.ChildNodes)) {
     $childName = [string]$child.LocalName
+    if ($child.NodeType -eq 'Element') { $runChildOrder.Add($childName) }
     if ($sectionBlocks.ContainsKey($childName)) { $sectionBlocks[$childName] = [int]$sectionBlocks[$childName] + 1 }
     if ($childName -eq 'ResultSummary') {
       foreach ($sub in @($child.ChildNodes)) { if ([string]$sub.LocalName -eq 'Counters') { $counterBlocks++ } }
@@ -1006,6 +1274,29 @@ foreach ($e in $baseline.suites) {
   $nameMismatch = @()
   $namesUnprovable = 0
   $unmapped = 0
+  $failedRows = 0
+  $passedRows = 0
+  $evidenceRows = 0
+  $failedWithEvidence = 0
+  $passedWithEvidence = 0
+  $failedNoEvidence = 0
+  $blankFailureText = 0
+  $duplicateEvidence = 0
+  $evidenceProblems = @()
+  $failedRowNames = @{}
+  $passedRowNames = @{}
+  $runInfoRows = 0
+  $runInfoMatched = 0
+  $runInfoDuplicates = 0
+  $runInfoForPassed = 0
+  $runInfoUnmatched = 0
+  $runInfoOutside = 0
+  $runInfoBlank = 0
+  $runInfoWrongMachine = 0
+  $runInfoBadOutcome = 0
+  $runInfoTimestampOffsets = 0
+  $runInfoTimestampOffsetLost = 0
+  $runInfoProblems = @()
   foreach ($res in @($xml.TestRun.Results.UnitTestResult)) {
     if ($null -eq $res) { continue }
     $rowCount++
@@ -1030,9 +1321,22 @@ foreach ($e in $baseline.suites) {
         $attrValues[$ak][$av] = $true
       }
     }
-    $rstart = Convert-ToInstant ([string]$res.startTime)
-    $rend = Convert-ToInstant ([string]$res.endTime)
-    $rms = Convert-ToMillis ([string]$res.duration)
+    $rstartRaw = [string]$res.startTime
+    $rendRaw = [string]$res.endTime
+    $rstart = Convert-ToInstant $rstartRaw
+    $rend = Convert-ToInstant $rendRaw
+    $rdurRaw = [string]$res.duration
+    $rms = Convert-ToMillis $rdurRaw
+    if ($rdurRaw -cmatch '^[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{7}$') {
+      $durShapeOk++
+    } else {
+      $durShapeLost++
+    }
+    foreach ($rowStampRaw in @($rstartRaw, $rendRaw)) {
+      if (-not [string]::IsNullOrWhiteSpace($rowStampRaw) -and $rowStampRaw -match '([+-][0-9]{2}:[0-9]{2}|Z)$') { $rowTimeOffsets++ }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($rstartRaw) -and $rstartRaw -notmatch '([+-][0-9]{2}:[0-9]{2}|Z)$') { $rowOffsetLost++ }
+    if (-not [string]::IsNullOrWhiteSpace($rendRaw) -and $rendRaw -notmatch '([+-][0-9]{2}:[0-9]{2}|Z)$') { $rowOffsetLost++ }
     if ($null -eq $rstart -or $null -eq $rend) {
       $badTimes++
     } else {
@@ -1090,6 +1394,51 @@ foreach ($e in $baseline.suites) {
     $oc = [string]$res.outcome
     if ([string]::IsNullOrWhiteSpace($oc)) { $oc = "(missing)" }
     if ($actualOutcomes.ContainsKey($oc)) { $actualOutcomes[$oc] = $actualOutcomes[$oc] + 1 } else { $actualOutcomes[$oc] = 1 }
+    if ($oc -eq 'Passed') { $passedRows++ }
+    if ($oc -eq 'Failed' -or $oc -eq 'Error') { $failedRows++ }
+    $rowDisplayName = [string]$res.testName
+    if (-not [string]::IsNullOrWhiteSpace($rowDisplayName)) {
+      if ($oc -eq 'Passed') {
+        $passedRowNames[$rowDisplayName] = $true
+      } elseif ($oc -eq 'Failed' -or $oc -eq 'Error') {
+        $failedRowNames[$rowDisplayName] = $true
+      }
+    }
+    $rowEvidence = @()
+    foreach ($rowOutput in @($res.ChildNodes)) {
+      if ([string]$rowOutput.LocalName -ne 'Output') { continue }
+      foreach ($rowOutputChild in @($rowOutput.ChildNodes)) {
+        if ([string]$rowOutputChild.LocalName -eq 'ErrorInfo') { $rowEvidence += $rowOutputChild }
+      }
+    }
+    if ($rowEvidence.Count -gt 0) {
+      $evidenceRows++
+      $evidenceText = ""
+      foreach ($evidenceChild in @($rowEvidence[0].ChildNodes)) {
+        if ([string]$evidenceChild.LocalName -eq 'Message') { $evidenceText = [string]$evidenceChild.InnerText; break }
+      }
+      if ($rowEvidence.Count -gt 1) {
+        $duplicateEvidence++
+        if ($evidenceProblems.Count -lt 12) { $evidenceProblems += "$cls (outcome $oc) carries $($rowEvidence.Count) ErrorInfo elements" }
+      }
+      if ($oc -eq 'Passed') {
+        $passedWithEvidence++
+        if ($evidenceProblems.Count -lt 12) {
+          $preview = $evidenceText
+          if ($preview.Length -gt 60) { $preview = $preview.Substring(0, 60) + "..." }
+          $evidenceProblems += "$cls reports Passed while carrying failure evidence: '$preview'"
+        }
+      } elseif ($oc -eq 'Failed' -or $oc -eq 'Error') {
+        $failedWithEvidence++
+        if ([string]::IsNullOrWhiteSpace($evidenceText)) {
+          $blankFailureText++
+          if ($evidenceProblems.Count -lt 12) { $evidenceProblems += "$cls reports $oc with a blank failure Message" }
+        }
+      }
+    } elseif ($oc -eq 'Failed' -or $oc -eq 'Error') {
+      $failedNoEvidence++
+      if ($evidenceProblems.Count -lt 12) { $evidenceProblems += "$cls reports $oc with no ErrorInfo at all" }
+    }
   }
   if ($unmapped -gt 0) {
     $orphanResIds = @($resIdCounts.Keys | Where-Object { -not $defIdCounts.ContainsKey($_) } | Sort-Object)
@@ -1144,12 +1493,14 @@ foreach ($e in $baseline.suites) {
       if ($rowAttrLost.Count -lt 12) { $rowAttrLost += "$ak is recorded nowhere in $($e.file)" }
     }
   }
+  if ($rowOffsetLost -gt 0) { $rowAttrLost += "$rowOffsetLost result row instant(s) carry no explicit UTC offset" }
   if ($badTimes -gt 0) { $rowAttrLost += "$badTimes row(s) carry an unreadable startTime or endTime" }
   if ($timeReversed -gt 0) { $rowAttrLost += "$timeReversed row(s) end before they start" }
   if ($badDuration -gt 0) { $rowAttrLost += "$badDuration row(s) carry an unreadable or negative duration" }
+  if ($durShapeLost -gt 0) { $rowAttrLost += "$durShapeLost row(s) carry a duration that is not written as hh:mm:ss.fffffff" }
   if ($outOfWindow -gt 0) { $rowAttrLost += "$outOfWindow row(s) fall outside the run's own Times window" }
   if ($rowAttrLost.Count -gt 0) {
-    throw "$($e.suite): the result rows contradict their own metadata while the total was $total - every count above is read from this file's rows, so rows that share an execution id, drop or mix a row attribute, or carry an impossible timestamp can keep all of them identical. broken: $($rowAttrLost -join ', '). A TRX whose rows disagree with themselves was hand-merged or patched; regenerate it from a clean test run."
+    throw "$($e.suite): the result rows contradict their own metadata while the total was $total - every count above is read from this file's rows, so rows that share an execution id, drop or mix a row attribute, or carry an impossible or zone-less timestamp or a duration written in another shape can keep all of them identical. broken: $($rowAttrLost -join ', '). A TRX whose rows disagree with themselves was hand-merged or patched; regenerate it from a clean test run."
   }
   if ($durDrift -gt 0) {
     $durWarn += "$($e.suite) ($durDrift row(s) report a duration that disagrees with their own start/end by more than a second)"
@@ -1229,6 +1580,22 @@ foreach ($e in $baseline.suites) {
     $shownGhost = @($ghostLists | Sort-Object)
     if ($shownGhost.Count -gt 12) { $shownGhost = $shownGhost[0..11] + "... ($($ghostLists.Count) total)" }
     $structureLost += "result row(s) ran in a list that TestLists does not declare (testId $($shownGhost -join ', '))"
+  }
+  # The sections also have an order, and nothing above read it: the six names are
+  # counted wherever they appear and TestSettings is counted on its own, so a file
+  # that moves TestSettings behind Results or lifts Results above Times keeps every
+  # count, every pairing, every row time and every phase line identical while it
+  # stops being the shape VSTest writes. The writer emits one fixed sequence, so
+  # walk the direct children in document order and require exactly that sequence.
+  $runSectionOrder = @('Times', 'TestSettings', 'Results', 'TestDefinitions', 'TestEntries', 'TestLists', 'ResultSummary')
+  $runSectionMatches = 0
+  for ($si = 0; $si -lt $runSectionOrder.Count; $si++) {
+    if ($si -lt $runChildOrder.Count -and $runChildOrder[$si] -eq $runSectionOrder[$si]) { $runSectionMatches++ }
+  }
+  if ($runChildOrder.Count -ne $runSectionOrder.Count -or $runSectionMatches -ne $runSectionOrder.Count) {
+    $shownOrder = 'none'
+    if ($runChildOrder.Count -gt 0) { $shownOrder = $runChildOrder -join '>' }
+    $structureLost += "TestRun declares its direct children as $shownOrder while the writer emits $($runSectionOrder -join '>')"
   }
   if ($structureLost.Count -gt 0) {
     throw "$($e.suite): the TRX sections do not agree with each other while the total was $total - the summary, the definitions, the result rows, the entry map and the declared lists all come from this file, so one that drops a section, adds or removes entries, or pairs an entry with the wrong execution id can keep every count above identical. mismatched: $($structureLost -join ', '). A TRX whose sections disagree was hand-merged or patched; regenerate it from a clean test run."
@@ -1406,6 +1773,577 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): $($e.file) disagrees with its own ResultSummary/Counters - the per-outcome rows do not reproduce the summary (total $total): $($counterMismatch -join '; '). The summary alone cannot be trusted; if the artifact came from another runner, teach the gate that vocabulary before trusting it."
   }
 
+  # The failure evidence is the only part of a failed row that says what went
+  # wrong, and no check above read it: every count comes from outcome names and
+  # row metadata, so a report whose failed rows lost their message, whose passed
+  # rows still carry a stale stack, or whose row carries the same failure twice
+  # keeps all of them identical. A Passed row carrying ErrorInfo is the sharpest
+  # case: the verdict and the text it ships contradict each other.
+  if ($evidenceProblems.Count -gt 0) {
+    throw "$($e.suite): the failure evidence in $($e.file) does not agree with the verdict each row reports while the total was $total - no count above reads the evidence block, so a file whose failed rows lost their message, whose passed rows carry a stale stack, or whose row carries the same failure twice can keep every count identical. broken: $($evidenceProblems -join ', '). A TRX whose failure evidence contradicts its own outcomes was hand-merged or patched; regenerate it from a clean test run."
+  }
+
+  # ResultSummary/RunInfos is the runner's failure log: one item per failed test,
+  # with that test's display name in Text. The rows and the log were written by the
+  # same run, so a log that lost an item, kept a stale one, named a passing row,
+  # carried a blank Text or a time outside the run window, or named another machine
+  # can leave every count and every ErrorInfo identical while the report no longer
+  # says which failures produced the run. The list is read by local name for the
+  # same adapter reason as ErrorInfo.
+  $runInfoNodes = @()
+  foreach ($summaryChild in @($xml.TestRun.ResultSummary.ChildNodes)) {
+    if ([string]$summaryChild.LocalName -ne 'RunInfos') { continue }
+    foreach ($runInfoChild in @($summaryChild.ChildNodes)) {
+      if ([string]$runInfoChild.LocalName -eq 'RunInfo') { $runInfoNodes += $runInfoChild }
+    }
+  }
+  $runInfoRows = @($runInfoNodes).Count
+  $failedRowNameList = @($failedRowNames.Keys)
+  $passedRowNameList = @($passedRowNames.Keys)
+  $runInfoRowMachine = ''
+  if ([int]$attrValues['computerName'].Count -eq 1) {
+    foreach ($rmk in @($attrValues['computerName'].Keys)) { $runInfoRowMachine = [string]$rmk }
+  }
+  $matchedFailedNames = @{}
+  foreach ($runInfo in @($runInfoNodes)) {
+    $runInfoText = ''
+    foreach ($runInfoChild in @($runInfo.ChildNodes)) {
+      if ([string]$runInfoChild.LocalName -eq 'Text') { $runInfoText = [string]$runInfoChild.InnerText; break }
+    }
+    $runInfoTimestampRaw = [string]$runInfo.timestamp
+    $runInfoStamp = Convert-ToInstant $runInfoTimestampRaw
+    if (-not [string]::IsNullOrWhiteSpace($runInfoTimestampRaw)) {
+      if ($runInfoTimestampRaw -match '([+-][0-9]{2}:[0-9]{2}|Z)$') {
+        $runInfoTimestampOffsets++
+      } else {
+        $runInfoTimestampOffsetLost++
+        if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo timestamp '$runInfoTimestampRaw' carries no explicit UTC offset" }
+      }
+    }
+    $runInfoMachine = [string]$runInfo.computerName
+    $runInfoOutcome = [string]$runInfo.outcome
+    if ([string]::IsNullOrWhiteSpace($runInfoText)) {
+      $runInfoBlank++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += 'a RunInfo carries no Text' }
+    }
+    if ($null -eq $runInfoStamp) {
+      $runInfoOutside++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += 'a RunInfo carries an unreadable timestamp' }
+    } elseif ($null -ne $tRunStart -and $null -ne $tRunFinish) {
+      if ($runInfoStamp -lt $tRunStart -or $runInfoStamp -gt $tRunFinish) {
+        $runInfoOutside++
+        if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo timestamp '$([string]$runInfo.timestamp)' is outside the run window" }
+      }
+    }
+    if ([string]::IsNullOrWhiteSpace($runInfoMachine)) {
+      $runInfoWrongMachine++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += 'a RunInfo names no machine' }
+    } elseif (-not [string]::IsNullOrWhiteSpace($runInfoRowMachine) -and -not [string]::Equals($runInfoMachine, $runInfoRowMachine, [System.StringComparison]::OrdinalIgnoreCase)) {
+      $runInfoWrongMachine++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo names machine '$runInfoMachine' while the rows ran on '$runInfoRowMachine'" }
+    }
+    if ([string]::IsNullOrWhiteSpace($runInfoOutcome)) {
+      $runInfoBadOutcome++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += 'a RunInfo names no outcome' }
+    } elseif ($runInfoOutcome -in @('Passed', 'Completed', 'Succeeded')) {
+      $runInfoBadOutcome++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo reports success ('$runInfoOutcome') inside the failure log" }
+    }
+    $bestName = ''
+    $bestOutcome = ''
+    foreach ($fn in $failedRowNameList) {
+      if ($runInfoText.IndexOf($fn, [System.StringComparison]::Ordinal) -ge 0 -and $fn.Length -gt $bestName.Length) {
+        $bestName = $fn
+        $bestOutcome = 'Failed'
+      }
+    }
+    foreach ($pn in $passedRowNameList) {
+      if ($runInfoText.IndexOf($pn, [System.StringComparison]::Ordinal) -ge 0 -and $pn.Length -gt $bestName.Length) {
+        $bestName = $pn
+        $bestOutcome = 'Passed'
+      }
+    }
+    if ($bestOutcome -eq 'Failed') {
+      $runInfoMatched++
+      if ($matchedFailedNames.ContainsKey($bestName)) {
+        $runInfoDuplicates++
+        if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo names '$bestName' more than once" }
+      } else {
+        $matchedFailedNames[$bestName] = $true
+      }
+    } elseif ($bestOutcome -eq 'Passed') {
+      $runInfoForPassed++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo names the passing row '$bestName'" }
+    } else {
+      $runInfoUnmatched++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo names no result row: '$runInfoText'" }
+    }
+  }
+  if ($runInfoRows -ne $failedRows) {
+    $runInfoProblems += "RunInfos carries $runInfoRows item(s) while $failedRows row(s) report Failed/Error"
+  }
+  if ($matchedFailedNames.Count -ne $failedRows) {
+    $runInfoProblems += "RunInfos names $($matchedFailedNames.Count) of $failedRows Failed/Error row(s)"
+  }
+  if ($runInfoProblems.Count -gt 0) {
+    throw "$($e.suite): the ResultSummary/RunInfos list in $($e.file) does not describe the Failed/Error rows one for one while the total was $total - the failure log and the verdicts are two halves of the same report, so a file whose log lost an item, kept a stale item, named a passing row, or moved an item outside the run window can keep every count and every ErrorInfo identical. broken: $($runInfoProblems -join ', '). A TRX whose failure log contradicts its own verdicts was hand-merged or patched; regenerate it from a clean test run."
+  }
+
+  # Each RunInfo is one failure-log item and its Text is the only child that
+  # names the test. A duplicated Text or a missing one leaves the item count,
+  # timestamp, machine and outcome identical while the item no longer has one
+  # unambiguous name. The check is kept separate from the item list above so a
+  # failure log with the right number of items still fails on its own shape.
+  $runInfoTextProblems = @()
+  $runInfoTextSingular = 0
+  foreach ($runInfo in @($runInfoNodes)) {
+    $runInfoTextChildren = @()
+    foreach ($runInfoChild in @($runInfo.ChildNodes)) {
+      if ([string]$runInfoChild.LocalName -eq 'Text') { $runInfoTextChildren += $runInfoChild }
+    }
+    if (@($runInfoTextChildren).Count -eq 1) {
+      $runInfoTextSingular++
+    } elseif ($runInfoTextProblems.Count -lt 12) {
+      $runInfoTextProblems += "a RunInfo carries $(@($runInfoTextChildren).Count) Text child element(s)"
+    }
+  }
+  if ($runInfoTextProblems.Count -gt 0) {
+    throw "$($e.suite): the RunInfo text layout in $($e.file) does not give every failure log item exactly one Text element while the total was $total - the item count, timestamp, machine and outcome can all stay identical while a duplicated or missing Text leaves the failure item without one unambiguous name. broken: $($runInfoTextProblems -join ', '). A TRX whose failure log item is not a single text node was hand-merged or patched; regenerate it from a clean test run."
+  }
+
+  # The list check above asks whether a failure-log line contains a failed row
+  # name, not whether that line names exactly one test. A line with extra prose
+  # before or after the name keeps every item, timestamp, machine and outcome
+  # identical while the log no longer has one unambiguous test per line. The
+  # xUnit writer wraps its console line in a timestamp prefix and a [FAIL]
+  # suffix; that envelope is stripped before the name is compared exactly.
+  $runInfoExactProblems = @()
+  $runInfoTextExact = 0
+  foreach ($runInfo in @($runInfoNodes)) {
+    $runInfoText = ''
+    foreach ($runInfoChild in @($runInfo.ChildNodes)) {
+      if ([string]$runInfoChild.LocalName -eq 'Text') { $runInfoText = [string]$runInfoChild.InnerText; break }
+    }
+    $runInfoExactName = ([string]$runInfoText).Trim()
+    $xunitEnvelope = [regex]::Match($runInfoExactName, '^\[xUnit\.net [0-9:.]+\]\s+(?<name>.+?)\s+\[FAIL\]$')
+    if ($xunitEnvelope.Success) { $runInfoExactName = $xunitEnvelope.Groups['name'].Value }
+    $exactHit = $false
+    foreach ($fn in $failedRowNameList) {
+      if ([string]::Equals($runInfoExactName, $fn, [System.StringComparison]::Ordinal)) { $exactHit = $true; break }
+    }
+    if ($exactHit) {
+      $runInfoTextExact++
+    } elseif ($runInfoExactProblems.Count -lt 12) {
+      $runInfoExactProblems += "a RunInfo Text is not exactly one Failed/Error row name: '$runInfoExactName'"
+    }
+  }
+  if ($runInfoExactProblems.Count -gt 0) {
+    throw "$($e.suite): the RunInfo text identity in $($e.file) does not name exactly one Failed/Error row while the total was $total - the item list above only asks whether a line contains a failed test name, so extra text before or after the name keeps every item, timestamp, machine and outcome identical while the failure log stops being one test per line. broken: $($runInfoExactProblems -join ', '). A TRX whose failure log line carries more than the test name was hand-merged or patched; regenerate it from a clean test run."
+  }
+
+  # The exact-name check above strips any line that resembles the envelope, so a
+  # bare name, a hand-written clock or a different gap still names the right row.
+  # The xUnit writer emits one fixed line: [xUnit.net hh:mm:ss.ff], five spaces,
+  # the test name, one space, [FAIL]. The failure log is that writer's line, not
+  # a template that happens to contain a name.
+  $runInfoEnvelopeProblems = @()
+  $runInfoTextCanonical = 0
+  $xunitCanonicalPattern = '\A\[xUnit\.net [0-9]{2}:[0-5][0-9]:[0-5][0-9]\.[0-9]{2}\] {5}\S(?:.*\S)? \[FAIL\]\z'
+  foreach ($runInfo in @($runInfoNodes)) {
+    $runInfoRawText = ''
+    foreach ($runInfoChild in @($runInfo.ChildNodes)) {
+      if ([string]$runInfoChild.LocalName -eq 'Text') { $runInfoRawText = [string]$runInfoChild.InnerText; break }
+    }
+    if ([regex]::IsMatch($runInfoRawText, $xunitCanonicalPattern)) {
+      $runInfoTextCanonical++
+    } elseif ($runInfoEnvelopeProblems.Count -lt 12) {
+      $runInfoEnvelopeProblems += "a RunInfo Text is not the canonical xUnit line: '$runInfoRawText'"
+    }
+  }
+  if ($runInfoEnvelopeProblems.Count -gt 0) {
+    throw "$($e.suite): the RunInfo text envelope in $($e.file) is not the line the xUnit writer emits while the total was $total - the identity check above strips any line that resembles the envelope, so a bare name, a hand-written timestamp, a tab or a wider gap, or trailing text still names the right test while the failure log stops being the writer's own line. expected '[xUnit.net hh:mm:ss.ff]     <test name> [FAIL]' with five spaces after the bracket and one before [FAIL]. broken: $($runInfoEnvelopeProblems -join ', '). A TRX whose failure log line is not the writer's canonical envelope was hand-merged or patched; regenerate it from a clean test run."
+  }
+
+  # The canonical envelope check above proves each RunInfo line names exactly one
+  # failed row, but it never reads the item's timestamp against that row's own
+  # clock. A log item moved onto another failure, or kept from another run, still
+  # names the right test and stays inside the run-wide window while its timestamp
+  # points at a different execution. The writer emits the item immediately after
+  # the test ends: allow one second before the row starts and five seconds after.
+  $failedRowSpans = @{}
+  foreach ($fr in @($xml.TestRun.Results.UnitTestResult)) {
+    $fo = [string]$fr.outcome
+    if ($fo -ne 'Failed' -and $fo -ne 'Error') { continue }
+    $fn = [string]$fr.testName
+    if ([string]::IsNullOrWhiteSpace($fn)) { continue }
+    $fs = Convert-ToInstant ([string]$fr.startTime)
+    $fe = Convert-ToInstant ([string]$fr.endTime)
+    if ($null -ne $fs -and $null -ne $fe) {
+      $failedRowSpans[$fn] = [pscustomobject]@{ Start = $fs; End = $fe }
+    }
+  }
+  $runInfoClockPattern = '\A\[xUnit\.net [0-9]{2}:[0-5][0-9]:[0-5][0-9]\.[0-9]{2}\] {5}(?<name>\S(?:.*\S)?) \[FAIL\]\z'
+  $runInfoClockProblems = @()
+  $runInfoRowClockBound = 0
+  foreach ($runInfo in @($runInfoNodes)) {
+    $runInfoRawText = ''
+    foreach ($runInfoChild in @($runInfo.ChildNodes)) {
+      if ([string]$runInfoChild.LocalName -eq 'Text') { $runInfoRawText = [string]$runInfoChild.InnerText; break }
+    }
+    $clockMatch = [regex]::Match($runInfoRawText, $runInfoClockPattern)
+    if (-not $clockMatch.Success) { continue }
+    $clockName = $clockMatch.Groups['name'].Value
+    if (-not $failedRowSpans.ContainsKey($clockName)) { continue }
+    $span = $failedRowSpans[$clockName]
+    $stamp = Convert-ToInstant ([string]$runInfo.timestamp)
+    if ($null -eq $stamp) { continue }
+    if ($stamp -ge $span.Start.AddSeconds(-1) -and $stamp -le $span.End.AddSeconds(5)) {
+      $runInfoRowClockBound++
+    } elseif ($runInfoClockProblems.Count -lt 12) {
+      $runInfoClockProblems += "a RunInfo for '$clockName' is timestamped outside that row's own run window ('$([string]$runInfo.timestamp)' vs $($span.Start.ToString('o'))..$($span.End.ToString('o')))"
+    }
+  }
+  if ($runInfoClockProblems.Count -gt 0) {
+    throw "$($e.suite): the RunInfo row clock in $($e.file) does not belong to the row it names while the total was $total - the envelope check above proves only that the line spells one row name, so an item whose timestamp was moved from another failure or another run keeps every item, name, machine and outcome identical while the failure log points at the wrong execution. expected the item timestamp within 1 s before the named row's start and 5 s after its end. broken: $($runInfoClockProblems -join ', '). A TRX whose failure-log timestamp disagrees with its own result row was hand-merged or patched; regenerate it from a clean test run."
+  }
+
+  # The row-clock check above reads each item on its own; it never asks whether
+  # the failure log still reads forward. Two items can be swapped, or one line's
+  # displayed clock edited, while every item keeps its own name, machine, outcome,
+  # row window and canonical envelope. The xUnit Text clock and the item timestamp
+  # are two views of the same event, so both must be nondecreasing in list order.
+  $runInfoChronologyPattern = '\A\[xUnit\.net (?<clock>[0-9]{2}:[0-5][0-9]:[0-5][0-9]\.[0-9]{2})\] {5}\S(?:.*\S)? \[FAIL\]\z'
+  $runInfoChronologyProblems = @()
+  $runInfoChronologyBound = 0
+  $previousRunInfoClock = $null
+  $previousRunInfoStamp = $null
+  $previousRunInfoClockText = ''
+  $previousRunInfoStampText = ''
+  foreach ($runInfo in @($runInfoNodes)) {
+    $runInfoRawText = ''
+    foreach ($runInfoChild in @($runInfo.ChildNodes)) {
+      if ([string]$runInfoChild.LocalName -eq 'Text') { $runInfoRawText = [string]$runInfoChild.InnerText; break }
+    }
+    $chronologyMatch = [regex]::Match($runInfoRawText, $runInfoChronologyPattern)
+    if (-not $chronologyMatch.Success) { continue }
+    $clockText = $chronologyMatch.Groups['clock'].Value
+    $clock = [TimeSpan]::Zero
+    if (-not [TimeSpan]::TryParseExact($clockText, 'hh\:mm\:ss\.ff', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.TimeSpanStyles]::None, [ref]$clock)) { continue }
+    $stamp = Convert-ToInstant ([string]$runInfo.timestamp)
+    if ($null -eq $stamp) { continue }
+    $chronologyProblem = ''
+    if ($null -ne $previousRunInfoClock -and $clock -lt $previousRunInfoClock) {
+      $chronologyProblem = "a RunInfo Text clock '$clockText' goes backwards after '$previousRunInfoClockText'"
+    } elseif ($null -ne $previousRunInfoStamp -and $stamp -lt $previousRunInfoStamp) {
+      $chronologyProblem = "a RunInfo timestamp '$([string]$runInfo.timestamp)' goes backwards after '$previousRunInfoStampText'"
+    }
+    if ($chronologyProblem -eq '') {
+      $runInfoChronologyBound++
+    } elseif ($runInfoChronologyProblems.Count -lt 12) {
+      $runInfoChronologyProblems += $chronologyProblem
+    }
+    $previousRunInfoClock = $clock
+    $previousRunInfoStamp = $stamp
+    $previousRunInfoClockText = $clockText
+    $previousRunInfoStampText = [string]$runInfo.timestamp
+  }
+  if ($runInfoChronologyProblems.Count -gt 0) {
+    throw "$($e.suite): the RunInfo chronology in $($e.file) does not read forward while the total was $total (runInfoChronology=$($runInfoChronologyBound)/$(@($runInfoNodes).Count)) - the row-clock check above reads every item on its own, so two swapped items or an edited Text clock keep every name, machine, outcome, row window and canonical envelope identical while the failure log stops reading in the order the run produced it. expected both the xUnit Text clock and the item timestamp to be nondecreasing in list order. broken: $($runInfoChronologyProblems -join ', '). A TRX whose failure log is out of order was hand-merged or patched; regenerate it from a clean test run."
+  }
+
+  # The chronology check above reads two views of the same event only as order.
+  # The same two views also encode the same instant: the xUnit Text clock starts
+  # at Times.start, while each item timestamp is an absolute instant. The writer
+  # emits the item a little after the test ends, so timestamp - Times.start - clock
+  # is a constant for one run. A Text clock copied from another run, or a timestamp
+  # moved from another failure, keeps order, row window and canonical envelope
+  # intact while the two views stop describing the same instant.
+  $runInfoOffsetProblems = @()
+  $runInfoOffsetBound = 0
+  $runInfoOffsetFirst = $null
+  $runInfoOffsetFirstText = ''
+  $runInfoOffsetStart = $null
+  try {
+    $runInfoOffsetStart = [DateTimeOffset]::Parse([string]$xml.TestRun.Times.start, [System.Globalization.CultureInfo]::InvariantCulture)
+  } catch {
+    if ($runInfoOffsetProblems.Count -lt 12) {
+      $runInfoOffsetProblems += 'the run Times.start is not readable, so the RunInfo clock/timestamp offset cannot be placed'
+    }
+  }
+  if ($null -ne $runInfoOffsetStart) {
+    foreach ($runInfo in @($runInfoNodes)) {
+      $runInfoRawText = ''
+      foreach ($runInfoChild in @($runInfo.ChildNodes)) {
+        if ([string]$runInfoChild.LocalName -eq 'Text') { $runInfoRawText = [string]$runInfoChild.InnerText; break }
+      }
+      $offsetMatch = [regex]::Match($runInfoRawText, $runInfoChronologyPattern)
+      if (-not $offsetMatch.Success) { continue }
+      $offsetClockText = $offsetMatch.Groups['clock'].Value
+      $offsetClock = [TimeSpan]::Zero
+      if (-not [TimeSpan]::TryParseExact($offsetClockText, 'hh\:mm\:ss\.ff', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.TimeSpanStyles]::None, [ref]$offsetClock)) { continue }
+      $offsetStamp = Convert-ToInstant ([string]$runInfo.timestamp)
+      if ($null -eq $offsetStamp) { continue }
+      $runInfoOffsetValue = ($offsetStamp - $runInfoOffsetStart) - $offsetClock
+      if ($null -eq $runInfoOffsetFirst) {
+        $runInfoOffsetFirst = $runInfoOffsetValue
+        $runInfoOffsetFirstText = "$offsetClockText @ $([string]$runInfo.timestamp)"
+        $runInfoOffsetBound++
+      } elseif ([math]::Abs(($runInfoOffsetValue - $runInfoOffsetFirst).TotalMilliseconds) -gt 100) {
+        if ($runInfoOffsetProblems.Count -lt 12) {
+          $runInfoOffsetProblems += "a RunInfo '$offsetClockText @ $([string]$runInfo.timestamp)' has offset '$([string]$runInfoOffsetValue)' against '$runInfoOffsetFirstText' '$([string]$runInfoOffsetFirst)'"
+        }
+      } else {
+        $runInfoOffsetBound++
+      }
+    }
+  }
+  if ($runInfoOffsetProblems.Count -gt 0) {
+    throw "$($e.suite): the RunInfo clock/timestamp offset in $($e.file) is not one run while the total was $total (runInfoOffset=$runInfoOffsetBound/$(@($runInfoNodes).Count)) - the row-clock and chronology checks read every item on its own and only in order, so a Text clock copied from another run or a timestamp moved from another failure keeps every name, row window and order intact while the two views stop describing the same instant. expected every RunInfo timestamp to sit within 100 ms of Times.start + its own xUnit Text clock. broken: $($runInfoOffsetProblems -join ', '). A TRX whose failure-log clock and timestamp were copied from different runs was hand-merged or patched; regenerate it from a clean test run."
+  }
+
+  # ResultSummary/RunInfos is one container, not a bag of items. The layer above
+  # counts the items wherever they sit, so two wrappers around one item, an empty
+  # second wrapper, or a wrapper parked under Deployment all keep the item list
+  # intact. A failure log has one owner; a stray container means the summary was
+  # reassembled from more than one run.
+  $runInfoLayoutBlocks = @()
+  foreach ($summaryChild in @($xml.TestRun.ResultSummary.ChildNodes)) {
+    if ([string]$summaryChild.LocalName -eq 'RunInfos') { $runInfoLayoutBlocks += $summaryChild }
+  }
+  $runInfoLayoutCount = @($runInfoLayoutBlocks).Count
+  $runInfoLayoutAnywhere = @($xml.SelectNodes('//*[local-name()="RunInfos"]')).Count
+  $runInfoLayoutProblems = @()
+  if ($runInfoLayoutAnywhere -ne $runInfoLayoutCount) {
+    $runInfoLayoutProblems += "the summary carries $runInfoLayoutAnywhere RunInfos block(s) but only $runInfoLayoutCount directly under ResultSummary"
+  }
+  if ($failedRows -gt 0 -and $runInfoLayoutCount -ne 1) {
+    $runInfoLayoutProblems += "the summary declares $runInfoLayoutCount RunInfos block(s) for $failedRows Failed/Error row(s)"
+  }
+  if ($failedRows -eq 0 -and $runInfoLayoutCount -gt 1) {
+    $runInfoLayoutProblems += "the summary declares $runInfoLayoutCount RunInfos blocks although no row reports Failed/Error"
+  }
+  if ($runInfoLayoutProblems.Count -gt 0) {
+    throw "$($e.suite): the ResultSummary/RunInfos block layout in $($e.file) does not describe this suite's failure log while the total was $total - the items and the container that owns them are two halves of the same summary, so a file whose items were split across wrappers, whose empty second wrapper was left behind, or whose wrapper was moved outside ResultSummary can keep every count, every ErrorInfo and every RunInfo identical. broken: $($runInfoLayoutProblems -join ', '). A TRX whose failure log has no single owner was reassembled; regenerate it from a clean test run."
+  }
+
+  # The block counts above count the ResultSummary/RunInfos containers, not the
+  # RunInfo items themselves or a Deployment record outside the settings block.
+  # A RunInfo parked under Deployment or nested in another RunInfo, or a second
+  # Deployment under ResultSummary, leaves every block and header count intact
+  # while the report names two owners for one failure log or one run.
+  $runInfoOwnerCount = 0
+  foreach ($runInfoBlock in @($runInfoLayoutBlocks)) {
+    foreach ($runInfoItem in @($runInfoBlock.ChildNodes)) {
+      if ([string]$runInfoItem.LocalName -eq 'RunInfo') { $runInfoOwnerCount++ }
+    }
+  }
+  $runInfoAnywhere = @($xml.SelectNodes('//*[local-name()="RunInfo"]')).Count
+  $deploymentOwnerCount = 0
+  foreach ($headerChild in @($xml.TestRun.ChildNodes)) {
+    if ([string]$headerChild.LocalName -ne 'TestSettings') { continue }
+    foreach ($headerSub in @($headerChild.ChildNodes)) {
+      if ([string]$headerSub.LocalName -eq 'Deployment') { $deploymentOwnerCount++ }
+    }
+  }
+  $deploymentAnywhere = @($xml.SelectNodes('//*[local-name()="Deployment"]')).Count
+  $ownerProblems = @()
+  if ($runInfoAnywhere -ne $runInfoOwnerCount) {
+    $ownerProblems += "the file carries $runInfoAnywhere RunInfo item(s) but only $runInfoOwnerCount directly under the ResultSummary/RunInfos block"
+  }
+  if ($deploymentAnywhere -ne $deploymentOwnerCount) {
+    $ownerProblems += "the file carries $deploymentAnywhere Deployment element(s) but only $deploymentOwnerCount directly under TestSettings"
+  }
+  if ($ownerProblems.Count -gt 0) {
+    throw "$($e.suite): the failure-log/deployment ownership in $($e.file) does not describe this suite while the total was $total - the block counts above only count the RunInfos containers and the settings-side Deployment, so an item parked under Deployment, an item nested in another item, or a second Deployment under ResultSummary can keep every count, every name and every Text identical while the report assigns the run to two owners. broken: $($ownerProblems -join ', '). A TRX whose failure log or deployment record has a second owner was reassembled; regenerate it from a clean test run."
+  }
+
+  # ResultSummary/Output/StdOut is the test host's own console text: what the
+  # runner printed while it discovered and executed this suite. No check above
+  # reads it, so a summary whose output was dropped, duplicated, blanked or
+  # copied from another suite keeps every count, every ErrorInfo and every
+  # RunInfo identical while the report no longer shows which suite produced it.
+  # The block is read by local name for the same adapter reason as ErrorInfo.
+  $summaryOutputBlocks = 0
+  $summaryStdOutBlocks = 0
+  $summaryStdOutText = ''
+  foreach ($summaryChild in @($xml.TestRun.ResultSummary.ChildNodes)) {
+    if ([string]$summaryChild.LocalName -ne 'Output') { continue }
+    $summaryOutputBlocks++
+    foreach ($outputChild in @($summaryChild.ChildNodes)) {
+      if ([string]$outputChild.LocalName -ne 'StdOut') { continue }
+      $summaryStdOutBlocks++
+      $summaryStdOutText = [string]$outputChild.InnerText
+    }
+  }
+  $summaryOutputProblems = @()
+  if ($summaryOutputBlocks -ne 1) {
+    $summaryOutputProblems += "the summary declares $summaryOutputBlocks Output block(s)"
+  }
+  if ($summaryStdOutBlocks -ne 1) {
+    $summaryOutputProblems += "the summary declares $summaryStdOutBlocks StdOut block(s)"
+  }
+  if ([string]::IsNullOrWhiteSpace($summaryStdOutText)) {
+    $summaryOutputProblems += 'the StdOut text is blank'
+  }
+  $summaryOutputNonBlank = [int](-not [string]::IsNullOrWhiteSpace($summaryStdOutText))
+  $summaryOutputNamesSuite = 0
+  if ($summaryOutputNonBlank -eq 1 -and $summaryStdOutText.IndexOf([string]$e.suite, [System.StringComparison]::Ordinal) -ge 0) {
+    $summaryOutputNamesSuite = 1
+  }
+  if ($summaryOutputNonBlank -eq 1 -and $summaryOutputNamesSuite -eq 0) {
+    $summaryOutputProblems += "the StdOut text does not name the suite '$($e.suite)'"
+  }
+  if ($summaryOutputProblems.Count -gt 0) {
+    throw "$($e.suite): the ResultSummary/Output/StdOut block in $($e.file) does not belong to this suite while the total was $total - the console output is the host's own record of what it ran, so a file whose output block was dropped, duplicated, blanked or copied from another suite can keep every count identical. broken: $($summaryOutputProblems -join ', '). A TRX whose console output contradicts its own suite was hand-merged or patched; regenerate it from a clean test run."
+  }
+
+  # The console text is also a phase ledger: the test host announces its own
+  # discovery and execution of this suite, once per phase. Layer 24 only checks
+  # that the suite name appears somewhere in the text, so a StdOut copied from
+  # another suite and edited to mention this one can still pass. The four phase
+  # lines are read by their literal marker plus this suite's name, and must
+  # appear exactly once each, in the order the host emits them.
+  $summaryPhaseNames = @('Discovering', 'Discovered', 'Starting', 'Finished')
+  $summaryPhasePositions = @{}
+  $summaryPhaseProblems = @()
+  $summaryPhaseFound = 0
+  foreach ($phaseName in $summaryPhaseNames) {
+    $phasePattern = [regex]::Escape($phaseName) + ':[ \t]*' + [regex]::Escape([string]$e.suite)
+    $phaseMatches = [regex]::Matches($summaryStdOutText, $phasePattern)
+    if ($phaseMatches.Count -ne 1) {
+      $summaryPhaseProblems += "the StdOut text carries $($phaseMatches.Count) '$phaseName' line(s) naming this suite"
+    } else {
+      $summaryPhasePositions[$phaseName] = $phaseMatches[0].Index
+      $summaryPhaseFound++
+    }
+  }
+  $summaryPhaseOrdered = 0
+  if ($summaryPhaseProblems.Count -eq 0) {
+    if ($summaryPhasePositions['Discovering'] -lt $summaryPhasePositions['Discovered'] -and
+        $summaryPhasePositions['Discovered'] -lt $summaryPhasePositions['Starting'] -and
+        $summaryPhasePositions['Starting'] -lt $summaryPhasePositions['Finished']) {
+      $summaryPhaseOrdered = 1
+    } else {
+      $summaryPhaseProblems += 'the four phase lines are not in the order Discovering, Discovered, Starting, Finished'
+    }
+  }
+
+  # The phase ledger above reads where each line sits, not the clock in front of
+  # it. An edited clock, two clocks in the wrong order, or a last failure-log
+  # clock that runs past Finished keeps every phase line, RunInfo and count in
+  # place while the console text no longer reads in the order the host reported.
+  # The canonical [xUnit.net hh:mm:ss.ff] clock is parsed per phase, must be
+  # nondecreasing in phase order, and Finished must not precede the last RunInfo
+  # Text clock. The two ledgers already exist; this layer ties them together.
+  $summaryPhaseClockProblems = @()
+  $summaryPhaseClockFound = 0
+  $summaryPhaseClockOrdered = 0
+  $summaryFinishedAfterRunInfo = 0
+  $summaryFirstRowAfterStart = 1
+  $summaryPhaseWithinRun = 1
+  $summaryPhaseRunDuration = $null
+  $summaryPhaseStartingClock = $null
+  $summaryPhaseStartingClockText = ''
+  $summaryPhaseFinishedClock = $null
+  $summaryPhaseFinishedClockText = ''
+  if ($summaryPhaseProblems.Count -eq 0) {
+    try {
+      $phaseRunStart = [DateTimeOffset]::Parse([string]$xml.TestRun.Times.start, [System.Globalization.CultureInfo]::InvariantCulture)
+      $phaseRunFinish = [DateTimeOffset]::Parse([string]$xml.TestRun.Times.finish, [System.Globalization.CultureInfo]::InvariantCulture)
+      $summaryPhaseRunDuration = $phaseRunFinish - $phaseRunStart
+    } catch {
+      $summaryPhaseWithinRun = 0
+      if ($summaryPhaseClockProblems.Count -lt 12) {
+        $summaryPhaseClockProblems += 'the run Times.start/finish is not readable, so the phase clocks cannot be placed inside the run window'
+      }
+    }
+    $previousPhaseClock = $null
+    $previousPhaseClockText = ''
+    $phaseClockOrdered = 1
+    foreach ($phaseName in $summaryPhaseNames) {
+      $phaseClockPattern = '(?m)^\[xUnit\.net (?<clock>[0-9]{2}:[0-5][0-9]:[0-5][0-9]\.[0-9]{2})\][ \t]+' + [regex]::Escape($phaseName) + ':[ \t]*' + [regex]::Escape([string]$e.suite) + '[ \t]*\r?$'
+      $phaseClockMatches = [regex]::Matches($summaryStdOutText, $phaseClockPattern)
+      if ($phaseClockMatches.Count -ne 1) {
+        if ($summaryPhaseClockProblems.Count -lt 12) {
+          $summaryPhaseClockProblems += "the '$phaseName' phase line carries $($phaseClockMatches.Count) canonical xUnit clock(s)"
+        }
+        continue
+      }
+      $phaseClockText = [string]$phaseClockMatches[0].Groups['clock'].Value
+      $phaseClock = [TimeSpan]::Zero
+      if (-not [TimeSpan]::TryParseExact($phaseClockText, 'hh\:mm\:ss\.ff', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.TimeSpanStyles]::None, [ref]$phaseClock)) {
+        if ($summaryPhaseClockProblems.Count -lt 12) {
+          $summaryPhaseClockProblems += "the '$phaseName' clock '$phaseClockText' is not readable"
+        }
+        continue
+      }
+      $summaryPhaseClockFound++
+      if ($null -ne $summaryPhaseRunDuration -and $phaseClock -gt $summaryPhaseRunDuration) {
+        if ($summaryPhaseClockProblems.Count -lt 12) {
+          $summaryPhaseClockProblems += "the '$phaseName' clock '$phaseClockText' runs past the run window '$([string]$summaryPhaseRunDuration)'"
+        }
+        $summaryPhaseWithinRun = 0
+      }
+      if ($null -ne $previousPhaseClock -and $phaseClock -lt $previousPhaseClock) {
+        if ($summaryPhaseClockProblems.Count -lt 12) {
+          $summaryPhaseClockProblems += "the '$phaseName' clock '$phaseClockText' goes backwards after '$previousPhaseClockText'"
+        }
+        $phaseClockOrdered = 0
+      }
+      if ($phaseName -eq 'Starting') {
+        $summaryPhaseStartingClock = $phaseClock
+        $summaryPhaseStartingClockText = $phaseClockText
+      }
+      if ($phaseName -eq 'Finished') {
+        $summaryPhaseFinishedClock = $phaseClock
+        $summaryPhaseFinishedClockText = $phaseClockText
+      }
+      $previousPhaseClock = $phaseClock
+      $previousPhaseClockText = $phaseClockText
+    }
+    if ($summaryPhaseClockFound -eq $summaryPhaseNames.Count -and $phaseClockOrdered -eq 1) {
+      $summaryPhaseClockOrdered = 1
+    }
+    if ($summaryPhaseClockOrdered -eq 1 -and $null -ne $summaryPhaseFinishedClock) {
+      if ($null -eq $previousRunInfoClock) {
+        $summaryFinishedAfterRunInfo = 1
+      } elseif ($summaryPhaseFinishedClock -ge $previousRunInfoClock) {
+        $summaryFinishedAfterRunInfo = 1
+      } elseif ($summaryPhaseClockProblems.Count -lt 12) {
+        $summaryPhaseClockProblems += "the Finished clock '$summaryPhaseFinishedClockText' precedes the last failure-log clock '$previousRunInfoClockText'"
+      }
+    }
+    if ($summaryPhaseClockOrdered -eq 1 -and $null -ne $summaryPhaseStartingClock -and $null -ne $phaseRunStart) {
+      $earliestRowStart = $null
+      $earliestRowName = ''
+      foreach ($row in @($xml.TestRun.Results.UnitTestResult)) {
+        $rowStart = Convert-ToInstant([string]$row.startTime)
+        if ($null -eq $rowStart) { continue }
+        if ($null -eq $earliestRowStart -or $rowStart -lt $earliestRowStart) {
+          $earliestRowStart = $rowStart
+          $earliestRowName = [string]$row.testName
+        }
+      }
+      if ($null -ne $earliestRowStart) {
+        if (($earliestRowStart - $phaseRunStart) -ge $summaryPhaseStartingClock) {
+          $summaryFirstRowAfterStart = 1
+        } else {
+          $summaryFirstRowAfterStart = 0
+          if ($summaryPhaseClockProblems.Count -lt 12) {
+            $summaryPhaseClockProblems += "the Starting clock '$summaryPhaseStartingClockText' comes after the first result row '$earliestRowName' started at '$([string]$earliestRowStart)'"
+          }
+        }
+      }
+    }
+  }
+  if ($summaryPhaseClockProblems.Count -gt 0) {
+    throw "$($e.suite): the StdOut phase clock ledger in $($e.file) does not read forward while the total was $total (phaseClock=$($summaryPhaseClockFound)/$($summaryPhaseNames.Count) ordered=$($summaryPhaseClockOrdered) finishedAfterRunInfo=$($summaryFinishedAfterRunInfo) withinRun=$($summaryPhaseWithinRun) firstRowAfterStart=$($summaryFirstRowAfterStart)) - the phase ledger above only checks where each line sits, so an edited clock, two clocks in the wrong order, a Starting clock after the first result row, or a failure log whose last clock runs past Finished keeps every phase line in place while the console text no longer reads in the order the host reported. expected one canonical [xUnit.net hh:mm:ss.ff] clock per phase, nondecreasing in phase order, Starting not later than the earliest result row's start, Finished not earlier than the last RunInfo Text clock, and every phase clock at or before Times.finish - Times.start. broken: $($summaryPhaseClockProblems -join ', '). A TRX whose phase clocks were hand-merged or patched; regenerate it from a clean test run."
+  }
+
+  if ($summaryPhaseProblems.Count -gt 0) {
+    throw "$($e.suite): the ResultSummary/Output/StdOut phase ledger in $($e.file) does not describe this suite's discovery and run while the total was $total - the console text can still name the suite while the lines that say it was discovered, started and finished are missing, repeated or out of order, and no count above reads them. broken: $($summaryPhaseProblems -join ', '). A TRX whose console output no longer describes its own phases was hand-merged or patched; regenerate it from a clean test run."
+  }
+
   # The verdict on top of the counters: ResultSummary/@outcome says how the whole
   # run ended, and no count above reads it. The rows and the buckets can agree with
   # each other while the verdict that summarises both is stale or invented - a file
@@ -1480,11 +2418,15 @@ foreach ($e in $baseline.suites) {
   $runUser = [string]$xml.TestRun.runUser
   $runNameUser = $null
   $runNameMachine = $null
+  $runNameDate = ''
+  $runNameTime = ''
   $runNameCanonical = $false
   if ($runName -match '^(\S+)@(\S+) ([0-9]{4}-[0-9]{2}-[0-9]{2}) ([0-9]{2}:[0-9]{2}:[0-9]{2})$') {
     $runNameCanonical = $true
     $runNameUser = [string]$Matches[1]
     $runNameMachine = [string]$Matches[2]
+    $runNameDate = [string]$Matches[3]
+    $runNameTime = [string]$Matches[4]
   }
   $runUserMachine = $null
   $runUserLeaf = $null
@@ -1495,6 +2437,7 @@ foreach ($e in $baseline.suites) {
     $runUserLeaf = [string]$Matches[2]
   }
   $derivedRoot = 0
+  $nameStampMatches = 0
   $headerMachine = $null
   if ($settingsCount -ne 1) { $headerLost += "the file declares $settingsCount TestSettings block(s)" }
   if ([string]::IsNullOrWhiteSpace($settingsName)) { $headerLost += 'TestSettings names no settings block' }
@@ -1513,6 +2456,15 @@ foreach ($e in $baseline.suites) {
   if (-not $runNameCanonical) {
     if ($headerFileWarn.Count -lt 12) { $headerFileWarn += "$($e.file) run name '$runName' is not user@machine plus a timestamp - the deployment root cannot be derived from it" }
   } else {
+    if ($null -ne $declarationCreation) {
+      $runNameStamp = $runNameDate + ' ' + $runNameTime
+      $creationStamp = $declarationCreation.ToString('yyyy-MM-dd HH:mm:ss', [System.Globalization.CultureInfo]::InvariantCulture)
+      if ([string]::Equals($runNameStamp, $creationStamp, [System.StringComparison]::Ordinal)) {
+        $nameStampMatches = 1
+      } else {
+        if ($headerLost.Count -lt 12) { $headerLost += "TestRun name carries '$runNameStamp' while Times.creation is '$creationStamp'" }
+      }
+    }
     if ($runUserCanonical) {
       if (-not [string]::Equals($runNameUser, $runUserLeaf, [System.StringComparison]::OrdinalIgnoreCase)) {
         $headerLost += "TestRun name says user '$runNameUser' while runUser says '$runUserLeaf'"
@@ -1591,15 +2543,28 @@ foreach ($e in $baseline.suites) {
   }
   "$($e.suite): outcomes=$($actualOutcomes.Count) baseline=outcome table $(@($e.outcomes.PSObject.Properties.Name).Count) outcomes"
   "$($e.suite): identities=$pairedIds named=$namedRows unique test ids shared by both halves"
-  "$($e.suite): rowAttributes=$rowCount unique execution ids=$($execIdCounts.Count) ordered row times=$timeOrdered rows within the run window=$inWindow uniform row fields=$uniformFields"
-  "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount"
+  "$($e.suite): rowAttributes=$rowCount unique execution ids=$($execIdCounts.Count) ordered row times=$timeOrdered rows within the run window=$inWindow uniform row fields=$uniformFields rowTimeOffsets=$rowTimeOffsets/$($rowCount*2) durationShape=$durShapeOk/$rowCount"
+  "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount runSections=$runSectionMatches/7"
   "$($e.suite): executionIds=$($execByDefId.Count) distinct declared ids=$($defExecCounts.Count) paired rows=$pairedRowExecs paired result directories=$pairedRowDirs"
   "$($e.suite): displayNames=$displayNameChecked declared prefixes=$($displayNameChecked - $displayNameLost.Count) mismatched=$($displayNameLost.Count)"
   "$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"
-  "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot bound rows=$boundRows header id collisions=$headerCollisions"
+  "$($e.suite): failureEvidence=$evidenceRows failed=$failedWithEvidence/$failedRows passed=$passedWithEvidence/$passedRows blankMessages=$blankFailureText duplicates=$duplicateEvidence"
+  "$($e.suite): runInfos=$runInfoRows failedRows=$failedRows matched=$($matchedFailedNames.Count) passed=$runInfoForPassed unmatched=$runInfoUnmatched duplicateMatches=$runInfoDuplicates outside=$runInfoOutside blankText=$runInfoBlank wrongMachine=$runInfoWrongMachine badOutcome=$runInfoBadOutcome timestampOffsets=$runInfoTimestampOffsets/$runInfoRows"
+  "$($e.suite): runInfoBlocks=$runInfoLayoutCount strayRunInfoBlocks=$([int]$runInfoLayoutAnywhere - [int]$runInfoLayoutCount)"
+  "$($e.suite): runInfoBoundary=$runInfoOwnerCount/$runInfoAnywhere deploymentBoundary=$deploymentOwnerCount/$deploymentAnywhere"
+  "$($e.suite): runInfoTexts=$runInfoTextSingular/$(@($runInfoNodes).Count)"
+  "$($e.suite): runInfoTextExact=$runInfoTextExact/$failedRows"
+  "$($e.suite): runInfoTextCanonical=$runInfoTextCanonical/$(@($runInfoNodes).Count)"
+  "$($e.suite): runInfoRowClock=$runInfoRowClockBound/$(@($runInfoNodes).Count)"
+  "$($e.suite): runInfoChronology=$runInfoChronologyBound/$(@($runInfoNodes).Count)"
+  "$($e.suite): runInfoOffset=$runInfoOffsetBound/$(@($runInfoNodes).Count)"
+  "$($e.suite): summaryOutput=$summaryOutputBlocks stdout=$summaryStdOutBlocks nonBlank=$summaryOutputNonBlank suiteNamed=$summaryOutputNamesSuite"
+  "$($e.suite): phaseLedger=$summaryPhaseFound/4 ordered=$summaryPhaseOrdered"
+  "$($e.suite): phaseClock=$summaryPhaseClockFound/4 ordered=$summaryPhaseClockOrdered finishedAfterRunInfo=$summaryFinishedAfterRunInfo withinRun=$summaryPhaseWithinRun firstRowAfterStart=$summaryFirstRowAfterStart"
+  "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot nameStamp=$nameStampMatches bound rows=$boundRows header id collisions=$headerCollisions"
   "$($e.suite): assemblyDeclaration=$assemblyPairs storage/codeBase pairs=$($assemblyPairs - $assemblyPairLostCount) same file adapters=$($adapterValues.Count)"
   "$($e.suite): listVocabulary=$listKnown/$listCount canonical names=$listCanonical distinct names=$($listNames.Count - $listNameBlank - $listNameDuplicates.Count) unreferenced lists=$($unreferencedLists.Count)"
-  "$($e.suite): runDeclarations=$declarationFacts/4 namespace=$([string](@('foreign','TeamTest/2010')[$declarationNamesOk])) timestamps=$declarationStamps ordered=$declarationOrdered explicit offsets=$declarationOffsets outside window=$declarationOutside"
+  "$($e.suite): runDeclarations=$declarationFacts/4 namespace=$([string](@('foreign','TeamTest/2010')[$declarationNamesOk])) timestamps=$declarationStamps ordered=$declarationOrdered explicit offsets=$declarationOffsets outside window=$declarationOutside windowOffsets=$declarationWindowOffsets/2"
   "$($e.suite): rowOrder=$rowOrderPositions aligned=$rowOrderAligned first mismatch=$rowOrderFirstText"
   "$($e.suite): summaryOutcome=$summaryOutcome failureBuckets=$failureBucketTotal contradiction=$($summaryContradiction.Count)"
 
@@ -1785,7 +2750,7 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): the declared lists do not name themselves consistently while the total was $total - every count above reads the rows, the counters and the ids, and nothing read a list name, so two lists that trade their names keep every one of them identical while the file tells the reader the rows ran somewhere else. mismatched: $($listVocabularyLost -join ', '). A TRX whose list names were rewritten was hand-merged or patched; regenerate it from a clean test run."
   }
   if ($declarationLost.Count -gt 0) {
-    throw "$($e.suite): the run does not declare the schema it was written in and the instants it was created in while the total was $total - every count above is read from the rows, the counters, the header, the definitions and the lists, and nothing read TestRun/@xmlns, Times/@creation or Times/@queuing, so a file written by another tool or patched to swap its two stamps keeps all of them identical. mismatched: $($declarationLost -join ', '). A TRX whose own declarations were rewritten was hand-merged or patched; regenerate it from a clean test run."
+    throw "$($e.suite): the run does not declare the schema it was written in and the instants it was created, queued and bounded by while the total was $total - every count above is read from the rows, the counters, the header, the definitions and the lists, and nothing read TestRun/@xmlns, Times/@creation, Times/@queuing, Times/@start or Times/@finish, so a file written by another tool, patched to swap its two stamps or stripped of a window offset keeps all of them identical while the window it bounds depends on the host's time zone. mismatched: $($declarationLost -join ', '). A TRX whose own declarations were rewritten was hand-merged or patched; regenerate it from a clean test run."
   }
   if ($rowOrderLost.Count -gt 0) {
     throw "$($e.suite): the rows are not in the order the file declares them while the total was $total - every count, id and pairing above is read by id, so rows that were sorted, reassembled or concatenated in another order keep all of them identical while the file stops reporting the run in the order it wrote it. mismatched: $($rowOrderLost -join ', '). A TRX whose row order was rewritten was hand-merged or patched; regenerate it from a clean test run."
