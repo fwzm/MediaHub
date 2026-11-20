@@ -166,9 +166,18 @@
 #   the TeamTest 2010 namespace, a creation and a queueing instant that carry an
 #   explicit UTC offset and are readable, and creation before queueing; the ladder
 #   line records runDeclarations=<facts>/4 namespace=<ns> timestamps=<n> ordered=<0|1>
-#   explicit offsets=<n> outside window=<n>. A creation or queueing instant later
-#   than the run finished is a warning, not a red: clock skew between the writer and
-#   the runner is not something this gate can decide.
+#   explicit offsets=<n> outside window=<n> windowOffsets=<n>/2. A creation or queueing
+#   instant later than the run finished is a warning, not a red: clock skew between the
+#   writer and the runner is not something this gate can decide.
+#
+#   The window itself is declared by Times/@start and Times/@finish, and neither was
+#   required to carry an explicit offset. DateTimeOffset.Parse reads a bare local time
+#   as the host's own zone, so one results file bounds a different interval on every
+#   machine while every count, row timing and phase line stays identical; the offset
+#   requirement above covered only the two stamps. Both window instants now require an
+#   explicit UTC offset, and the ladder line adds windowOffsets=<n>/2. A window instant
+#   that is absent or unreadable stays a warning: a TRX without a usable window can be
+#   reported, but not placed.
 
 #   The rows also carry an order, and nothing above read it: TestEntries and the
 #   Results section are written from one ordered pass, so the row at position N is
@@ -414,6 +423,11 @@
 #   the schema namespace is not the TeamTest 2010 one, or Times records no creation
 #     or no queueing instant, or either instant cannot be read or carries no explicit
 #     UTC offset, or the run is queued before it is created -> red
+#   Times/@start or Times/@finish carries no explicit UTC offset -> red: the window
+#     is then read in the host's own zone, so one file bounds a different interval on
+#     every machine while every count, row timing and phase line stays unchanged; the
+#     ladder line records windowOffsets=<n>/2. An absent or unreadable window remains
+#     a warning, because a run that records no window can be reported but not placed.
 #   a failed run that does not carry exactly one ResultSummary/RunInfos container,
 #     a run without Failed/Error rows that carries more than one, or any RunInfos
 #     block outside ResultSummary -> red
@@ -803,6 +817,7 @@ foreach ($e in $baseline.suites) {
   $declarationFacts = 0
   $declarationOrdered = 0
   $declarationOffsets = 0
+  $declarationWindowOffsets = 0
   $declarationOutside = 0
   $declarationNamesOk = 0
   if ([string]::IsNullOrWhiteSpace($declarationSchema)) {
@@ -831,6 +846,18 @@ foreach ($e in $baseline.suites) {
       continue
     }
     $declarationOffsets++
+  }
+  if ($xml.TestRun.Times) {
+    foreach ($stamp in @(@('start', [string]$xml.TestRun.Times.start), @('finish', [string]$xml.TestRun.Times.finish))) {
+      $stampName = [string]$stamp[0]
+      $stampRaw = [string]$stamp[1]
+      if ([string]::IsNullOrWhiteSpace($stampRaw)) { continue }
+      if ($stampRaw -notmatch '([+-][0-9]{2}:[0-9]{2}|Z)$') {
+        $declarationLost += "Times.$stampName '$stampRaw' carries no explicit UTC offset"
+        continue
+      }
+      $declarationWindowOffsets++
+    }
   }
   if ($null -ne $declarationCreation -and $null -ne $declarationQueuing) {
     if ($declarationQueuing -lt $declarationCreation) {
@@ -2430,7 +2457,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot nameStamp=$nameStampMatches bound rows=$boundRows header id collisions=$headerCollisions"
   "$($e.suite): assemblyDeclaration=$assemblyPairs storage/codeBase pairs=$($assemblyPairs - $assemblyPairLostCount) same file adapters=$($adapterValues.Count)"
   "$($e.suite): listVocabulary=$listKnown/$listCount canonical names=$listCanonical distinct names=$($listNames.Count - $listNameBlank - $listNameDuplicates.Count) unreferenced lists=$($unreferencedLists.Count)"
-  "$($e.suite): runDeclarations=$declarationFacts/4 namespace=$([string](@('foreign','TeamTest/2010')[$declarationNamesOk])) timestamps=$declarationStamps ordered=$declarationOrdered explicit offsets=$declarationOffsets outside window=$declarationOutside"
+  "$($e.suite): runDeclarations=$declarationFacts/4 namespace=$([string](@('foreign','TeamTest/2010')[$declarationNamesOk])) timestamps=$declarationStamps ordered=$declarationOrdered explicit offsets=$declarationOffsets outside window=$declarationOutside windowOffsets=$declarationWindowOffsets/2"
   "$($e.suite): rowOrder=$rowOrderPositions aligned=$rowOrderAligned first mismatch=$rowOrderFirstText"
   "$($e.suite): summaryOutcome=$summaryOutcome failureBuckets=$failureBucketTotal contradiction=$($summaryContradiction.Count)"
 
@@ -2616,7 +2643,7 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): the declared lists do not name themselves consistently while the total was $total - every count above reads the rows, the counters and the ids, and nothing read a list name, so two lists that trade their names keep every one of them identical while the file tells the reader the rows ran somewhere else. mismatched: $($listVocabularyLost -join ', '). A TRX whose list names were rewritten was hand-merged or patched; regenerate it from a clean test run."
   }
   if ($declarationLost.Count -gt 0) {
-    throw "$($e.suite): the run does not declare the schema it was written in and the instants it was created in while the total was $total - every count above is read from the rows, the counters, the header, the definitions and the lists, and nothing read TestRun/@xmlns, Times/@creation or Times/@queuing, so a file written by another tool or patched to swap its two stamps keeps all of them identical. mismatched: $($declarationLost -join ', '). A TRX whose own declarations were rewritten was hand-merged or patched; regenerate it from a clean test run."
+    throw "$($e.suite): the run does not declare the schema it was written in and the instants it was created, queued and bounded by while the total was $total - every count above is read from the rows, the counters, the header, the definitions and the lists, and nothing read TestRun/@xmlns, Times/@creation, Times/@queuing, Times/@start or Times/@finish, so a file written by another tool, patched to swap its two stamps or stripped of a window offset keeps all of them identical while the window it bounds depends on the host's time zone. mismatched: $($declarationLost -join ', '). A TRX whose own declarations were rewritten was hand-merged or patched; regenerate it from a clean test run."
   }
   if ($rowOrderLost.Count -gt 0) {
     throw "$($e.suite): the rows are not in the order the file declares them while the total was $total - every count, id and pairing above is read by id, so rows that were sorted, reassembled or concatenated in another order keep all of them identical while the file stops reporting the run in the order it wrote it. mismatched: $($rowOrderLost -join ', '). A TRX whose row order was rewritten was hand-merged or patched; regenerate it from a clean test run."
