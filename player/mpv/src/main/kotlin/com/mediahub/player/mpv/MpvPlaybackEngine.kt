@@ -24,6 +24,7 @@ import com.mediahub.player.engine.PlaybackUiState
 import com.mediahub.player.engine.SeekMode
 import com.mediahub.player.engine.SubtitleCapabilities
 import com.mediahub.player.engine.TrackSelection
+import com.mediahub.player.engine.TrackSelectionResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -510,12 +511,13 @@ class MpvPlaybackEngine internal constructor(
      * 需解析成 mpv 的 aid（track id，≠ stream index）；null → aid=no。
      * 选择无效时不下发命令，避免静默把 aid 设成错误值。
      */
-    override fun selectAudioTrack(selection: TrackSelection?) {
-        if (!isTrackSelectionCurrent(selection)) return
-        val run = synchronized(stateLock) { current } ?: return
+    override fun selectAudioTrack(selection: TrackSelection?): TrackSelectionResult {
+        if (!isTrackSelectionCurrent(selection)) return TrackSelectionResult.STALE
+        val run = synchronized(stateLock) { current } ?: return TrackSelectionResult.ENGINE_NOT_READY
         val trackList = synchronized(stateLock) { run.mpvTrackList.orEmpty() }
         val aid = MpvTrackMapper.nativeAudioId(trackList, selection) ?: run {
-            if (selection != null) return // 无效序号：保持现状，不伪造成功
+            // 无效序号：保持现状，不伪造成功
+            if (selection != null) return TrackSelectionResult.TRACK_UNAVAILABLE
             "no"
         }
         withCurrent(run) {
@@ -523,6 +525,7 @@ class MpvPlaybackEngine internal constructor(
             // 立即用 native 实际值回填，避免乐观 UI（失败时保持真实状态）
             withNative(run) { _, m -> refreshTracks(run, m) }
         }
+        return TrackSelectionResult.APPLIED
     }
 
     /**
@@ -576,18 +579,19 @@ class MpvPlaybackEngine internal constructor(
             ) }
         }
     }
-    override fun selectSubtitleTrack(selection: TrackSelection?) {
-        if (!isTrackSelectionCurrent(selection)) return
-        val run = synchronized(stateLock) { subtitleOperation++; current } ?: return
+    override fun selectSubtitleTrack(selection: TrackSelection?): TrackSelectionResult {
+        if (!isTrackSelectionCurrent(selection)) return TrackSelectionResult.STALE
+        val run = synchronized(stateLock) { subtitleOperation++; current } ?: return TrackSelectionResult.ENGINE_NOT_READY
         val rows = synchronized(stateLock) { run.mpvTrackList }
         val sid = MpvTrackMapper.nativeSubtitleId(rows, selection) ?: run {
-            if (selection != null) return
+            if (selection != null) return TrackSelectionResult.TRACK_UNAVAILABLE
             "no"
         }
         withNative(run) { _, m ->
             m.command(arrayOf("set", "sid", sid))
             refreshTracks(run, m)
         }
+        return TrackSelectionResult.APPLIED
     }
 
     // ---- 外挂字幕 / 偏移（P2 字幕中心切片一） ----

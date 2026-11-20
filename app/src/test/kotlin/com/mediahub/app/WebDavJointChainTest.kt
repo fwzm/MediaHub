@@ -38,6 +38,7 @@ import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.PlaybackUiState
 import com.mediahub.player.engine.SeekMode
 import com.mediahub.player.engine.TrackSelection
+import com.mediahub.player.engine.TrackSelectionResult
 import com.mediahub.provider.base.DefaultProviderRegistry
 import com.mediahub.provider.webdav.WebDavCredentialCoordinator
 import com.mediahub.provider.webdav.WebDavProviderFactory
@@ -134,8 +135,8 @@ class WebDavJointChainTest {
         override fun togglePlayPause() = Unit
         override fun seekTo(positionMs: Long, mode: SeekMode) = Unit
         override fun setSpeed(speed: Float) = Unit
-        override fun selectAudioTrack(selection: TrackSelection?) = Unit
-        override fun selectSubtitleTrack(selection: TrackSelection?) = Unit
+        override fun selectAudioTrack(selection: TrackSelection?): TrackSelectionResult = TrackSelectionResult.APPLIED
+        override fun selectSubtitleTrack(selection: TrackSelection?): TrackSelectionResult = TrackSelectionResult.APPLIED
         override fun stop(): PlaybackProgress? = null
         override fun release() = Unit
     }

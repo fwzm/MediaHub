@@ -113,6 +113,14 @@ class PlaybackEngineTrackSelectionTest {
             assertTrue(params.getSelectionOverride(2, nativeGroups)!!.containsTrack(1))
         } finally { f.close() }
     }
+    @Test fun `selection before tracks exist reports tracks unavailable`() = runTest {
+        val f = Fixture(backgroundScope)
+        try {
+            // Mapped info 尚未发布，选择必须被如实报告，不能静默吞掉（#80）。
+            assertEquals(TrackSelectionResult.TRACKS_UNAVAILABLE,
+                f.engine.selectAudioTrack(TrackSelection(0, 0)))
+        } finally { f.close() }
+    }
     @Test fun `new track snapshot rejects an old row before any selector mutation`() = runTest {
         val f = Fixture(backgroundScope)
         try {
@@ -120,7 +128,7 @@ class PlaybackEngineTrackSelectionTest {
             f.publish()
             assertFalse(f.engine.isTrackSelectionCurrent(old))
             val before = f.selector.parameters
-            f.engine.selectAudioTrack(old)
+            assertEquals(TrackSelectionResult.STALE, f.engine.selectAudioTrack(old))
             assertEquals(before, f.selector.parameters)
             f.engine.selectAudioTrack(f.engine.uiState.value.trackRowMap.audioFor(2))
             assertEquals(listOf(1), f.selector.parameters.overrides[f.aac]!!.trackIndices)
@@ -147,11 +155,14 @@ class PlaybackEngineTrackSelectionTest {
             f.publish(); val token = f.engine.uiState.value.trackRowMap.snapshotToken
             val before = f.selector.parameters
             for (bad in listOf(TrackSelection(-1, 0, token), TrackSelection(0, -1, token),
-                TrackSelection(99, 0, token), TrackSelection(1, 99, token))) f.engine.selectAudioTrack(bad)
+                TrackSelection(99, 0, token), TrackSelection(1, 99, token))) {
+                assertEquals(TrackSelectionResult.TRACK_UNAVAILABLE, f.engine.selectAudioTrack(bad))
+            }
             assertEquals(before, f.selector.parameters)
             val row = f.engine.uiState.value.trackRowMap.audioFor(2)!!
             f.engine.release(); assertFalse(f.engine.isTrackSelectionCurrent(row))
-            f.engine.selectAudioTrack(row); assertEquals(before, f.selector.parameters)
+            assertEquals(TrackSelectionResult.STALE, f.engine.selectAudioTrack(row))
+            assertEquals(before, f.selector.parameters)
         } finally { f.close() }
     }
     private object Quiet : Logger {
