@@ -195,6 +195,14 @@
 #   TestSettings, Results, TestDefinitions, TestEntries, TestLists, ResultSummary,
 #   and prints runSections=<n>/7 on the structure ladder line.
 
+#   The durations have a shape as well, and nothing above read it: a duration is
+#   parsed with [TimeSpan]::Parse, which accepts 0:0:1, 00:00:01, 1.00:00:00 and
+#   00:00:01.5 as readily as the sixteen character form the writer emits. A row
+#   whose duration was rewritten by hand therefore reads as a perfectly good
+#   number, keeps every drift warning quiet and moves nothing on any ladder line.
+#   The gate now requires every row duration to be written as hh:mm:ss.fffffff
+#   and prints durationShape=<n>/<rows> on the row ladder line.
+
 #   The rows also carry an order, and nothing above read it: TestEntries and the
 #   Results section are written from one ordered pass, so the row at position N is
 #   the row of the entry at position N. Every check above keys the two halves by id,
@@ -488,6 +496,13 @@
 #     a moved section means the file was reassembled while every count and every
 #     pairing above stays identical; the structure ladder line records
 #     runSections=<positions that agree>/7.
+
+#   a UnitTestResult/@duration is not written as hh:mm:ss.fffffff -> red: the
+#     value is parsed with [TimeSpan]::Parse, which accepts 0:0:1, 00:00:01,
+#     1.00:00:00 and 00:00:01.5, so a duration rewritten by hand reads as a
+#     perfectly good number while every count, every drift warning and every
+#     ladder line stays identical. The row ladder line records
+#     durationShape=<rows in the canonical shape>/<rows>.
 
 #   the row at position N of Results does not name the test that position N of
 #     TestEntries declares -> red. The two sections are emitted from one ordered
@@ -929,6 +944,10 @@ foreach ($e in $baseline.suites) {
   $badTimes = 0
   $timeReversed = 0
   $badDuration = 0
+  # How many row durations are written in the canonical sixteen character shape,
+  # and how many are readable but written some other way.
+  $durShapeOk = 0
+  $durShapeLost = 0
   $durDrift = 0
   $inWindow = 0
   $outOfWindow = 0
@@ -1306,7 +1325,13 @@ foreach ($e in $baseline.suites) {
     $rendRaw = [string]$res.endTime
     $rstart = Convert-ToInstant $rstartRaw
     $rend = Convert-ToInstant $rendRaw
-    $rms = Convert-ToMillis ([string]$res.duration)
+    $rdurRaw = [string]$res.duration
+    $rms = Convert-ToMillis $rdurRaw
+    if ($rdurRaw -cmatch '^[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{7}$') {
+      $durShapeOk++
+    } else {
+      $durShapeLost++
+    }
     foreach ($rowStampRaw in @($rstartRaw, $rendRaw)) {
       if (-not [string]::IsNullOrWhiteSpace($rowStampRaw) -and $rowStampRaw -match '([+-][0-9]{2}:[0-9]{2}|Z)$') { $rowTimeOffsets++ }
     }
@@ -1472,9 +1497,10 @@ foreach ($e in $baseline.suites) {
   if ($badTimes -gt 0) { $rowAttrLost += "$badTimes row(s) carry an unreadable startTime or endTime" }
   if ($timeReversed -gt 0) { $rowAttrLost += "$timeReversed row(s) end before they start" }
   if ($badDuration -gt 0) { $rowAttrLost += "$badDuration row(s) carry an unreadable or negative duration" }
+  if ($durShapeLost -gt 0) { $rowAttrLost += "$durShapeLost row(s) carry a duration that is not written as hh:mm:ss.fffffff" }
   if ($outOfWindow -gt 0) { $rowAttrLost += "$outOfWindow row(s) fall outside the run's own Times window" }
   if ($rowAttrLost.Count -gt 0) {
-    throw "$($e.suite): the result rows contradict their own metadata while the total was $total - every count above is read from this file's rows, so rows that share an execution id, drop or mix a row attribute, or carry an impossible or zone-less timestamp can keep all of them identical. broken: $($rowAttrLost -join ', '). A TRX whose rows disagree with themselves was hand-merged or patched; regenerate it from a clean test run."
+    throw "$($e.suite): the result rows contradict their own metadata while the total was $total - every count above is read from this file's rows, so rows that share an execution id, drop or mix a row attribute, or carry an impossible or zone-less timestamp or a duration written in another shape can keep all of them identical. broken: $($rowAttrLost -join ', '). A TRX whose rows disagree with themselves was hand-merged or patched; regenerate it from a clean test run."
   }
   if ($durDrift -gt 0) {
     $durWarn += "$($e.suite) ($durDrift row(s) report a duration that disagrees with their own start/end by more than a second)"
@@ -2517,7 +2543,7 @@ foreach ($e in $baseline.suites) {
   }
   "$($e.suite): outcomes=$($actualOutcomes.Count) baseline=outcome table $(@($e.outcomes.PSObject.Properties.Name).Count) outcomes"
   "$($e.suite): identities=$pairedIds named=$namedRows unique test ids shared by both halves"
-  "$($e.suite): rowAttributes=$rowCount unique execution ids=$($execIdCounts.Count) ordered row times=$timeOrdered rows within the run window=$inWindow uniform row fields=$uniformFields rowTimeOffsets=$rowTimeOffsets/$($rowCount*2)"
+  "$($e.suite): rowAttributes=$rowCount unique execution ids=$($execIdCounts.Count) ordered row times=$timeOrdered rows within the run window=$inWindow uniform row fields=$uniformFields rowTimeOffsets=$rowTimeOffsets/$($rowCount*2) durationShape=$durShapeOk/$rowCount"
   "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount runSections=$runSectionMatches/7"
   "$($e.suite): executionIds=$($execByDefId.Count) distinct declared ids=$($defExecCounts.Count) paired rows=$pairedRowExecs paired result directories=$pairedRowDirs"
   "$($e.suite): displayNames=$displayNameChecked declared prefixes=$($displayNameChecked - $displayNameLost.Count) mismatched=$($displayNameLost.Count)"
