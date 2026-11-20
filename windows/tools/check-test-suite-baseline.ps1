@@ -203,6 +203,16 @@
 #   The gate now requires every row duration to be written as hh:mm:ss.fffffff
 #   and prints durationShape=<n>/<rows> on the row ladder line.
 
+#   Every element also carries exactly the attributes the writer gives it, and
+#   nothing above read that: the attribute loops only visit TestRun/@xmlns, the
+#   Counters block and the two header blocks, while every other element is read by
+#   name. An element that gains an attribute - a note, a duplicated value under
+#   another name - keeps every count, every pairing, every row time and every
+#   phase line identical while the file stops being the shape VSTest writes. The
+#   gate now walks every element in the document and refuses an attribute outside
+#   the writer's vocabulary; the structure ladder line adds
+#   attributeVocabulary=<elements with only known attributes>/<elements>.
+
 #   The rows also carry an order, and nothing above read it: TestEntries and the
 #   Results section are written from one ordered pass, so the row at position N is
 #   the row of the entry at position N. Every check above keys the two halves by id,
@@ -504,6 +514,12 @@
 #     ladder line stays identical. The row ladder line records
 #     durationShape=<rows in the canonical shape>/<rows>.
 
+#   an element carries an attribute the writer does not emit -> red: every element
+#     is read by name, so an extra attribute leaves every count, every pairing and
+#     every ladder line identical while the file is no longer the shape VSTest
+#     writes; the structure ladder line records attributeVocabulary=<elements
+#     carrying only known attributes>/<elements>.
+
 #   the row at position N of Results does not name the test that position N of
 #     TestEntries declares -> red. The two sections are emitted from one ordered
 #     pass, and every check above keys them by id, so a reordered, reassembled or
@@ -564,6 +580,37 @@ foreach ($outcome in @('Passed', 'Failed', 'NotExecuted', 'Error', 'Timeout', 'A
 $TeamTestNamespace = 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'
 $OutcomeByAttribute[($outcome.Substring(0, 1).ToLower() + $outcome.Substring(1))] = $outcome
 }
+
+# Every element is read by name above, so an element that gains an attribute keeps
+# every count, pairing, row time and phase line identical. Keep the complete
+# attribute set the writer gives each element; the check below refuses anything
+# outside it. Counters is the one block whose attributes are a vocabulary of their
+# own, so it is spelled from the outcome table rather than written out twice.
+$AttributeVocabulary = @{}
+$AttributeVocabulary['TestRun'] = @('id', 'name', 'runUser', 'xmlns')
+$AttributeVocabulary['Times'] = @('creation', 'finish', 'queuing', 'start')
+$AttributeVocabulary['TestSettings'] = @('id', 'name')
+$AttributeVocabulary['Deployment'] = @('runDeploymentRoot')
+$AttributeVocabulary['UnitTestResult'] = @('computerName', 'duration', 'endTime', 'executionId', 'outcome', 'relativeResultsDirectory', 'startTime', 'testId', 'testListId', 'testName', 'testType')
+$AttributeVocabulary['UnitTest'] = @('id', 'name', 'storage')
+$AttributeVocabulary['Execution'] = @('id')
+$AttributeVocabulary['TestMethod'] = @('adapterTypeName', 'className', 'codeBase', 'name')
+$AttributeVocabulary['TestEntry'] = @('executionId', 'testId', 'testListId')
+$AttributeVocabulary['TestList'] = @('id', 'name')
+$AttributeVocabulary['ResultSummary'] = @('outcome')
+$AttributeVocabulary['RunInfo'] = @('computerName', 'outcome', 'timestamp')
+$AttributeVocabulary['Counters'] = @(@('total', 'executed') + @($OutcomeByAttribute.Keys | Sort-Object))
+$AttributeVocabulary['ErrorInfo'] = @()
+$AttributeVocabulary['Message'] = @()
+$AttributeVocabulary['Output'] = @()
+$AttributeVocabulary['Results'] = @()
+$AttributeVocabulary['RunInfos'] = @()
+$AttributeVocabulary['StackTrace'] = @()
+$AttributeVocabulary['StdOut'] = @()
+$AttributeVocabulary['TestDefinitions'] = @()
+$AttributeVocabulary['TestEntries'] = @()
+$AttributeVocabulary['TestLists'] = @()
+$AttributeVocabulary['Text'] = @()
 
 # Sorted copy of one method's argument rows, duplicates kept. A row is the
 # display-name suffix from the first "(", i.e. the argument text of one
@@ -1601,6 +1648,42 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): the TRX sections do not agree with each other while the total was $total - the summary, the definitions, the result rows, the entry map and the declared lists all come from this file, so one that drops a section, adds or removes entries, or pairs an entry with the wrong execution id can keep every count above identical. mismatched: $($structureLost -join ', '). A TRX whose sections disagree was hand-merged or patched; regenerate it from a clean test run."
   }
 
+  # Every element also carries exactly the attributes the writer gives it, and
+  # nothing above read that: the attribute loops only visit TestRun/@xmlns, the
+  # Counters block and the two header blocks, while every other element is read by
+  # name. An element that gains an attribute - a note, a second copy of a value
+  # under another name - leaves every count, every pairing, every row time and
+  # every phase line identical while the file stops being the shape VSTest writes.
+  # The writer emits one fixed attribute set per element, so walk every element in
+  # the document and require each attribute to be one of them.
+  $attrElements = 0
+  $attrOk = 0
+  $attrStray = @()
+  $attrUnknown = @()
+  foreach ($ael in @($xml.SelectNodes('//*'))) {
+    $aelName = [string]$ael.LocalName
+    if (-not $AttributeVocabulary.ContainsKey($aelName)) {
+      if ($attrUnknown.Count -lt 12) { $attrUnknown += $aelName }
+      continue
+    }
+    $attrElements++
+    $allowedAttrs = $AttributeVocabulary[$aelName]
+    $strayAttrs = @()
+    foreach ($aat in @($ael.Attributes)) {
+      if ($allowedAttrs -notcontains [string]$aat.Name) { $strayAttrs += [string]$aat.Name }
+    }
+    if ($strayAttrs.Count -eq 0) {
+      $attrOk++
+    } elseif ($attrStray.Count -lt 12) {
+      $attrStray += "$aelName carries $($strayAttrs -join '/')"
+    }
+  }
+  if ($attrUnknown.Count -gt 0) {
+    Write-Host "::warning::$($e.suite): $($attrUnknown.Count) element name(s) this gate does not know ($(@($attrUnknown) -join ', ')) - their attributes were not checked"
+  }
+  if ($attrStray.Count -gt 0) {
+    throw "$($e.suite): an element carries an attribute the writer does not emit while the total was $total - every element above is read by name, so a file that gains an attribute keeps every count, every pairing, every row time and every phase line identical. broken: $($attrStray -join ', '). A TRX whose elements were extended by hand was hand-merged or patched; regenerate it from a clean test run."
+  }
   # A declared list is a vocabulary entry, not just an id in a set. The structure
   # check above asks a list id to exist, be unique and be used, and the row metadata
   # check asks every row to name one list, so the name - the only part a reader ever
@@ -2544,7 +2627,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): outcomes=$($actualOutcomes.Count) baseline=outcome table $(@($e.outcomes.PSObject.Properties.Name).Count) outcomes"
   "$($e.suite): identities=$pairedIds named=$namedRows unique test ids shared by both halves"
   "$($e.suite): rowAttributes=$rowCount unique execution ids=$($execIdCounts.Count) ordered row times=$timeOrdered rows within the run window=$inWindow uniform row fields=$uniformFields rowTimeOffsets=$rowTimeOffsets/$($rowCount*2) durationShape=$durShapeOk/$rowCount"
-  "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount runSections=$runSectionMatches/7"
+  "$($e.suite): structure=$sectionCount/7 single blocks entries=$entryCount matched entries=$matchedEntries paired execution ids=$pairedExecIds paired list ids=$pairedListIds lists=$listCount runSections=$runSectionMatches/7 attributeVocabulary=$attrOk/$attrElements"
   "$($e.suite): executionIds=$($execByDefId.Count) distinct declared ids=$($defExecCounts.Count) paired rows=$pairedRowExecs paired result directories=$pairedRowDirs"
   "$($e.suite): displayNames=$displayNameChecked declared prefixes=$($displayNameChecked - $displayNameLost.Count) mismatched=$($displayNameLost.Count)"
   "$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"
