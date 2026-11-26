@@ -57,6 +57,7 @@ import com.mediahub.core.ui.ThumbImage
 import com.mediahub.feature.detail.source.shouldShowSourceSelector
 import com.mediahub.feature.detail.source.sourceRows
 import com.mediahub.feature.detail.source.truncationMessage
+import com.mediahub.feature.detail.version.VersionSelector
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
@@ -81,6 +82,7 @@ fun DetailRoute(
     val seriesState by viewModel.seriesState.collectAsStateWithLifecycle()
     val sourceState by viewModel.sourceState.collectAsStateWithLifecycle()
     val favoriteState by viewModel.favoriteState.collectAsStateWithLifecycle()
+    val selectedVersionId by viewModel.selectedVersionId.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -157,14 +159,7 @@ fun DetailRoute(
                     onPlay(
                         viewModel.serverId,
                         viewModel.itemId,
-                        PlaybackLaunchSnapshot(
-                            itemId = item.id,
-                            type = item.type,
-                            title = item.title,
-                            runtimeMs = item.runtimeMs,
-                            posterUrl = item.posterUrl,
-                            container = item.container,
-                        )
+                        viewModel.launchSnapshot(item),
                     )
                 },
                 onSelectSeason = viewModel::selectSeason,
@@ -172,6 +167,8 @@ fun DetailRoute(
                 onOpenItem = onOpenItem,
                 sourceState = sourceState,
                 onSwitchSource = onSwitchSource,
+                selectedVersionId = selectedVersionId,
+                onSelectVersion = viewModel::selectVersion,
                 )
             }
         }
@@ -189,6 +186,8 @@ fun DetailBody(
     onOpenItem: ((MediaItem) -> Unit)? = null,
     sourceState: SourceResolutionState = SourceResolutionState.Idle,
     onSwitchSource: ((serverId: String, itemId: String, title: String) -> Unit)? = null,
+    selectedVersionId: String? = null,
+    onSelectVersion: (String) -> Unit = {},
 ) {
     val item = detail.item
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
@@ -275,6 +274,13 @@ fun DetailBody(
             Spacer(Modifier.width(8.dp))
             Text("立即播放", style = MaterialTheme.typography.titleMedium)
         }
+
+        // ---- 多版本选择（同服务器 MediaSource） ----
+        VersionSelector(
+            versions = detail.versions,
+            selectedVersionId = selectedVersionId,
+            onSelectVersion = onSelectVersion,
+        )
 
         // ---- 1F C2：跨服务器来源选择（ADR-038） ----
         SourceSelector(

@@ -9,10 +9,12 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.logging.LogTag
 import com.mediahub.feature.detail.source.CanonicalSourceResolver
 import com.mediahub.feature.detail.source.SourceResolution
+import com.mediahub.feature.detail.version.shouldShowVersionPanel
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
 import com.mediahub.model.PageRequest
+import com.mediahub.model.PlaybackLaunchSnapshot
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderHandle
@@ -54,6 +56,10 @@ class DetailViewModel @Inject constructor(
     private val _favoriteState = MutableStateFlow<FavoriteToggleState?>(null)
     val favoriteState: StateFlow<FavoriteToggleState?> = _favoriteState.asStateFlow()
 
+    /** 详情页选中的媒体版本（MediaSourceId）；null = 服务端默认版本（首项）。 */
+    private val _selectedVersionId = MutableStateFlow<String?>(null)
+    val selectedVersionId: StateFlow<String?> = _selectedVersionId.asStateFlow()
+
     private var handle: ProviderHandle? = null
     private var episodeJob: Job? = null
     private var sourceJob: Job? = null
@@ -74,6 +80,9 @@ class DetailViewModel @Inject constructor(
                     ?: throw ProviderException.NotYetImplemented(serverId, "该数据源的详情能力尚未接入")
                 val detail = detailProvider.getItemDetail(itemId)
                 _uiState.value = DetailUiState.Content(detail)
+                // 刷新后版本列表可能变化：旧选中 id 不在新列表里就回到服务端默认版本
+                _selectedVersionId.value = _selectedVersionId.value
+                    ?.takeIf { id -> detail.versions.any { it.id == id } }
                 // 收藏状态取自服务器 UserData（本机无收藏表）；无 favorite 能力的源不显示开关
                 if (h.favorite != null) {
                     _favoriteState.value = FavoriteToggle.fromServerState(detail.item.id, detail.item.isFavorite)
@@ -123,6 +132,33 @@ class DetailViewModel @Inject constructor(
         if (_seriesState.value.selectedSeasonId == seasonId) return
         _seriesState.value = _seriesState.value.copy(selectedSeasonId = seasonId)
         loadEpisodesForSeason(seasonId)
+    }
+
+    /** 选择媒体版本：只接受当前详情里真实存在的 id，脏值直接忽略。 */
+    fun selectVersion(versionId: String) {
+        val detail = (_uiState.value as? DetailUiState.Content)?.detail ?: return
+        if (detail.versions.none { it.id == versionId }) return
+        _selectedVersionId.value = versionId
+    }
+
+    /**
+     * 详情页 → 播放器的启动快照。版本只在“播放根条目本身 + 至少两个版本”时携带，
+     * 单集播放不继承剧集/电影的版本选择。
+     */
+    fun launchSnapshot(item: MediaItem): PlaybackLaunchSnapshot {
+        val detail = (_uiState.value as? DetailUiState.Content)?.detail
+        val versionId = _selectedVersionId.value?.takeIf {
+            detail != null && item.id == detail.item.id && shouldShowVersionPanel(detail.versions)
+        }
+        return PlaybackLaunchSnapshot(
+            itemId = item.id,
+            type = item.type,
+            title = item.title,
+            runtimeMs = item.runtimeMs,
+            posterUrl = item.posterUrl,
+            container = item.container,
+            versionId = versionId,
+        )
     }
 
     fun retryEpisodes() {
