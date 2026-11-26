@@ -3,6 +3,7 @@ package com.mediahub.player.mpv
 import android.view.Surface
 import com.mediahub.core.logging.*
 import com.mediahub.model.PlaybackSource
+import com.mediahub.model.ResumeSeekMode
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.player.engine.PlaybackSession
 import kotlinx.coroutines.CoroutineScope
@@ -76,6 +77,22 @@ class MpvSubtitlePresentationLifecycleTest {
             f.close(); val count = f.natives.sumOf { it.writes }
             f.engine.setSubtitlePresentation(SubtitleStyle(), 18)
             assertEquals(count, f.natives.sumOf { it.writes })
+        } finally { f.close() }
+    }
+
+    @Test fun exactResumeAppliesHrSeekBeforeInit() = runTest {
+        val f = Fixture(backgroundScope)
+        try {
+            f.engine.play(session("exact").copy(resumeSeekMode = ResumeSeekMode.EXACT)); runCurrent()
+            assertEquals("yes", f.natives.single().initOptions["hr-seek"])
+        } finally { f.close() }
+    }
+
+    @Test fun defaultResumeKeepsKeyframeSeeking() = runTest {
+        val f = Fixture(backgroundScope)
+        try {
+            f.engine.play(session("keyframe")); runCurrent()
+            assertEquals("no", f.natives.single().initOptions["hr-seek"])
         } finally { f.close() }
     }
 

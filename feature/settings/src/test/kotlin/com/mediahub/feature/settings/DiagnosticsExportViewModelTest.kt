@@ -1,7 +1,9 @@
 package com.mediahub.feature.settings
 
 import com.mediahub.core.database.prefs.UserPreferencesRepository
+import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.common.sync.InMemorySourceSyncBaselineStore
+import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.UserPreferences
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
@@ -36,6 +38,17 @@ class DiagnosticsExportViewModelTest {
         override suspend fun update(transform: (UserPreferences) -> UserPreferences) = Unit
     }
 
+    /** 本组用例不涉及播放记录，清空替身固定返回 0。 */
+    private object EmptyProgressStore : ProgressStore {
+        override fun observeContinueWatching(limit: Int): Flow<List<PlaybackProgress>> =
+            MutableStateFlow(emptyList())
+
+        override suspend fun getResume(serverId: String, itemId: String): Long? = null
+        override suspend fun save(progress: PlaybackProgress) = Unit
+        override suspend fun get(serverId: String, itemId: String): PlaybackProgress? = null
+        override suspend fun clearAll(): Int = 0
+    }
+
     private class GatedPort(
         private val gate: CompletableDeferred<Unit>,
     ) : DiagnosticsExportPort {
@@ -51,7 +64,7 @@ class DiagnosticsExportViewModelTest {
     fun export_reports_progress_then_success_and_does_not_overlap() = runTest(dispatcher) {
         val gate = CompletableDeferred<Unit>()
         val port = GatedPort(gate)
-        val viewModel = SettingsViewModel(Repository(), InMemorySourceSyncBaselineStore(), port)
+        val viewModel = SettingsViewModel(Repository(), InMemorySourceSyncBaselineStore(), port, EmptyProgressStore)
 
         assertEquals(DiagnosticsExportState.Idle, viewModel.diagnosticsState.value)
         assertNull(DiagnosticsExportText.line(DiagnosticsExportState.Idle))
@@ -75,7 +88,7 @@ class DiagnosticsExportViewModelTest {
             override suspend fun export(): DiagnosticsExportOutcome =
                 DiagnosticsExportOutcome.Failed("diagnostics-write-failed", "not a directory")
         }
-        val viewModel = SettingsViewModel(Repository(), InMemorySourceSyncBaselineStore(), port)
+        val viewModel = SettingsViewModel(Repository(), InMemorySourceSyncBaselineStore(), port, EmptyProgressStore)
 
         viewModel.exportDiagnostics()
         advanceUntilIdle()

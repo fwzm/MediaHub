@@ -100,7 +100,7 @@ jobs:
       - name: Unit tests
         timeout-minutes: 30
         # testDebugUnitTest 不会运行独立 Kotlin/JVM 模块的 test task。
-        run: ./gradlew testDebugUnitTest :core:model:test :provider:api:test :metadata:test --no-daemon --continue --no-parallel --max-workers=1 -Dorg.gradle.jvmargs=-Xmx2048m -Pkotlin.compiler.execution.strategy=in-process --rerun-tasks --no-build-cache
+        run: ./gradlew testDebugUnitTest :core:model:test :provider:api:test :metadata:test :core:download:test --no-daemon --continue --no-parallel --max-workers=1 -Dorg.gradle.jvmargs=-Xmx2048m -Pkotlin.compiler.execution.strategy=in-process --rerun-tasks --no-build-cache
 
       - name: Require fresh unit test evidence
         if: ${{ !cancelled() }}

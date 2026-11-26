@@ -12,6 +12,7 @@
     <string name="settings_prefer_hardware_decoding">优先硬件解码</string>
     <string name="settings_prefer_direct_play">优先直连播放（Direct Play）</string>
     <string name="settings_auto_play_next_episode">自动连播下一集</string>
+    <string name="settings_precise_resume_seek">精确续播（较慢，按精确时间恢复）</string>
     <string name="settings_show_media_info">播放器显示媒体信息浮层</string>
     <string name="settings_professional_info">播放专业信息（关闭为精简面板）</string>
     <string name="settings_auto_landscape">播放视频时自动横屏</string>

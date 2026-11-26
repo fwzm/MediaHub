@@ -32,8 +32,11 @@ import androidx.compose.ui.unit.dp
 import androidx.annotation.StringRes
 import androidx.compose.material3.TextButton
 import com.mediahub.model.AudioTrack
+import com.mediahub.model.HdrType
+import com.mediahub.model.MediaVersion
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.SubtitleTrack
+import java.util.Locale
 
 /**
  * 播放器 Bottom Sheets（Phase 1B-2.4）：
@@ -442,4 +445,84 @@ private fun ColorRow(
             }
         }
     }
+}
+
+// ---- 多版本闭环（A 组 27/39/55/65/145）：播放器内展示/切换 MediaSource ----
+
+/** 播放器内版本切换面板。服务端返回顺序即优先级，未指定版本时首项为默认。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun VersionSheet(
+    versions: List<MediaVersion>,
+    selectedId: String?,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 24.dp),
+        ) {
+            Text(
+                stringResource(R.string.player_versions),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp),
+            )
+            if (versions.isEmpty()) {
+                Text(
+                    stringResource(R.string.player_versions_empty),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                )
+                return@Column
+            }
+            versions.forEachIndexed { index, version ->
+                val selected = if (selectedId != null) version.id == selectedId else index == 0
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelect(version.id) }
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                ) {
+                    RadioButton(selected = selected, onClick = { onSelect(version.id) })
+                    Column(modifier = Modifier.padding(start = 8.dp)) {
+                        Text(versionLabel(version, index), style = MaterialTheme.typography.bodyLarge)
+                        versionDetail(version)?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun versionLabel(version: MediaVersion, index: Int): String =
+    version.qualityLabel?.takeIf { it.isNotBlank() }
+        ?: version.name.takeIf { it.isNotBlank() }
+        ?: "版本 ${index + 1}"
+
+private fun versionDetail(version: MediaVersion): String? {
+    val parts = buildList {
+        if (version.width != null && version.height != null) add("${version.width}×${version.height}")
+        else version.height?.let { add(it.toString()) }
+        when (version.hdrType) {
+            HdrType.NONE -> Unit
+            HdrType.HDR10 -> add("HDR10")
+            HdrType.HDR10_PLUS -> add("HDR10+")
+            HdrType.HLG -> add("HLG")
+            HdrType.DOLBY_VISION -> add("杜比视界")
+        }
+        version.bitrate?.takeIf { it > 0 }?.let { add(String.format(Locale.ROOT, "%.1f Mbps", it / 1_000_000.0)) }
+        version.sizeBytes?.takeIf { it > 0 }?.let { add(String.format(Locale.ROOT, "%.1f GB", it / 1_000_000_000.0)) }
+    }
+    return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }
