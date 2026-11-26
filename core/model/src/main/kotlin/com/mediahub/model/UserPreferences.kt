@@ -6,6 +6,15 @@ package com.mediahub.model
 enum class PlaybackEngineMode { AUTO, MEDIA3, MPV }
 
 /**
+ * 续播定位策略（条目 124）。
+ *
+ * - [KEYFRAME]：默认。从目标位置附近的关键帧恢复，起播更快，但位置可能早于记录值。
+ * - [EXACT]：按精确时间定位。EXO 使用 `SeekParameters.EXACT`，mpv 使用 `hr-seek=yes`；
+ *   代价是首帧更慢（需要解码到精确位置）。
+ */
+enum class ResumeSeekMode { KEYFRAME, EXACT }
+
+/**
  * 用户播放偏好（持久化于 DataStore，见 core:database）。
  * 播放兼容性评估器（player:compatibility）与播放器 UI 都消费该模型。
  */
@@ -16,6 +25,8 @@ data class UserPreferences(
     val enableHardwareDecoding: Boolean = true,
     val preferDirectPlay: Boolean = true,
     val autoPlayNextEpisode: Boolean = true,
+    /** 精确续播（条目 124）：默认从邻近关键帧快速起播，开启后按精确时间定位。 */
+    val preciseResumeSeek: Boolean = false,
     val maxBitrateBps: Long? = null,
     val showPlayerInfoOverlay: Boolean = false,
     /** 播放视频时自动横屏（进入播放器锁定 SENSOR_LANDSCAPE，退出恢复原方向）。 */

@@ -261,6 +261,8 @@ class MpvPlaybackEngine internal constructor(
                         logger.i(LogTag.PLAYER, "mpv tuning " + tuning.name + "=" + tuning.value)
                     }
                     val startMs = s.startPositionMs ?: s.resumePositionMs
+                    // 条目 124：按会话精度设置起播 seek（必须在 init 之前）。
+                    m.setOptionString(MpvResumeSeekOption.NAME, MpvResumeSeekOption.value(s.resumeSeekMode))
                     if (startMs != null && startMs > 0) m.setOptionString("start", (startMs / 1000.0).toString())
                     logger.i(LogTag.PLAYER, "mpv container=$container video=${src.videoCodec} audio=${src.audioCodec} startMs=$startMs")
                     checkCurrent()

@@ -2,6 +2,7 @@ package com.mediahub.player.engine
 
 import com.mediahub.model.MediaType
 import com.mediahub.model.PlaybackSource
+import com.mediahub.model.ResumeSeekMode
 
 /** 一次播放会话：条目 + 播放源 + 起播位置。 */
 data class PlaybackSession(
@@ -24,4 +25,9 @@ data class PlaybackSession(
      * 降级路径显式把旧引擎的暂停态带过来。
      */
     val startPaused: Boolean? = null,
+    /**
+     * 续播定位策略（条目 124）：换源/换集/续播时的起播 seek 精度。
+     * 默认 [ResumeSeekMode.KEYFRAME] 以邻近关键帧快速起播；EXACT 按精确时间定位。
+     */
+    val resumeSeekMode: ResumeSeekMode = ResumeSeekMode.KEYFRAME,
 )
