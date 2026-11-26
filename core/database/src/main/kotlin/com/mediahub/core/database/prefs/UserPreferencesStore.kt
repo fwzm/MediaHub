@@ -11,6 +11,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.mediahub.model.DanmakuPreferences
 import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.PlayerGestures
 import com.mediahub.model.PlayerVisualEffectsPreferences
@@ -63,6 +64,7 @@ class UserPreferencesStore internal constructor(
             writeGestures(prefs, updated.gestures)
             writePlayerVisualEffects(prefs, updated.playerVisualEffects)
             writeProfessionalInfo(prefs, updated.professionalInfo)
+            writeDanmaku(prefs, updated.danmaku)
             updated.preferredAudioLanguage?.takeIf { it.isNotBlank() }?.let { prefs[Keys.PREFERRED_AUDIO_LANGUAGE] = it }
                 ?: prefs.remove(Keys.PREFERRED_AUDIO_LANGUAGE)
             updated.preferredSubtitleLanguage?.takeIf { it.isNotBlank() }?.let { prefs[Keys.PREFERRED_SUBTITLE_LANGUAGE] = it }
@@ -104,6 +106,7 @@ class UserPreferencesStore internal constructor(
             gestures = readGestures(prefs),
             playerVisualEffects = readPlayerVisualEffects(prefs),
             professionalInfo = readProfessionalInfo(prefs),
+            danmaku = readDanmaku(prefs),
             preferredAudioLanguage = prefs[Keys.PREFERRED_AUDIO_LANGUAGE],
             preferredSubtitleLanguage = prefs[Keys.PREFERRED_SUBTITLE_LANGUAGE],
             videoAspectOverrides = VideoAspectMemory.decode(prefs[Keys.VIDEO_ASPECT_OVERRIDES]),
@@ -206,6 +209,27 @@ class UserPreferencesStore internal constructor(
         prefs[Keys.PROFESSIONAL_INFO_EXPERT_MODE] = professionalInfo.expertMode
     }
 
+    private fun readDanmaku(prefs: Preferences): DanmakuPreferences =
+        DanmakuPreferences(
+            enabled = prefs[Keys.DANMAKU_ENABLED] ?: true,
+            opacity = (prefs[Keys.DANMAKU_OPACITY] ?: DanmakuPreferences().opacity)
+                .coerceIn(DanmakuPreferences.MIN_OPACITY, 1f),
+            strokeWidthDp = (prefs[Keys.DANMAKU_STROKE_WIDTH] ?: DanmakuPreferences().strokeWidthDp)
+                .coerceIn(0f, DanmakuPreferences.MAX_STROKE_WIDTH_DP),
+            onlineEnabled = prefs[Keys.DANMAKU_ONLINE_ENABLED] ?: false,
+        )
+
+    private fun writeDanmaku(
+        prefs: MutablePreferences,
+        danmaku: DanmakuPreferences,
+    ) {
+        prefs[Keys.DANMAKU_ENABLED] = danmaku.enabled
+        prefs[Keys.DANMAKU_OPACITY] = danmaku.opacity.coerceIn(DanmakuPreferences.MIN_OPACITY, 1f)
+        prefs[Keys.DANMAKU_STROKE_WIDTH] =
+            danmaku.strokeWidthDp.coerceIn(0f, DanmakuPreferences.MAX_STROKE_WIDTH_DP)
+        prefs[Keys.DANMAKU_ONLINE_ENABLED] = danmaku.onlineEnabled
+    }
+
     private inline fun <reified T : Enum<T>> enumValueOrNull(stored: String): T? =
         enumValues<T>().firstOrNull { value -> value.name == stored }
 
@@ -246,6 +270,10 @@ class UserPreferencesStore internal constructor(
         val VISUAL_AUDIO_REACTIVE = booleanPreferencesKey("player_visual_effects_audio_reactive")
         val VISUAL_PERFORMANCE_MODE = stringPreferencesKey("player_visual_effects_performance_mode")
         val PROFESSIONAL_INFO_EXPERT_MODE = booleanPreferencesKey("player_professional_info_expert_mode")
+        val DANMAKU_ENABLED = booleanPreferencesKey("danmaku_enabled")
+        val DANMAKU_OPACITY = floatPreferencesKey("danmaku_opacity")
+        val DANMAKU_STROKE_WIDTH = floatPreferencesKey("danmaku_stroke_width_dp")
+        val DANMAKU_ONLINE_ENABLED = booleanPreferencesKey("danmaku_online_enabled")
         val PREFERRED_AUDIO_LANGUAGE = stringPreferencesKey("preferred_audio_language")
         val PREFERRED_SUBTITLE_LANGUAGE = stringPreferencesKey("preferred_subtitle_language")
         val VIDEO_ASPECT_OVERRIDES = stringPreferencesKey("video_aspect_overrides")
