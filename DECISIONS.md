@@ -626,6 +626,16 @@
   （Emby production wire）；Jellyfin = CONFIRMED PROTOCOL RISK /
   DEVICE PROOF PENDING / PRODUCTION FROZEN（本 slice 零 Jellyfin delta）。
 
+- **补充（2026-11-15，ADR-040 correction，append-only）**：服务端兼容批次为
+  fnOS 等"PlaybackInfo 不返回 PlaySessionId"的兼容服引入**末级兜底**：
+  仅当 `PlaybackInfo.playSessionId` 为空白时，客户端生成 `mh-<uuid>` 作为
+  `PlaybackSource.sessionId` 并用于流地址与进度上报；服务端给出真值时始终优先
+  真值。上文"MediaHub 不自行生成"在**正常路径**仍然有效，本补充只覆盖原本会
+  直接 Parse 失败、完全无法播放的缺失分支。证据边界：Emby 4.x 已由上文实测证明
+  "任意非空值亦 204（服务端视作不透明键）"；fnOS 缺失 PSID 时的实际行为与真机
+  续播闭环 **NOT_RUN**，需真实 fnOS 样本复核。若后续真机证明服务端拒绝该兜底，
+  应回退为显式错误而非继续重试。
+
 ## ADR-041 本地备份还原：冻结计划、凭据隔离与可恢复持久化
 - 状态：PR #18 Agent B 修复提案（2026-09-09），待 Agent A 接回及独立复审，尚未合并/封板。
 - 本条追加现有约束，不改写 ADR-003/016/028/033/039 历史：导出不携带凭据或临时 URL，最多一个默认源，身份变更不得复用旧鉴权；同源替换不改为无条件登出。

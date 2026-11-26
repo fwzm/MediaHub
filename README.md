@@ -117,6 +117,9 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
 ### Emby（Phase 1A–1B-2.4）
 1. 首页 → 添加媒体库 → Emby → 填服务器地址 / 用户名 / 密码 → 登录并添加。
 2. 点 Emby 服务器卡片 → 浏览 Views → 电影库 / 剧集库 → 海报墙（电影/剧集 2:3 海报，单集 16:9 剧照）。
+   地址只填主机、不确定协议或端口时，可点地址框旁「自动识别」：依次尝试 https/http ×
+   8096/8920/443/80（最多 6 个候选），成功后回填完整地址并显示识别结果；全部失败会列出
+   实际尝试过的地址，不会静默改用猜测值。显式写了协议/端口时只探测该组合。
 3. 点 Movie / Episode → 详情页（backdrop + 海报 + 元信息 + 简介）→ 播放。
 4. 播放（无转码 Direct Stream）：Token 只走请求头不进 URL（ADR-026）；
    跨 origin 重定向剥离凭据（ADR-030）；图片加载同源注入鉴权、跨 origin 剥离（ADR-031）。
@@ -131,7 +134,11 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
    未设置首选语言时保持既有默认策略（字幕不自动开启）。
 6. 手动选中的音轨/字幕轨只在本播放会话内记录：自动连播下一集时按语言/标题继承同一条轨；
    用户显式关闭字幕后，下一集保持关闭，不会被首选字幕语言重新打开。
-7. 播放进度自动写入本地快照 → 首页"继续观看"（缩略图 + 进度条）。
+7. 播放进度自动写入本地快照 → 首页"继续观看"（缩略图 + 进度条）；服务端支持时
+   同时读取 `/Users/{id}/Items/Resume` 与 `UserData.PlaybackPositionTicks` 做跨设备续播，
+   退出时先补发最终 Progress 再发 Stopped（兼容只认 Progress 落库位置的服务器）。
+   外挂字幕兼容 `S_TEXT/UTF8` 等 MediaBrowser codec 别名，以及只给 `DeliveryUrl`、
+   不置 `IsExternal` 的服务；请求仍走官方字幕端点并只在请求头带 Token（ADR-026）。
 8. 播放期保屏与续播精度：播放中持有 `FLAG_KEEP_SCREEN_ON`，暂停、解析失败或退出播放页立即恢复系统锁屏；
    换源/换集时进度、缓冲、时长与播放意图先清零，等新源解析后再重算。
    设置 → 播放 →「精确续播」默认关闭：EXO 用 `SeekParameters.CLOSEST_SYNC`、mpv 用 `hr-seek=no`，
@@ -487,6 +494,23 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   - **干净机安装**：`NOT_RUN`，条件为一台没有 .NET 与 Windows App Runtime 的干净 Windows 机器或快照。
   - **便携 zip**：本机可从复制出来的目录启动；安装器 / MSIX 在缺少 Windows App Runtime 时的具体行为见
     [windows/docs/licensing/PACKAGING.md](windows/docs/licensing/PACKAGING.md)。
+
+#### 服务器兼容与登录（2026-11-15 批次，Draft PR，未合并）
+
+- 已在本地门禁验证（`EXECUTED_PASS`，`--rerun-tasks --no-build-cache`）：服务器地址协议/端口自动识别；
+  Provider 错误码 → 中文文案（403 明确标注不是密码错误）；播放期 HTTP 403/404/429/5xx 结构化映射；
+  Emby/fnOS 续播读取（Resume 端点 404/405 按能力缺失处理）与退出前最终 Progress；
+  `RunTimeTicks` 标准/毫秒/秒三尺度归一（不可信值不显示）；反代子路径图片鉴权 scope；
+  外挂字幕 `S_TEXT/*` codec 别名与仅给 `DeliveryUrl` 的判定；首页/媒体库重复或缺失 id 的响应去重并转错误态；
+  SAF 访问异常统一转「重新授权目录」。
+- `NOT_RUN`（需外部条件，不得视为通过）：
+  - 真实 fnOS / Emby / Jellyfin 服务器的继续观看回写、Resume 读取与 403/404 行为：条件为可用测试服务器；
+    本批次只用 MockWebServer 与本地夹具，未访问任何真实服务器。
+  - 真实反代子路径（如 `https://host/custom`）图片加载：条件为部署一台带子路径的反代并观察是否仍 401。
+  - fnOS 真机跨设备续播、外挂字幕实际加载、授权失效设备上的 SAF 重新授权：条件为真机与真实目录授权。
+  - 缺 `PlaySessionId` 的兼容服：按 ADR-040 补充走 `mh-<uuid>` 末级兜底，服务端接受性待真实样本复核。
+- 已知残留：未处理真实服务器的转码/直连策略差异；媒体库「闪退」目前只收敛了重复/缺失 id 路径，
+  其它服务端畸形字段若仍触发 Compose 约束，需按新样本追加回归。
 
 ### 构建与测试
 

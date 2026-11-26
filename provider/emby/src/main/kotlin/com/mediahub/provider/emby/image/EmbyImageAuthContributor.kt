@@ -8,6 +8,7 @@ import com.mediahub.provider.emby.api.EmbyAuthorizationHeaderBuilder
 import com.mediahub.provider.emby.session.EmbySessionStore
 import javax.inject.Inject
 import javax.inject.Singleton
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
  * Emby 图片鉴权贡献者（Phase 1G-A，ADR-039）：把 1B-2.3 起 app 层
@@ -35,6 +36,23 @@ class EmbyImageAuthContributor @Inject constructor(
     override fun authScopeUrl(baseUrl: String): String = buildString {
         append(baseUrl.trimEnd('/'))
         if (!endsWith("/emby")) append("/emby")
+    }
+
+    /**
+     * 反代子路径兼容（用户条目 22）：baseUrl 形如 `https://h/custom` 时，服务端返回的
+     * 图片绝对 URL 通常是 `https://h/custom/Items/...`（不带 `/emby`），只看
+     * [authScopeUrl] 会匹配不到 scope → 图片 401 空白。
+     *
+     * 因此当且仅当 baseUrl **带非空 path** 时，额外登记 baseUrl 自身；
+     * 裸 origin（path 为空）仍只有 `/emby` scope，避免把同 origin 的全部路径都归给本服务器
+     * （跨服凭据隔离不变；同前缀多 serverId 仍由 app 层 fail closed）。
+     */
+    override fun authScopeUrls(baseUrl: String): List<String> {
+        val trimmed = baseUrl.trim().trimEnd('/')
+        val path = runCatching { trimmed.toHttpUrlOrNull()?.encodedPath }.getOrNull()
+            .orEmpty().trim('/')
+        return if (path.isEmpty()) listOf(authScopeUrl(trimmed))
+        else listOf(authScopeUrl(trimmed), trimmed).distinct()
     }
 
     override suspend fun headersFor(serverId: String): Map<String, String>? {

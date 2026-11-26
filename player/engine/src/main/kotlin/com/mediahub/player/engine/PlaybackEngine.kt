@@ -699,36 +699,7 @@ class PlaybackEngine(
             .setMimeType(mimeType)
             .build()
 
-    private fun mapPlayerError(e: PlaybackException): PlaybackError {
-        val details = mapOf(
-            "media3ErrorCode" to e.errorCode.toString(),
-            "message" to (e.message ?: ""),
-        )
-        // 缺陷 47/87：厂商把"共享纹理失败/数据访问失败"放在异常链 message 里，
-        // Media3 没有稳定错误码；先按取证字符串归类，识别不了再走原有错误码映射。
-        PlaybackFailureClassifier.classify(e)?.let { code ->
-            return PlaybackError(code, details = details, cause = e)
-        }
-        return when (e.errorCode) {
-            PlaybackException.ERROR_CODE_DECODING_FAILED,
-            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
-            PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
-            -> PlaybackError(PlaybackError.Code.DECODER_ERROR, details = details, cause = e)
-
-            PlaybackException.ERROR_CODE_DRM_CONTENT_ERROR,
-            PlaybackException.ERROR_CODE_DRM_LICENSE_ACQUISITION_FAILED,
-            PlaybackException.ERROR_CODE_DRM_PROVISIONING_FAILED,
-            PlaybackException.ERROR_CODE_DRM_SYSTEM_ERROR,
-            PlaybackException.ERROR_CODE_DRM_UNSPECIFIED,
-            -> PlaybackError(PlaybackError.Code.DRM_ERROR, details = details, cause = e)
-
-            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
-            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
-            -> PlaybackError(PlaybackError.Code.NETWORK_TIMEOUT, details = details, cause = e)
-
-            else -> PlaybackError(PlaybackError.Code.UNKNOWN, details = details, cause = e)
-        }
-    }
+    private fun mapPlayerError(e: PlaybackException): PlaybackError = mapPlaybackException(e)
 
     private companion object {
         const val EXTERNAL_SUBTITLE_CONFIRM_ATTEMPTS = 41

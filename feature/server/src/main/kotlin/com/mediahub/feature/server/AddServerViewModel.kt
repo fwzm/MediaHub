@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.IdGenerator
+import com.mediahub.core.common.ServerAddressDetector
 import com.mediahub.core.common.ServerAddressNormalizer
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
@@ -42,6 +43,12 @@ data class AddServerUiState(
     val addressError: String? = null,
     /** 地址草稿版本：任何地址/协议变化递增；异步测试结果按发起时版本绑定。 */
     val addressVersion: Long = 0,
+    /** 正在自动识别协议/端口（审计条目 75）。 */
+    val isDetecting: Boolean = false,
+    /** 上一次识别出的完整地址（未识别/已失效时为 null）。 */
+    val detectedAddress: String? = null,
+    /** 识别结果文案（成功/失败均可读）。 */
+    val detectionMessage: String? = null,
     val isReauthorizing: Boolean = false,
     val isLoadingExisting: Boolean = false,
     val isTesting: Boolean = false,
@@ -73,6 +80,12 @@ class AddServerViewModel @Inject constructor(
     private var probeGeneration = 0L
     private var probeJob: Job? = null
     private var persistenceOperation = 0L
+
+    /**
+     * 地址自动识别的探测钩子（审计条目 75）。默认走真实 `HttpURLConnection`；
+     * 测试替换为假 prober，从而**不发任何网络请求**。
+     */
+    internal var addressProber: suspend (String) -> Boolean = { url -> ServerAddressProber.probe(url) }
 
     private val _uiState = MutableStateFlow(
         AddServerUiState(
@@ -163,6 +176,9 @@ class AddServerViewModel @Inject constructor(
                 password = "",
                 isTesting = false,
                 testResult = null,
+                isDetecting = false,
+                detectedAddress = null,
+                detectionMessage = null,
                 loginError = null,
                 error = null,
             )
@@ -180,7 +196,8 @@ class AddServerViewModel @Inject constructor(
             val tree = localTree(raw)
             return@updateEditable st.copy(baseUrl = raw, resolvedUrl = tree,
                 addressError = if (tree == null) "请选择需要授权的本地目录" else null,
-                addressVersion = st.addressVersion + 1, testResult = null, error = null)
+                addressVersion = st.addressVersion + 1, testResult = null, error = null,
+                isDetecting = false, detectedAddress = null, detectionMessage = null)
         }
         val detected = ServerAddressNormalizer.explicitHttpScheme(raw)
         val preferHttps = detected?.let { it == "https" } ?: st.preferHttps
@@ -192,6 +209,10 @@ class AddServerViewModel @Inject constructor(
             addressError = (normalized as? ServerAddressNormalizer.Result.Invalid)?.error?.userMessage,
             addressVersion = st.addressVersion + 1,
             testResult = null,
+            // 地址变了，旧识别结果立即失效（按 addressVersion 绑定的异步结果也会被丢弃）
+            isDetecting = false,
+            detectedAddress = null,
+            detectionMessage = null,
         )
     }
 
@@ -211,7 +232,73 @@ class AddServerViewModel @Inject constructor(
             addressError = (normalized as? ServerAddressNormalizer.Result.Invalid)?.error?.userMessage,
             addressVersion = st.addressVersion + 1,
             testResult = null,
+            isDetecting = false,
+            detectedAddress = null,
+            detectionMessage = null,
         )
+    }
+
+    /**
+     * 自动识别协议与端口（审计条目 75）：仅在非 LOCAL 且地址可规范化时执行。
+     *
+     * 结果按发起时的 [AddServerUiState.addressVersion] 绑定——地址/协议一旦变化，
+     * 迟到的探测结果直接丢弃，绝不回写（避免把用户新输入改回旧地址）。
+     * 识别成功只代表"该协议+端口有 HTTP 响应"，**不代表登录成功**。
+     */
+    fun detectAddress() {
+        val descriptor = selectedDescriptor() ?: return
+        if (descriptor.serverType == ServerType.LOCAL) return
+        val state = _uiState.value
+        if (formLocked(state) || state.isDetecting || state.isTesting) return
+        if (state.baseUrl.isBlank()) {
+            _uiState.update { it.copy(addressError = "请输入服务器地址", detectionMessage = null) }
+            return
+        }
+        val normalized = ServerAddressNormalizer.normalize(state.baseUrl, state.preferHttps)
+        if (normalized is ServerAddressNormalizer.Result.Invalid) {
+            // 输入本身非法：不探测，原样报字段错误
+            _uiState.update {
+                it.copy(
+                    addressError = normalized.error.userMessage,
+                    detectedAddress = null,
+                    detectionMessage = null,
+                    isDetecting = false,
+                )
+            }
+            return
+        }
+        val candidates = ServerAddressDetector.plan(state.baseUrl, state.preferHttps)
+        if (candidates.isEmpty()) return
+        val versionAtRequest = state.addressVersion
+        _uiState.update {
+            it.copy(isDetecting = true, detectedAddress = null, detectionMessage = null, error = null)
+        }
+        viewModelScope.launch {
+            val result = ServerAddressDetector.detect(candidates) { addressProber(it) }
+            _uiState.update { current ->
+                if (current.addressVersion != versionAtRequest) return@update current
+                when (result) {
+                    is ServerAddressDetector.DetectionResult.Detected -> current.copy(
+                        baseUrl = result.address,
+                        preferHttps = result.scheme == "https",
+                        resolvedUrl = result.address,
+                        addressError = null,
+                        isDetecting = false,
+                        detectedAddress = result.address,
+                        detectionMessage = "已识别：${result.address}",
+                        addressVersion = current.addressVersion + 1,
+                        testResult = null,
+                    )
+
+                    is ServerAddressDetector.DetectionResult.NotDetected -> current.copy(
+                        isDetecting = false,
+                        detectedAddress = null,
+                        detectionMessage = "未能自动识别，已尝试 " +
+                            result.attempted.joinToString("、"),
+                    )
+                }
+            }
+        }
     }
 
     fun updateUsername(username: String) = updateEditable { it.copy(username = username) }

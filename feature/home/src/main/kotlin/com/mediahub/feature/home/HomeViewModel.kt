@@ -63,6 +63,12 @@ class HomeViewModel @Inject constructor(
 
     val continueWatching: StateFlow<List<PlaybackProgress>> =
         progressRepository.observeContinueWatching(limit = 20)
+            // 兼容服写入的畸形进度（缺 serverId/itemId）点击会合成非法详情路由（detail//…），
+            // 重复的 (serverId,itemId) 会让 LazyRow 的 key 冲突崩溃；单条跳过，不影响其它记录。
+            .map { rows ->
+                rows.filter { it.serverId.isNotBlank() && it.itemId.isNotBlank() }
+                    .distinctBy { it.serverId to it.itemId }
+            }
             .onEach { _continueWatchingFailed.value = false }
             .catch { error ->
                 logger.w(LogTag.UI, "首页继续观看分区加载失败，保留其余分区", error)
