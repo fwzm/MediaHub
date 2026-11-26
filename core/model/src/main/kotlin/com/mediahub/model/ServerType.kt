@@ -9,6 +9,7 @@ enum class ServerType(val label: String, val category: Category) {
     JELLYFIN("Jellyfin", Category.MEDIA_SERVER),
     PLEX("Plex", Category.MEDIA_SERVER),
     FN_NAS("FnNas", Category.MEDIA_SERVER),
+    IPTV("IPTV", Category.MEDIA_SERVER),
     WEBDAV("WebDAV", Category.CLOUD_STORAGE),
     SMB("SMB", Category.CLOUD_STORAGE),
     LOCAL("本地存储", Category.CLOUD_STORAGE),
