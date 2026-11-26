@@ -703,7 +703,9 @@ class PlayerViewModel @Inject constructor(
                         null
                     }
                 handle = providerHandle
-                _versionSwitchAvailable.value = providerHandle.detail != null
+                // 下载内核（#110）把 providerHandle 变成可空（有本地已下载源时 registry 可返回 null），
+                // 版本切换能力只在拿到 provider 详情时才存在，故必须走安全调用。
+                _versionSwitchAvailable.value = providerHandle?.detail != null
 
                 val detailProvider = providerHandle?.detail
                 val playbackProvider = providerHandle?.playback
