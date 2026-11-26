@@ -740,7 +740,7 @@ class PlayerViewModelTest {
         override fun e(tag: LogTag, message: String, throwable: Throwable?) = Unit
     }
 
-    private fun mediaItemWithPoster(url: String) = MediaItem(
+    private fun mediaItemWithPoster(url: String?) = MediaItem(
         serverId = "srv-1",
         id = "m1",
         type = MediaType.MOVIE,
