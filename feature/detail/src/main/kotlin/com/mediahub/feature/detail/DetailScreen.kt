@@ -47,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -283,7 +284,8 @@ fun DetailBody(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 20.dp)
-                .height(54.dp),
+                .height(54.dp)
+                .testTag(DetailTestTags.PRIMARY_PLAY_ACTION),
             shape = MaterialTheme.shapes.medium,
         ) {
             Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(26.dp))
