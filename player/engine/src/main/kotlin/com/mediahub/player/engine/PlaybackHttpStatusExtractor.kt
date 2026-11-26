@@ -44,6 +44,11 @@ internal fun mapPlaybackException(e: PlaybackException): PlaybackError {
         "media3ErrorCode" to e.errorCode.toString(),
         "message" to (e.message ?: ""),
     )
+    // 缺陷 47/87：厂商把「共享纹理失败 / 数据访问失败」塞在异常链 message 里，Media3 没有稳定错误码；
+    // 先按取证字符串归类（SURFACE_ERROR / DATA_ACCESS_ERROR），识别不了再走下面的错误码映射。
+    PlaybackFailureClassifier.classify(e)?.let { code ->
+        return PlaybackError(code, details = details, cause = e)
+    }
     return when (e.errorCode) {
         PlaybackException.ERROR_CODE_DECODING_FAILED,
         PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,

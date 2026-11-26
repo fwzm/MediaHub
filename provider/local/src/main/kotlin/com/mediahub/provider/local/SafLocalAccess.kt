@@ -42,16 +42,30 @@ internal class SafLocalAccess(private val server: MediaServer, private val roots
         if (!SafUri.contains(tree, uri)) throw ProviderException.NotFound(server.id, "本地文档")
     }
     private fun root(): SafTreeNavigator.SafSource {
-        if (!SafUri.validTree(tree) || roots.contentRoots().none { SafUri.sameTree(tree, it.toString()) }) {
+        val grantedTrees = try { roots.contentRoots() }
+        catch (e: Exception) {
+            if (SafAccessFailurePolicy.isAccessFailure(e)) throw ProviderException.DirectoryAccessRequired(server.id)
+            throw e
+        }
+        if (!SafUri.validTree(tree) || grantedTrees.none { SafUri.sameTree(tree, it.toString()) }) {
             throw ProviderException.DirectoryAccessRequired(server.id)
         }
         val source = documents
-        val metadata = source.metadata(SafUri.documentUri(tree, SafUri.treeDocId(tree)))
+        val metadata = try { source.metadata(SafUri.documentUri(tree, SafUri.treeDocId(tree))) }
+            catch (e: Exception) {
+                if (SafAccessFailurePolicy.isAccessFailure(e)) throw ProviderException.DirectoryAccessRequired(server.id)
+                throw e
+            }
         if (metadata?.mimeType != DIRECTORY) throw ProviderException.DirectoryAccessRequired(server.id)
         return source
     }
     private fun describe(source: SafTreeNavigator.SafSource, uri: String): SafTreeNavigator.SafRow =
-        source.metadata(uri) ?: throw ProviderException.NotFound(server.id, "本地文档")
+        try { source.metadata(uri) ?: throw ProviderException.NotFound(server.id, "本地文档") }
+        catch (e: ProviderException) { throw e }
+        catch (e: Exception) {
+            if (SafAccessFailurePolicy.isAccessFailure(e)) throw ProviderException.DirectoryAccessRequired(server.id)
+            throw e
+        }
 
     fun connection(): ConnectionStatus = try {
         access { root() }
@@ -66,7 +80,11 @@ internal class SafLocalAccess(private val server: MediaServer, private val roots
         member(parent)
         val source = root()
         if (describe(source, parent).mimeType != DIRECTORY) throw ProviderException.NotFound(server.id, "本地目录")
-        val rows = source.listChildren(SafUri.childrenUri(tree, SafUri.docId(parent)))
+        val rows = try { source.listChildren(SafUri.childrenUri(tree, SafUri.docId(parent))) }
+            catch (e: Exception) {
+                if (SafAccessFailurePolicy.isAccessFailure(e)) throw ProviderException.DirectoryAccessRequired(server.id)
+                throw e
+            }
         val all = rows.map { row -> mapped(row, parent) }
             .sortedWith(compareBy({ it.type != MediaType.FOLDER }, { it.title.lowercase() }, { it.id }))
         val items = all.drop(page.offset).take(page.limit)
@@ -87,7 +105,12 @@ internal class SafLocalAccess(private val server: MediaServer, private val roots
         member(uri)
         val source = root()
         val row = describe(source, uri)
-        if (row.mimeType == DIRECTORY || !source.canOpen(uri)) throw ProviderException.NotFound(server.id, "本地媒体")
+        val openable = try { source.canOpen(uri) }
+        catch (e: Exception) {
+            if (SafAccessFailurePolicy.isAccessFailure(e)) throw ProviderException.DirectoryAccessRequired(server.id)
+            throw e
+        }
+        if (row.mimeType == DIRECTORY || !openable) throw ProviderException.NotFound(server.id, "本地媒体")
         PlaybackSource(url = uri, mimeType = row.mimeType,
             container = row.name.substringAfterLast('.', "").lowercase().takeIf { it.isNotBlank() },
             mode = PlaybackMode.DIRECT_PLAY)
@@ -100,7 +123,12 @@ internal class SafLocalAccess(private val server: MediaServer, private val roots
         val source = root()
         val parent = video.parentId ?: source.parentUri(uri) ?: return@access emptyList()
         member(parent)
-        source.listChildren(SafUri.childrenUri(tree, SafUri.docId(parent)))
+        val children = try { source.listChildren(SafUri.childrenUri(tree, SafUri.docId(parent))) }
+        catch (e: Exception) {
+            if (SafAccessFailurePolicy.isAccessFailure(e)) throw ProviderException.DirectoryAccessRequired(server.id)
+            throw e
+        }
+        children
             .filter { it.mimeType != DIRECTORY && it.name.substringAfterLast('.', "").lowercase() in SubtitleFormats.EXTENSIONS }
             .map { row ->
                 val extension = row.name.substringAfterLast('.').lowercase()
