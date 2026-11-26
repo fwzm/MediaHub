@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -59,7 +60,7 @@ fun MediaHubNavHost() {
                 },
                 onAddServer = { navController.navigate(Routes.ADD_SERVER) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                onOpenSearch = { navController.navigate(Routes.SEARCH) },
+                onOpenSearch = { openSearch(navController) },
                 onOpenItem = { progress ->
                     navController.navigate(
                         "detail/${progress.serverId}/${NavArgCodec.encode(progress.itemId)}" +
@@ -123,9 +124,13 @@ fun MediaHubNavHost() {
             com.mediahub.feature.settings.backup.BackupRoute(onBack = { navController.popBackStack() })
         }
 
-        composable(Routes.SEARCH) {
+        composable(Routes.SEARCH) { entry ->
+            val focusRequestToken by entry.savedStateHandle
+                .getStateFlow(SEARCH_FOCUS_REQUEST_KEY, 0)
+                .collectAsStateWithLifecycle()
             SearchRoute(
                 onBack = { navController.popBackStack() },
+                focusRequestToken = focusRequestToken,
                 onOpenItem = { item ->
                     // 搜索命中统一进 DetailRoute：Movie/Episode → 详情播放；
                     // Series → Series Detail（季 chips + EpisodeRow，1B-3.1 页面的正式入口）
@@ -245,6 +250,19 @@ fun MediaHubNavHost() {
         ) {
             PlayerRoute(onBack = { navController.popBackStack() })
         }
+    }
+}
+
+/** 再次选中搜索入口时递增：搜索页据此重新聚焦输入框并弹出键盘（条目 35/99）。 */
+private const val SEARCH_FOCUS_REQUEST_KEY = "search_focus_request_token"
+
+private fun openSearch(navController: NavHostController) {
+    val current = navController.currentBackStackEntry
+    if (navController.currentDestination?.route == Routes.SEARCH && current != null) {
+        val next = (current.savedStateHandle.get<Int>(SEARCH_FOCUS_REQUEST_KEY) ?: 0) + 1
+        current.savedStateHandle[SEARCH_FOCUS_REQUEST_KEY] = next
+    } else {
+        navController.navigate(Routes.SEARCH) { launchSingleTop = true }
     }
 }
 

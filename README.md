@@ -262,6 +262,8 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   但未在真实老 NAS 上验证；Digest / NTLM 等非 Basic 认证不在支持范围（会按认证失败处理）。
   含 ISO-8859-1 无法表示字符的凭据遇到只认旧编码的服务器时不会降级重试——这是有意的 fail-closed，不是遗漏。
 - **搜索**：多源搜索已有模拟服务器与单测（`Search_sends_the_term_and_returns_only_matching_items` 断言 `SearchTerm=Star%20Wars` 与服务端过滤结果）；Emby / Jellyfin 共用的 `/Users/{id}/Items?SearchTerm=` 服务端搜索已接入。真服路径未测，验证条件是真实 Emby / Jellyfin 服务器；WebDAV / 本地源没有服务端搜索能力，按「不支持搜索」处理。
+  搜索历史已本地持久化（Room `search_history` 表：主键去重、重复搜索置顶、上限 20 条）；历史列表固定显示两行高度、超出滚动，长按单条删除；进入搜索页或再次选中搜索入口时聚焦输入框并弹出键盘。
+  上述历史与交互有 `core:database` / `feature:search` 的 JVM / Robolectric 用例覆盖（`--rerun-tasks --no-build-cache` 实测）；输入法是否真正弹出未在真机断言，属 `NOT_RUN`。
 - **体验缺口与覆盖缺口**：「继续观看」卡片海报懒加载已修（W10；页面调用 `MediaCardViewModel.RequestPoster`，U1 P2.6 两服 PASS）；永久播放列表拖拽排序已接线（`ListView.CanReorderItems` → `PlaylistStore.ReorderItems`，存储层与置换校验有单测），WinUI 拖拽手势本身仍需 GUI 验收（`NOT_RUN`；条件：Windows 客户端 + 至少 3 条目的播放列表）。
 - **NOT_RUN / IMPLEMENTED_UNVERIFIED（缺的是可判定的执行条件，其中 HDR 是产品边界而非缺陷）**：
   - **HDR 与色彩管理**：产品边界 —— 不声称任何 HDR 能力，杜比视界 `NOT_SUPPORTED`；若将来要宣称，需 HDR 显示器 + HDR
