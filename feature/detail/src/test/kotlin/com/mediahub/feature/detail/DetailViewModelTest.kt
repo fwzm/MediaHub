@@ -1,6 +1,7 @@
 package com.mediahub.feature.detail
 
 import androidx.lifecycle.SavedStateHandle
+import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
@@ -11,8 +12,10 @@ import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaLibrary
 import com.mediahub.model.MediaServer
 import com.mediahub.model.MediaType
+import com.mediahub.model.MediaVersion
 import com.mediahub.model.PageRequest
 import com.mediahub.model.PagedResult
+import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.ServerType
 import com.mediahub.model.UserData
 import com.mediahub.provider.api.ConnectionStatus
@@ -98,12 +101,37 @@ class DetailViewModelTest {
         userData = UserData(playedPercentage = playedPercentage, playCount = playCount),
     )
 
+    /** 条目 72：内存版进度仓储，只实现详情页需要的读契约。 */
+    private class FakeProgressStore(
+        val data: MutableMap<String, PlaybackProgress> = mutableMapOf(),
+    ) : ProgressStore {
+        override fun observeContinueWatching(limit: Int): Flow<List<PlaybackProgress>> =
+            flowOf(data.values.toList())
+
+        override suspend fun getResume(serverId: String, itemId: String): Long? =
+            data["$serverId/$itemId"]?.positionMs
+
+        override suspend fun save(progress: PlaybackProgress) {
+            data["${progress.serverId}/${progress.itemId}"] = progress
+        }
+
+        override suspend fun get(serverId: String, itemId: String): PlaybackProgress? =
+            data["$serverId/$itemId"]
+
+        override suspend fun clearAll(): Int {
+            val count = data.size
+            data.clear()
+            return count
+        }
+    }
+
     private fun createViewModel(
         detail: MediaDetail,
         libraryItems: Map<String, List<MediaItem>> = emptyMap(),
         libraryProvider: MediaLibraryProvider? = null,
         libraryNull: Boolean = false,
         identityLookup: com.mediahub.provider.api.MediaIdentityLookupProvider? = null,
+        progressStore: ProgressStore = FakeProgressStore(),
     ): DetailViewModel {
         val savedStateHandle = SavedStateHandle(mapOf("serverId" to "srv", "itemId" to "dGVzdA"))
         val lib = when {
@@ -141,7 +169,90 @@ class DetailViewModelTest {
             registry,
             CanonicalSourceResolver(fakeServerStore(), registry, FakeLogger()),
             FakeLogger(),
+            progressStore,
         )
+    }
+
+    // ---- 条目 72：详情页回读本地进度（已缓存 / 本地内容） ----
+
+    private fun storedProgress(
+        itemId: String = "test",
+        positionMs: Long = 120_000L,
+        durationMs: Long = 600_000L,
+    ) = PlaybackProgress(
+        serverId = "srv",
+        itemId = itemId,
+        positionMs = positionMs,
+        durationMs = durationMs,
+        isPaused = true,
+        updatedAtEpochMs = 1_000L,
+    )
+
+    @Test
+    fun `local progress is surfaced after the detail loads`() = runTest(testDispatcher) {
+        val progress = storedProgress()
+        val store = FakeProgressStore(mutableMapOf("srv/test" to progress))
+
+        val vm = createViewModel(
+            MediaDetail(item = makeItem("m1", MediaType.MOVIE)),
+            progressStore = store,
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            "已缓存/本地内容没有远端进度，详情页必须显示本地快照的续播位置",
+            progress,
+            vm.localProgress.value,
+        )
+    }
+
+    @Test
+    fun `refreshLocalProgress picks up progress written while playing`() = runTest(testDispatcher) {
+        val store = FakeProgressStore()
+        val vm = createViewModel(
+            MediaDetail(item = makeItem("m1", MediaType.MOVIE)),
+            progressStore = store,
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertNull(vm.localProgress.value)
+
+        // 模拟播放器回写本地快照后回到详情页。
+        store.data["srv/test"] = storedProgress(positionMs = 300_000L)
+        vm.refreshLocalProgress()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(300_000L, vm.localProgress.value?.positionMs)
+    }
+
+    @Test
+    fun `finished playback is not offered as resume`() = runTest(testDispatcher) {
+        val store = FakeProgressStore(
+            mutableMapOf("srv/test" to storedProgress(positionMs = 600_000L, durationMs = 600_000L)),
+        )
+        val vm = createViewModel(
+            MediaDetail(item = makeItem("m1", MediaType.MOVIE)),
+            progressStore = store,
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertNull("看完的内容不应再显示继续播放", vm.localProgress.value)
+    }
+
+    @Test
+    fun `progress read failure degrades to null and keeps the detail usable`() = runTest(testDispatcher) {
+        val failing = object : ProgressStore by FakeProgressStore() {
+            override suspend fun get(serverId: String, itemId: String): PlaybackProgress? =
+                error("db unavailable")
+        }
+
+        val vm = createViewModel(
+            MediaDetail(item = makeItem("m1", MediaType.MOVIE)),
+            progressStore = failing,
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue(vm.uiState.value is DetailUiState.Content)
+        assertNull(vm.localProgress.value)
     }
 
     @Test
@@ -475,5 +586,62 @@ class DetailViewModelTest {
         testDispatcher.scheduler.advanceUntilIdle()
         assertNull(vm.seriesState.value.episodesError)
         assertTrue(vm.seriesState.value.episodes.isEmpty())
+    }
+
+    // ---- 多版本闭环（A 组 27/39/55/65/145）：选择版本必须进入播放启动快照 ----
+
+    private fun makeVersion(id: String, name: String = "版本$id"): MediaVersion =
+        MediaVersion(id = id, name = name)
+
+    @Test
+    fun `selecting a version flows into playback launch snapshot`() = runTest(testDispatcher) {
+        val item = makeItem("movie-mv", MediaType.MOVIE)
+        val detail = MediaDetail(item = item, versions = listOf(makeVersion("v1"), makeVersion("v2")))
+        val vm = createViewModel(detail)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // 默认版本由服务端首项决定，VM 不预设 id
+        assertNull(vm.selectedVersionId.value)
+        vm.selectVersion("v2")
+        assertEquals("v2", vm.selectedVersionId.value)
+        assertEquals("v2", vm.launchSnapshot(detail.item).versionId)
+    }
+
+    @Test
+    fun `unknown version selection is ignored`() = runTest(testDispatcher) {
+        val item = makeItem("movie-mv-unknown", MediaType.MOVIE)
+        val detail = MediaDetail(item = item, versions = listOf(makeVersion("v1"), makeVersion("v2")))
+        val vm = createViewModel(detail)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        vm.selectVersion("missing")
+        assertNull(vm.selectedVersionId.value)
+        assertNull(vm.launchSnapshot(detail.item).versionId)
+    }
+
+    @Test
+    fun `single version never reaches launch snapshot`() = runTest(testDispatcher) {
+        val item = makeItem("movie-mv-single", MediaType.MOVIE)
+        val detail = MediaDetail(item = item, versions = listOf(makeVersion("only")))
+        val vm = createViewModel(detail)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        vm.selectVersion("only")
+        assertNull(
+            "只有一个版本时不应把版本塞进播放参数（直接走服务端默认源）",
+            vm.launchSnapshot(detail.item).versionId,
+        )
+    }
+
+    @Test
+    fun `episode does not inherit detail item version`() = runTest(testDispatcher) {
+        val movie = makeItem("movie-mv-ep", MediaType.MOVIE)
+        val episode = makeItem("ep-1", MediaType.EPISODE, episodeNumber = 1)
+        val detail = MediaDetail(item = movie, versions = listOf(makeVersion("v1"), makeVersion("v2")))
+        val vm = createViewModel(detail)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        vm.selectVersion("v2")
+        assertNull(vm.launchSnapshot(episode).versionId)
     }
 }

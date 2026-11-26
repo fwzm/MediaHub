@@ -2,6 +2,7 @@ package com.mediahub.provider.webdav
 
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
+import com.mediahub.model.HlsContentDetector
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaServer
 import com.mediahub.model.MediaType
@@ -26,6 +27,14 @@ internal class WebDavPlaybackProvider(
     private val server: MediaServer,
     private val session: WebDavSession,
     private val logger: Logger,
+    /**
+     * 条目 136：容器未知时的内容探测（HLS MIME 兜底）。
+     *
+     * 默认 null = 不探测，行为与接入前一致；生产由工厂注入
+     * [WebDavApi.probePlaylistMime]。探测只在**容器无法推断**时发生，
+     * 已知容器不会产生额外网络请求。
+     */
+    private val probePlaylistMime: (suspend (url: String, authorization: String?) -> String?)? = null,
 ) : MediaPlaybackProvider {
 
     override suspend fun resolvePlayback(item: MediaItem, options: PlaybackOptions): PlaybackSource {
@@ -52,10 +61,20 @@ internal class WebDavPlaybackProvider(
             throw ProviderException.Parse(server.id)
         }
 
+        val authorization = session.authorization()
+        val guessedMime = contentTypeOrGuess(item)
+        // 条目 136：无扩展名 HLS 的容器为 null，仅按扩展名永远推断不出来；
+        // 此时用一次短超时探测按真实响应识别，避免 EXO 以渐进式解析 m3u8 后反复重试。
+        val probedMime = if (guessedMime == null) {
+            probePlaylistMime?.invoke(sameOrigin, authorization)
+        } else {
+            null
+        }
+
         return PlaybackSource(
             url = sameOrigin,
-            headers = mapOf("Authorization" to session.authorization()),
-            mimeType = contentTypeOrGuess(item),
+            headers = mapOf("Authorization" to authorization),
+            mimeType = guessedMime ?: probedMime,
             container = item.container,
             durationMs = item.runtimeMs,
             mode = PlaybackMode.DIRECT_PLAY,
@@ -71,6 +90,7 @@ internal class WebDavPlaybackProvider(
         "ts", "m2ts" -> "video/mp2t"
         "avi" -> "video/x-msvideo"
         "mov" -> "video/quicktime"
+        "m3u8", "m3u" -> HlsContentDetector.MIME_TYPE
         "mp3" -> "audio/mpeg"
         "flac" -> "audio/flac"
         "m4a" -> "audio/mp4"

@@ -51,6 +51,9 @@ enum class ProviderCapability {
     /** 直播 */
     LIVE_TV,
 
+    /** 电子节目单（EPG） */
+    EPG,
+
     /** 服务端转码 */
     TRANSCODE,
 }

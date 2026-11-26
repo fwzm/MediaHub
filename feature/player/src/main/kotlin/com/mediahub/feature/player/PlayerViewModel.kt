@@ -11,12 +11,14 @@ import com.mediahub.core.database.repository.SubtitleMemoryStore
 import com.mediahub.core.network.PlaybackNetworkTraceRegistry
 import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
+import com.mediahub.core.download.DownloadedMediaLocator
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.ui.effects.VisualPalette
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
 import com.mediahub.model.MediaTypeGuesser
+import com.mediahub.model.MediaVersion
 import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.PlaybackSource
 import com.mediahub.model.PlayerVisualEffectsPreferences
@@ -125,6 +127,9 @@ data class PlayerCombinedState(
     /** G3：用户播放意图（缓冲时 isPlaying=false 但本字段仍为 true）。 */
     val playWhenReady: Boolean = false,
     val isEnded: Boolean = false,
+    /** 视频编码尺寸（0 = 未知）；用于按真实宽高比呈现首帧（条目 137）。 */
+    val videoWidth: Int = 0,
+    val videoHeight: Int = 0,
 )
 
 private object SubtitleMemoryOwnership {
@@ -154,6 +159,11 @@ class PlayerViewModel @Inject constructor(
      * 冷启动的首次枚举由 app 层预热，不在播放线程上触发。
      */
     private val deviceCapabilitiesProvider: DeviceCapabilitiesProvider? = null,
+    /**
+     * 本地下载命中器（条目 61）：已下载/已存在的内容优先走本地 `file://`，
+     * 不依赖远端 resolvePlayback，断网也能播放。null = 未接入下载内核（测试/无下载能力）。
+     */
+    private val downloadedMediaLocator: DownloadedMediaLocator? = null,
 ) : ViewModel() {
     private val serverId: String = checkNotNull(savedStateHandle["serverId"])
     // itemId 经 NavArgCodec(Base64 URL_SAFE) 传输，兼容文件路径中的 '/'（见 core:common）
@@ -166,6 +176,17 @@ class PlayerViewModel @Inject constructor(
     private var launchRuntime: String = savedStateHandle["runtime"] ?: ""
     private var launchPoster: String = savedStateHandle["poster"] ?: ""
     private var launchContainer: String = savedStateHandle["container"] ?: ""
+    // 多版本闭环：详情页选中的版本随路由传入；播放器内可再切换（切集时清空）。
+    private var selectedVersion: String? =
+        (savedStateHandle.get<String>("version") ?: "").takeIf { it.isNotBlank() }
+    private val _versions = MutableStateFlow<List<MediaVersion>>(emptyList())
+    val versions: StateFlow<List<MediaVersion>> = _versions.asStateFlow()
+    private val _selectedVersionId = MutableStateFlow(selectedVersion)
+    val selectedVersionId: StateFlow<String?> = _selectedVersionId.asStateFlow()
+    private val _versionSwitchAvailable = MutableStateFlow(false)
+    /** 数据源具备详情能力时才允许在播放器内拉版本列表并切换。 */
+    val versionSwitchAvailable: StateFlow<Boolean> = _versionSwitchAvailable.asStateFlow()
+    private var versionsLoaded = false
 
     /** 启动快照携带的容器（详情页直传；可能为空串=未提供）。 */
     val launchContainerOrNull: String?
@@ -211,10 +232,49 @@ class PlayerViewModel @Inject constructor(
     private val _preferences = MutableStateFlow<com.mediahub.model.UserPreferences?>(null)
     val preferences: StateFlow<com.mediahub.model.UserPreferences?> = _preferences.asStateFlow()
 
+    /** 画面比例模式（条目 9）：随内容记忆，播放器内可循环切换。 */
+    private val _videoAspectMode = MutableStateFlow(com.mediahub.model.VideoAspectMode.FIT)
+    val videoAspectMode: StateFlow<com.mediahub.model.VideoAspectMode> = _videoAspectMode.asStateFlow()
+    /** 本会话内用户手动切换过比例：迟到的偏好读取不得覆盖。 */
+    private var aspectModeManual = false
+
+    private fun currentAspectKey(): String =
+        com.mediahub.model.VideoAspectMemory.key(serverId, itemId)
+
+    private fun restoreAspectMode() {
+        aspectModeManual = false
+        _videoAspectMode.value =
+            latestPreferences.videoAspectOverrides[currentAspectKey()]
+                ?: com.mediahub.model.VideoAspectMode.FIT
+    }
+
+    /** 循环切换画面比例，并按内容记忆（下次播放同一内容时恢复）。 */
+    fun cycleVideoAspectMode() {
+        val next = _videoAspectMode.value.next()
+        _videoAspectMode.value = next
+        aspectModeManual = true
+        viewModelScope.launch {
+            userPreferencesRepository.update { current ->
+                current.copy(
+                    videoAspectOverrides = com.mediahub.model.VideoAspectMemory.remember(
+                        current.videoAspectOverrides,
+                        currentAspectKey(),
+                        next,
+                    ),
+                )
+            }
+        }
+    }
+
     init {
         viewModelScope.launch {
             userPreferencesRepository.flow.collect { stored ->
                 latestPreferences = stored
+                if (!aspectModeManual) {
+                    _videoAspectMode.value =
+                        stored.videoAspectOverrides[currentAspectKey()]
+                            ?: com.mediahub.model.VideoAspectMode.FIT
+                }
                 engine.setSubtitlePresentation(stored.subtitleStyle, stored.subtitleSizeSp)
                 _preferences.value = stored
             }
@@ -604,6 +664,8 @@ class PlayerViewModel @Inject constructor(
                 error = player.error,
                 playWhenReady = ready && player.playWhenReady,
                 isEnded = ready && player.isEnded,
+                videoWidth = player.videoWidth,
+                videoHeight = player.videoHeight,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerCombinedState())
 
@@ -617,11 +679,49 @@ class PlayerViewModel @Inject constructor(
     }
 
     /**
+     * 拉取当前媒体的版本列表（懒加载，只在用户打开版本面板时触发）。
+     * 失败只记日志，不改变正在进行的播放。
+     */
+    fun loadVersions() {
+        if (versionsLoaded) return
+        val detail = handle?.detail ?: return
+        versionsLoaded = true
+        viewModelScope.launch {
+            try {
+                val loaded = detail.getItemDetail(itemId).versions
+                if (loaded.isNotEmpty()) {
+                    _versions.value = loaded
+                    // 路由带来的版本若已不存在（服务端增删版本），回落到服务端默认源
+                    if (selectedVersion != null && loaded.none { it.id == selectedVersion }) {
+                        selectedVersion = null
+                        _selectedVersionId.value = null
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                versionsLoaded = false
+                logger.w(LogTag.PLAYER, "加载版本列表失败 itemId=$itemId", e)
+            }
+        }
+    }
+
+    /** 播放器内切换版本：重新解析并起播指定 MediaSourceId 对应的源。 */
+    fun switchVersion(versionId: String) {
+        if (stopped || versionId == selectedVersion) return
+        if (_versions.value.none { it.id == versionId }) return
+        selectedVersion = versionId
+        _selectedVersionId.value = versionId
+        resolveInternal(autoplay = false)
+    }
+
+    /**
      * [resolve] 的实现。autoplay=true 表示本次解析由「播完自动连播」触发：
      * 失败时永久停住本轮播放（autoplayBlocked），不重试也不连环跳集。
      */
     private fun resolveInternal(autoplay: Boolean) {
         if (stopped) return
+        restoreAspectMode()
         resolveJob?.cancel()
         val generation = resolveGeneration.incrementAndGet()
         invalidateSubtitleSession()
@@ -644,18 +744,29 @@ class PlayerViewModel @Inject constructor(
                 if (stopped || resolveGeneration.get() != generation) return@launch
                 _serverDisplayName.value = server.displayName
                 _serverIcon.value = server.icon
+                // 条目 61：本地已下载内容优先，直接播放 file:// 源（离线可用）。
+                val localSource = downloadedMediaLocator?.resolveLocalPlayback(serverId, itemId)
                 val providerHandle = registry.create(server)
-                    ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
+                    ?: if (localSource == null) {
+                        throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
+                    } else {
+                        null
+                    }
                 handle = providerHandle
+                // 下载内核（#110）把 providerHandle 变成可空（有本地已下载源时 registry 可返回 null），
+                // 版本切换能力只在拿到 provider 详情时才存在，故必须走安全调用。
+                _versionSwitchAvailable.value = providerHandle?.detail != null
 
-                val detailProvider = providerHandle.detail
-                val playbackProvider = providerHandle.playback
-                    ?: throw ProviderException.NotYetImplemented(serverId, "该数据源的播放能力尚未接入")
+                val detailProvider = providerHandle?.detail
+                val playbackProvider = providerHandle?.playback
+                if (localSource == null && playbackProvider == null) {
+                    throw ProviderException.NotYetImplemented(serverId, "该数据源的播放能力尚未接入")
+                }
 
                 // review P2-5：browse-only 数据源（如本地文件树）无详情能力时，
                 // 按 itemId 重建条目并推断媒体类型（避免退化为 OTHER 污染"继续观看"元数据）。
                 // Player Startup 优化：详情页已传快照（type 非空）时跳过 detail 拉取。
-                val item = if (launchType.isNotBlank()) {
+                val item = if (launchType.isNotBlank() || localSource != null) {
                     MediaItem(
                         serverId = serverId,
                         id = itemId,
@@ -664,7 +775,7 @@ class PlayerViewModel @Inject constructor(
                         title = itemTitle.ifBlank { itemId.substringAfterLast('/') },
                         runtimeMs = launchRuntime.toLongOrNull(),
                         posterUrl = launchPoster.ifBlank { null },
-                        container = launchContainer.ifBlank { null },
+                        container = launchContainer.ifBlank { localSource?.container ?: "" }.ifBlank { null },
                     )
                 } else {
                     detailProvider?.getItemDetail(itemId)?.item ?: MediaItem(
@@ -682,9 +793,13 @@ class PlayerViewModel @Inject constructor(
                 val resume = progressStore.getResume(serverId, itemId)
                 coroutineContext.ensureActive()
                 if (stopped || resolveGeneration.get() != generation) return@launch
-                val source = playbackProvider.resolvePlayback(
+                val source = localSource ?: playbackProvider!!.resolvePlayback(
                     item,
-                    PlaybackOptions(startPositionMs = resume, enableDirectPlay = true),
+                    PlaybackOptions(
+                        startPositionMs = resume,
+                        enableDirectPlay = true,
+                        versionId = selectedVersion,
+                    ),
                 )
                 coroutineContext.ensureActive()
                 if (stopped || resolveGeneration.get() != generation) return@launch
@@ -716,7 +831,7 @@ class PlayerViewModel @Inject constructor(
                     syncCoordinator.start(
                         progress = engine.progress,
                         events = playbackEventBus,
-                        remoteIntervalMs = providerHandle.progress?.remoteReportIntervalMs
+                        remoteIntervalMs = providerHandle?.progress?.remoteReportIntervalMs
                             ?: 10_000L,
                     )
                     startEventsTap()
@@ -826,6 +941,11 @@ class PlayerViewModel @Inject constructor(
         launchRuntime = ""
         launchPoster = ""
         launchContainer = ""
+        // 版本属于上一集：不清空会把上一集的 MediaSourceId 套到新一集（服务端会拒绝）。
+        selectedVersion = null
+        _selectedVersionId.value = null
+        _versions.value = emptyList()
+        versionsLoaded = false
         resolveInternal(autoplay = true)
     }
 

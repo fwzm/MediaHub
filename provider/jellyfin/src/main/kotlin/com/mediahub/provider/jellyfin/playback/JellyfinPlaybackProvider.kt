@@ -68,18 +68,30 @@ class JellyfinPlaybackProvider(
                 // Jellyfin MaxStreamingBitrate 为 int?：正数过滤 + Int.MAX_VALUE 安全收缩
                 maxStreamingBitrate = maxStreamingBitrate,
                 enableDirectPlay = options.enableDirectPlay,
+                // 多版本：协商与选择绑定同一个 MediaSourceId
+                mediaSourceId = options.versionId,
             )
             var sources = info.mediaSources
             // 响应损坏（空 MediaSources）≠ 需要转码：明确报 Parse。
             if (sources.isEmpty()) throw ProviderException.Parse(server.id)
+            // 指定版本必须真实存在：不存在就明确报 NotFound，不能悄悄回退到默认源。
+            val versionId = options.versionId
+            if (versionId != null &&
+                JellyfinMediaSourceSelector.findById(sources, versionId) == null
+            ) {
+                throw ProviderException.NotFound(server.id, "媒体版本")
+            }
             // Jellyfin 12.1 disables ordinary HTTP remux and may require burn-in for its default
             // external subtitle when our profile declares no subtitle delivery capability.
             // One source-bound retry asks only for untouched static bytes. It neither requests
             // transcoding nor removes embedded subtitles from the media the native player receives.
-            if (JellyfinMediaSourceSelector.selectDirectStream(sources) == null &&
+            if (JellyfinMediaSourceSelector.selectDirectStream(sources, versionId) == null &&
                 options.enableDirectPlay && options.preferredSubtitleLanguage.isNullOrBlank()
             ) {
-                val candidate = JellyfinMediaSourceSelector.selectStaticNegotiationCandidate(sources)
+                val candidate = JellyfinMediaSourceSelector.selectStaticNegotiationCandidate(
+                    sources,
+                    versionId,
+                )
                 if (candidate != null) {
                     val retry = api.getPlaybackInfo(
                         token = token,
@@ -96,7 +108,7 @@ class JellyfinPlaybackProvider(
                     if (sources.isEmpty()) throw ProviderException.Parse(server.id)
                 }
             }
-            val source = JellyfinMediaSourceSelector.selectDirectStream(sources)
+            val source = JellyfinMediaSourceSelector.selectDirectStream(sources, versionId)
                 ?: throw ProviderException.NotYetImplemented(server.id, "当前媒体需要转码")
             // Direct Stream 必备参数：缺了只能说明上游响应损坏，绝不生成残缺 URL。
             val mediaSourceId = source.id?.takeIf(String::isNotBlank)

@@ -7,6 +7,7 @@ import com.mediahub.core.network.HttpClientFactory
 import com.mediahub.core.security.SecretStorage
 import com.mediahub.core.security.StoredToken
 import com.mediahub.core.security.TokenStore
+import com.mediahub.model.HdrType
 import com.mediahub.model.MediaServer
 import com.mediahub.model.Person
 import com.mediahub.model.ServerType
@@ -106,12 +107,48 @@ class JellyfinDetailProviderTest {
         assertTrue(item.people.first { it.id == "p1" }.imageUrl!!.contains("/Items/p1/Images/Primary"))
         assertTrue(item.posterUrl!!.contains("/Items/m1/Images/Primary"))
 
-        // 单条目详情端点：路径精确；无 Fields 裁剪参数
+        // 单条目详情端点：路径精确；Fields 只请求 MediaSources（多版本闭环）
         val request = server.takeRequest()
         assertEquals("/Items/m1", request.requestUrl!!.encodedPath)
         assertEquals("user-1", request.requestUrl!!.queryParameter("UserId"))
         assertTrue(request.getHeader("Authorization")!!.endsWith("Token=\"tok-1\""))
-        assertEquals(null, request.requestUrl!!.queryParameter("Fields"))
+        assertEquals("MediaSources", request.requestUrl!!.queryParameter("Fields"))
+    }
+
+    // ---- 1b：多版本映射（与 Emby 同构：服务端顺序、id/name/container/宽高/HDR/码率/体积） ----
+
+    @Test
+    fun `detail maps media sources into versions`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"Id":"m1","Name":"Fargo","Type":"Movie","Container":"mkv",
+                     "MediaSources":[
+                       {"Id":"ms-1","Name":"4K HDR10","Container":"mkv",
+                        "Size":20000000000,"Bitrate":25000000,
+                        "MediaStreams":[{"Type":"Video","Codec":"hevc","Width":3840,
+                          "Height":2160,"VideoRange":"HDR10"}]},
+                       {"Id":"ms-2","Name":"1080P","Container":"mp4",
+                        "Size":8000000000,"Bitrate":8000000,
+                        "MediaStreams":[{"Type":"Video","Codec":"h264","Width":1920,
+                          "Height":1080}]}
+                     ]}"""
+            )
+        )
+
+        val detail = provider().getItemDetail("m1")
+
+        assertEquals(listOf("ms-1", "ms-2"), detail.versions.map { it.id })
+        val uhd = detail.versions[0]
+        assertEquals("4K HDR10", uhd.name)
+        assertEquals("mkv", uhd.container)
+        assertEquals(3840, uhd.width)
+        assertEquals(2160, uhd.height)
+        assertEquals(HdrType.HDR10, uhd.hdrType)
+        assertEquals(25_000_000L, uhd.bitrate)
+        assertEquals(20_000_000_000L, uhd.sizeBytes)
+        assertEquals(HdrType.NONE, detail.versions[1].hdrType)
+        assertEquals(8_000_000L, detail.versions[1].bitrate)
     }
 
     // ---- 2：错误映射 ----
