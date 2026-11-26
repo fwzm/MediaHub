@@ -75,6 +75,9 @@ class UserPreferencesStoreTest {
 
         val recreatedStore = UserPreferencesStore(dataStore)
         assertTrue(recreatedStore.flow.first().preciseResumeSeek)
+    }
+
+    @Test
     fun `aspect ratio memory survives a store round trip and keeps unrelated keys`() = runBlocking {
         val overrides = mapOf(
             VideoAspectMemory.key("server-1", "item-1") to VideoAspectMode.CROP,

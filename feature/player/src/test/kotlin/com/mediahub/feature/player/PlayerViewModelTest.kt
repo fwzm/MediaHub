@@ -638,6 +638,8 @@ class PlayerViewModelTest {
             vm.stopAndFlush()
             runCurrent()
         }
+    }
+
     @Test fun aspectModeIsRestoredPerItemAndCyclePersistsMemory() = runTest(dispatcher) {
         val prefs = FakeUserPreferences()
         val key = com.mediahub.model.VideoAspectMemory.key("srv-1", "m1")
