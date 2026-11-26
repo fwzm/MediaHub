@@ -604,10 +604,14 @@ class SwitchablePlaybackEngine(
         session === expectedSession &&
         (expectedEngine == null || current === expectedEngine)
 
-    private companion object {
+    companion object {
         const val SURFACE_REATTACH_DELAY_MS = 120L
-        /** mpv 可能救回的错误类型；网络/鉴权/DRM 不降级（同一网络与凭据救不回）。 */
-        val FALLBACK_ERROR_CODES = setOf(
+        /**
+         * mpv 可能救回的错误类型；网络/鉴权/DRM/HTTP 4xx/5xx 不降级——
+         * mpv 走同一网络栈与同一份请求头/凭据，403/404/429/5xx 换内核救不回，
+         * 只会把"权限或地址错误"掩盖成"兼容性失败"。
+         */
+        internal val FALLBACK_ERROR_CODES = setOf(
             PlaybackError.Code.DECODER_ERROR,
             PlaybackError.Code.UNSUPPORTED_CODEC,
             PlaybackError.Code.SURFACE_ERROR,
