@@ -21,6 +21,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -33,7 +37,17 @@ class HomeViewModel @Inject constructor(
     private val logger: Logger,
 ) : ViewModel() {
 
+    /** 媒体源分区失败（条目 42）：只影响本分区，不取消其它分区。 */
+    private val _serversFailed = MutableStateFlow(false)
+    val serversFailed: StateFlow<Boolean> = _serversFailed.asStateFlow()
+
     val servers: StateFlow<List<MediaServer>> = serverStore.observeServers()
+        .onEach { _serversFailed.value = false }
+        .catch { error ->
+            logger.w(LogTag.UI, "首页媒体源分区加载失败，保留其余分区", error)
+            _serversFailed.value = true
+            emit(emptyList())
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
@@ -43,9 +57,58 @@ class HomeViewModel @Inject constructor(
     private val _loaded = MutableStateFlow(false)
     val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
 
+    /** 继续观看分区失败（条目 42）：只影响本分区，不取消其它分区。 */
+    private val _continueWatchingFailed = MutableStateFlow(false)
+    val continueWatchingFailed: StateFlow<Boolean> = _continueWatchingFailed.asStateFlow()
+
     val continueWatching: StateFlow<List<PlaybackProgress>> =
         progressRepository.observeContinueWatching(limit = 20)
+            .onEach { _continueWatchingFailed.value = false }
+            .catch { error ->
+                logger.w(LogTag.UI, "首页继续观看分区加载失败，保留其余分区", error)
+                _continueWatchingFailed.value = true
+                emit(emptyList())
+            }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 持久默认首页（复用 isDefault）；仅作默认值与标记，不新增持久首页字段（条目 117）。 */
+    val defaultHomeServerId: StateFlow<String?> = servers
+        .map { defaultHomeSourceId(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** 临时首页：只存在内存，进程重启即回到持久默认首页（条目 117）。 */
+    private val _temporaryHomeServerId = MutableStateFlow<String?>(null)
+
+    val isTemporaryHome: StateFlow<Boolean> =
+        combine(_temporaryHomeServerId, servers) { temporary, list ->
+            temporary != null &&
+                temporary != defaultHomeSourceId(list) &&
+                list.any { it.id == temporary }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val homeServerId: StateFlow<String?> =
+        combine(_temporaryHomeServerId, servers) { temporary, list ->
+            temporary?.takeIf { id -> list.any { it.id == id } } ?: defaultHomeSourceId(list)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** 首页继续观看按所选来源过滤；来源尚未装载时保持聚合结果。 */
+    val visibleContinueWatching: StateFlow<List<PlaybackProgress>> =
+        combine(continueWatching, homeServerId) { items, serverId ->
+            scopedContinueWatching(items, serverId)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 数据源选择器选项：显示线路名称，不显示地址 / ID（条目 144）。 */
+    val sourceOptions: StateFlow<List<HomeSourceOption>> = servers
+        .map { homeSourceOptions(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun setAsHome(serverId: String) {
+        _temporaryHomeServerId.value = serverId
+    }
+
+    fun restoreDefaultHome() {
+        _temporaryHomeServerId.value = null
+    }
 
     /** 各服务器登录态（restoreSession 驱动，review：App 启动真正恢复登录）。 */
     private val _authStates = MutableStateFlow<Map<String, AuthSessionState>>(emptyMap())
@@ -68,7 +131,15 @@ class HomeViewModel @Inject constructor(
         // 首次装载标记必须来自**上游真实发射**（Room 首帧）——collect servers 的
         // StateFlow 会先收到种子空表，不能作为装载完成的依据（幂等置位）。
         viewModelScope.launch {
-            serverStore.observeServers().collect { _loaded.value = true }
+            serverStore.observeServers()
+                .onEach { _loaded.value = true }
+                .catch { error ->
+                    // 分区失败也要结束加载态，避免整页一直转圈；其余分区继续工作。
+                    logger.w(LogTag.UI, "首页媒体源分区首次装载失败", error)
+                    _serversFailed.value = true
+                    _loaded.value = true
+                }
+                .collect {}
         }
         // 不在 collector 内等待网络：旧身份的慢请求不能阻塞恢复后的新身份。
         viewModelScope.launch {

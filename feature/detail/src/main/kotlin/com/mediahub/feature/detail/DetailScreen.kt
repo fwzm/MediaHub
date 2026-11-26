@@ -60,6 +60,7 @@ import com.mediahub.core.ui.ThumbImage
 import com.mediahub.feature.detail.source.shouldShowSourceSelector
 import com.mediahub.feature.detail.source.sourceRows
 import com.mediahub.feature.detail.source.truncationMessage
+import com.mediahub.feature.detail.version.VersionSelector
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
@@ -86,6 +87,7 @@ fun DetailRoute(
     val sourceState by viewModel.sourceState.collectAsStateWithLifecycle()
     val favoriteState by viewModel.favoriteState.collectAsStateWithLifecycle()
     val localProgress by viewModel.localProgress.collectAsStateWithLifecycle()
+    val selectedVersionId by viewModel.selectedVersionId.collectAsStateWithLifecycle()
 
     // 条目 72：从播放器返回、页面重新可见时刷新本地续播进度。
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
@@ -167,14 +169,7 @@ fun DetailRoute(
                     onPlay(
                         viewModel.serverId,
                         viewModel.itemId,
-                        PlaybackLaunchSnapshot(
-                            itemId = item.id,
-                            type = item.type,
-                            title = item.title,
-                            runtimeMs = item.runtimeMs,
-                            posterUrl = item.posterUrl,
-                            container = item.container,
-                        )
+                        viewModel.launchSnapshot(item),
                     )
                 },
                 onSelectSeason = viewModel::selectSeason,
@@ -183,6 +178,8 @@ fun DetailRoute(
                 sourceState = sourceState,
                 onSwitchSource = onSwitchSource,
                 localProgress = localProgress,
+                selectedVersionId = selectedVersionId,
+                onSelectVersion = viewModel::selectVersion,
                 )
             }
         }
@@ -202,6 +199,8 @@ fun DetailBody(
     onSwitchSource: ((serverId: String, itemId: String, title: String) -> Unit)? = null,
     /** 条目 72：本地快照续播进度（已缓存 / 本地内容没有远端进度可显示）。 */
     localProgress: PlaybackProgress? = null,
+    selectedVersionId: String? = null,
+    onSelectVersion: (String) -> Unit = {},
 ) {
     val item = detail.item
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
@@ -306,6 +305,13 @@ fun DetailBody(
                     .height(3.dp),
             )
         }
+
+        // ---- 多版本选择（同服务器 MediaSource） ----
+        VersionSelector(
+            versions = detail.versions,
+            selectedVersionId = selectedVersionId,
+            onSelectVersion = onSelectVersion,
+        )
 
         // ---- 1F C2：跨服务器来源选择（ADR-038） ----
         SourceSelector(

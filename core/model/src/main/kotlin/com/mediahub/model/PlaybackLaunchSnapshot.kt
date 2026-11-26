@@ -12,6 +12,8 @@ data class PlaybackLaunchSnapshot(
     val runtimeMs: Long? = null,
     val posterUrl: String? = null,
     val container: String? = null,
+    /** 详情页选中的媒体版本（MediaSourceId）；null = 服务端默认版本。 */
+    val versionId: String? = null,
 ) {
     /** 详情页已提供有效快照（type 非空）时，播放页可跳过 detail 拉取。 */
     val hasDetail: Boolean get() = type != null

@@ -70,6 +70,7 @@ dependencies {
     implementation(project(":provider:jellyfin"))
     implementation(project(":provider:webdav"))
     implementation(project(":provider:local"))
+    implementation(project(":core:download"))
 
     implementation(project(":feature:home"))
     implementation(project(":feature:server"))
