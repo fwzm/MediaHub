@@ -8,6 +8,8 @@ import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.PlayerVisualEffectsPreferences
 import com.mediahub.model.PlayerVisualPreset
 import com.mediahub.model.UserPreferences
+import com.mediahub.model.VideoAspectMemory
+import com.mediahub.model.VideoAspectMode
 import com.mediahub.model.VisualPerformanceMode
 import java.io.File
 import java.util.concurrent.CountDownLatch
@@ -66,6 +68,33 @@ class UserPreferencesStoreTest {
     }
 
     @Test
+    fun `precise resume preference survives a store round trip`() = runBlocking {
+        assertFalse(store.flow.first().preciseResumeSeek)
+
+        store.update { it.copy(preciseResumeSeek = true) }
+
+        val recreatedStore = UserPreferencesStore(dataStore)
+        assertTrue(recreatedStore.flow.first().preciseResumeSeek)
+    }
+
+    @Test
+    fun `aspect ratio memory survives a store round trip and keeps unrelated keys`() = runBlocking {
+        val overrides = mapOf(
+            VideoAspectMemory.key("server-1", "item-1") to VideoAspectMode.CROP,
+            VideoAspectMemory.key("server-1", "item-2") to VideoAspectMode.RATIO_16_9,
+        )
+        store.update { current ->
+            current.copy(subtitleSizeSp = 22, videoAspectOverrides = overrides)
+        }
+
+        val restored = UserPreferencesStore(dataStore).flow.first()
+
+        assertEquals(overrides, restored.videoAspectOverrides)
+        assertEquals(22, restored.subtitleSizeSp)
+
+    }
+
+    @Test
     fun `visual preferences survive a store round trip`() = runBlocking {
         val expected = PlayerVisualEffectsPreferences(
             enabled = true,
@@ -89,6 +118,30 @@ class UserPreferencesStoreTest {
         assertEquals(expected, restored.playerVisualEffects)
         assertEquals(PlaybackEngineMode.MPV, restored.playbackEngineMode)
         assertEquals(24, restored.subtitleSizeSp)
+    }
+
+    @Test
+    fun `preferred audio and subtitle languages survive a store round trip`() = runBlocking {
+        store.update { current ->
+            current.copy(
+                preferredAudioLanguage = "ja",
+                preferredSubtitleLanguage = "zh",
+            )
+        }
+
+        val recreatedStore = UserPreferencesStore(dataStore)
+        val restored = recreatedStore.flow.first()
+
+        assertEquals("ja", restored.preferredAudioLanguage)
+        assertEquals("zh", restored.preferredSubtitleLanguage)
+    }
+
+    @Test
+    fun `clearing preferred subtitle language persists no auto subtitle preference`() = runBlocking {
+        store.update { it.copy(preferredSubtitleLanguage = "zh") }
+        store.update { it.copy(preferredSubtitleLanguage = null) }
+
+        assertNull(UserPreferencesStore(dataStore).flow.first().preferredSubtitleLanguage)
     }
 
     @Test

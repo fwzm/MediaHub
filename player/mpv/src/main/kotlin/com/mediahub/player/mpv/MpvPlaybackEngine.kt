@@ -261,6 +261,8 @@ class MpvPlaybackEngine internal constructor(
                         logger.i(LogTag.PLAYER, "mpv tuning " + tuning.name + "=" + tuning.value)
                     }
                     val startMs = s.startPositionMs ?: s.resumePositionMs
+                    // 条目 124：按会话精度设置起播 seek（必须在 init 之前）。
+                    m.setOptionString(MpvResumeSeekOption.NAME, MpvResumeSeekOption.value(s.resumeSeekMode))
                     if (startMs != null && startMs > 0) m.setOptionString("start", (startMs / 1000.0).toString())
                     logger.i(LogTag.PLAYER, "mpv container=$container video=${src.videoCodec} audio=${src.audioCodec} startMs=$startMs")
                     checkCurrent()
@@ -274,6 +276,9 @@ class MpvPlaybackEngine internal constructor(
                     m.observeProperty("duration", MpvInstance.Format.DOUBLE)
                     m.observeProperty("pause", MpvInstance.Format.FLAG)
                     m.observeProperty("speed", MpvInstance.Format.DOUBLE)
+                    // 条目 137：向 UI 提供视频尺寸，让画面容器与 mpv 内部宽高比一致。
+                    m.observeProperty("width", MpvInstance.Format.DOUBLE)
+                    m.observeProperty("height", MpvInstance.Format.DOUBLE)
                     m.observeProperty("media-title", MpvInstance.Format.STRING)
                     checkCurrent()
                     tr?.record(PlaybackStartupTrace.Milestone.MPV_LOADFILE)
@@ -342,6 +347,8 @@ class MpvPlaybackEngine internal constructor(
                 "time-pos" -> _uiState.update { it.copy(positionMs = (value * 1000).toLong()) }
                 "duration" -> if (value > 0) _uiState.update { it.copy(durationMs = (value * 1000).toLong()) }
                 "speed" -> _uiState.update { it.copy(speed = value.toFloat()) }
+                "width" -> if (value > 0) _uiState.update { it.copy(videoWidth = value.toInt()) }
+                "height" -> if (value > 0) _uiState.update { it.copy(videoHeight = value.toInt()) }
             }
         }
         override fun property(name: String, value: String) = withCurrent(run) {

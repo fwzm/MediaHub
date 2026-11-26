@@ -17,9 +17,15 @@ class SourceSelectorModelTest {
         title = "Fargo", year = 2014, externalIds = ExternalIds(tmdb = "1"),
     )
 
-    private fun occ(serverId: String, serverName: String, id: String, active: Boolean = false) =
+    private fun occ(
+        serverId: String,
+        serverName: String,
+        id: String,
+        active: Boolean = false,
+        endpointName: String? = null,
+    ) =
         CanonicalSourceOccurrence(
-            serverId = serverId, serverName = serverName,
+            serverId = serverId, serverName = serverName, endpointName = endpointName,
             item = item(serverId, id), isActive = active,
         )
 
@@ -73,6 +79,39 @@ class SourceSelectorModelTest {
         // 行携带各自 itemId/serverId，切换路由可直达目标 occurrence
         assertEquals(listOf("a1", "a1-dup", "b1"), rows.map { it.itemId })
         assertEquals(listOf("s1", "s1", "s2"), rows.map { it.serverId })
+    }
+
+    // ---- 144：标签显示线路名称，不显示地址 / ID ----
+
+    @Test
+    fun `source selector labels prefer endpoint line name`() {
+        val rows = sourceRows(
+            listOf(
+                occ("s1", "予初", "a1", active = true, endpointName = "主线路"),
+                occ("s2", "墨云阁", "b1", endpointName = "备用线路"),
+            ),
+        )
+        assertEquals(listOf("主线路", "备用线路"), rows.map { it.label })
+        rows.forEach {
+            assertFalse("不得展示服务器地址或 ID：${it.label}", it.label.contains("s1") || it.label.contains("s2"))
+        }
+    }
+
+    @Test
+    fun `blank endpoint name falls back to server name`() {
+        val rows = sourceRows(listOf(occ("s1", "予初", "a1", active = true, endpointName = "  ")))
+        assertEquals(listOf("予初"), rows.map { it.label })
+    }
+
+    @Test
+    fun `same line name across servers is disambiguated by server name not address`() {
+        val rows = sourceRows(
+            listOf(
+                occ("s1", "予初", "a1", active = true, endpointName = "默认线路"),
+                occ("s2", "墨云阁", "b1", endpointName = "默认线路"),
+            ),
+        )
+        assertEquals(listOf("默认线路 · 予初", "默认线路 · 墨云阁"), rows.map { it.label })
     }
 
     // ---- 评审 P2-2 回归：truncation 提示与 selector gate 解耦 ----
