@@ -76,6 +76,7 @@ core/                核心层（无业务）
   model/             统一领域模型（纯 Kotlin，无 Android 依赖）
   network/           ApiClient（API）+ MediaHttpClient（媒体流）+ 结构化错误
   database/          Room（服务器/账号/进度）+ DataStore（偏好）+ Repository
+  download/          离线下载内核（状态机 / 断点续传 / 索引清理 / 本地播放关联；纯 Kotlin）
   security/          Android Keystore 加密存储（SecretStorage / TokenStore）
   logging/           统一日志（分类、脱敏、内存缓冲）
 player/
@@ -86,7 +87,7 @@ provider/
   base/              BaseMediaServerProvider + Provider 注册表
   emby/ jellyfin/ webdav/ local/   具体数据源；真实能力以各 Provider 的声明与验证记录为准
   smb/ aliyun/ baidu/ quark/ china-mobile/ tianyi/   规划占位（README）
-metadata/            媒体元数据（刮削）抽象
+metadata/            媒体元数据（刮削）：TMDB 客户端（搜索/详情/季集），API Key 由调用方注入
 feature/
   home/ server/ library/ detail/ search/ settings/ player/    UI 模块
 docs/                providers / player / api 设计文档
@@ -149,6 +150,16 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
 
 本轮验证和仍待完成的系统撤权 UI 验收见 [SAF 接入记录](docs/reviews/saf-directory-content-2026-10-26.md)。
 
+### 首页聚合与详情页来源选择
+1. 首页「继续观看」按当前首页来源展示；数据源选择器显示**线路名称**（如「主线路」），不再显示服务器地址或内部 ID。
+2. 媒体源卡片可点「设为首页」**临时**切换首页；该选择只存在内存，进程重启后回到 `isDefault` 的默认首页，
+   也可用「恢复默认」立即还原（不新增持久首页字段）。
+3. 单资源「继续观看」标题栏提供「查看全部」，进入该来源的完整继续观看列表。
+4. 所选来源没有可播放记录时，该分区明确显示「暂无可播放资源」，不再复用通用空态文案。
+5. 首页「媒体源」与「继续观看」两个分区独立加载：任一分区失败只影响自身并显示分区错误，
+   不会连带整页空白或闪退。
+6. 详情页的多来源选择器同样以线路名称标注来源；不同服务器线路同名时追加服务器名消歧，不使用地址或内部 ID。
+
 ### Jellyfin 静态播放
 
 本分支仍只交付无需转码的静态媒体流，ISO 不支持。字幕策略阻止播放时的协商、显式字幕偏好保护和
@@ -157,6 +168,17 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
 设置页可改默认倍速、字幕大小等（DataStore 持久化）。mpv 同样接收字幕大小与字幕面板中的颜色、
 描边、背景、位置偏好，并在播放中更新、退出重进及内核降级时保留；默认尊重内嵌 ASS 样式。
 验证范围见 [字幕外观接线记录](docs/reviews/subtitle-presentation-and-local-audit-2026-10-27.md)。
+
+### 元数据（TMDB，第 1 段）
+
+`metadata` 模块已提供 TMDB v3 客户端与 Provider（`TmdbMetadataProvider`）：
+搜索（`/search/multi`）、详情（`/movie|tv/{id}`，含 credits / external_ids）、
+季集（`/tv/{id}/season/{n}`，含未入库与未播出季集）。
+
+- 配置：API Key 由调用方注入（`TmdbMetadataProvider.create(apiKey = ...)`），仓库不保存任何真实密钥；
+  `baseUrl` / `language` 可覆盖，测试用 MockWebServer 注入本地地址，不访问真实 TMDB。
+- ID 约定：`movie/550`、`tv/1396`；裸数字 ID 会被拒绝（TMDB 电影与剧集 ID 空间重叠）。
+- 限制：尚未接入 UI 与持久化；多源评分聚合、片头片尾标记、排序与匹配率优化在后续段交付。
 
 > 真机、真实 Emby/Jellyfin 服务器和旧版本数据库升级不属于上述 JVM 路径的自动保证范围；
 > 当前验证边界、尚未完成项和每个 Provider 的能力以 [TASKS.md](TASKS.md)、[ROADMAP.md](ROADMAP.md)
@@ -262,6 +284,8 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   但未在真实老 NAS 上验证；Digest / NTLM 等非 Basic 认证不在支持范围（会按认证失败处理）。
   含 ISO-8859-1 无法表示字符的凭据遇到只认旧编码的服务器时不会降级重试——这是有意的 fail-closed，不是遗漏。
 - **搜索**：多源搜索已有模拟服务器与单测（`Search_sends_the_term_and_returns_only_matching_items` 断言 `SearchTerm=Star%20Wars` 与服务端过滤结果）；Emby / Jellyfin 共用的 `/Users/{id}/Items?SearchTerm=` 服务端搜索已接入。真服路径未测，验证条件是真实 Emby / Jellyfin 服务器；WebDAV / 本地源没有服务端搜索能力，按「不支持搜索」处理。
+  搜索历史已本地持久化（Room `search_history` 表：主键去重、重复搜索置顶、上限 20 条）；历史列表固定显示两行高度、超出滚动，长按单条删除；进入搜索页或再次选中搜索入口时聚焦输入框并弹出键盘。
+  上述历史与交互有 `core:database` / `feature:search` 的 JVM / Robolectric 用例覆盖（`--rerun-tasks --no-build-cache` 实测）；输入法是否真正弹出未在真机断言，属 `NOT_RUN`。
 - **体验缺口与覆盖缺口**：「继续观看」卡片海报懒加载已修（W10；页面调用 `MediaCardViewModel.RequestPoster`，U1 P2.6 两服 PASS）；永久播放列表拖拽排序已接线（`ListView.CanReorderItems` → `PlaylistStore.ReorderItems`，存储层与置换校验有单测），WinUI 拖拽手势本身仍需 GUI 验收（`NOT_RUN`；条件：Windows 客户端 + 至少 3 条目的播放列表）。
 - **NOT_RUN / IMPLEMENTED_UNVERIFIED（缺的是可判定的执行条件，其中 HDR 是产品边界而非缺陷）**：
   - **HDR 与色彩管理**：产品边界 —— 不声称任何 HDR 能力，杜比视界 `NOT_SUPPORTED`；若将来要宣称，需 HDR 显示器 + HDR
