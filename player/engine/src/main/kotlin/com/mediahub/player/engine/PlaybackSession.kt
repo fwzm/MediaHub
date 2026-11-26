@@ -26,6 +26,15 @@ data class PlaybackSession(
      */
     val startPaused: Boolean? = null,
     /**
+     * 首选音频语言（已收敛为语言子标签；空 = 无偏好，沿用系统 Locale 策略）。
+     * 由 ViewModel 从用户偏好注入，见 [TrackPreferencePolicy]。
+     */
+    val preferredAudioLanguages: List<String> = emptyList(),
+    /**
+     * 首选字幕语言（空 = 不自动开启字幕）。匹配不到时引擎必须保持字幕关闭。
+     */
+    val preferredTextLanguages: List<String> = emptyList(),
+    /**
      * 续播定位策略（条目 124）：换源/换集/续播时的起播 seek 精度。
      * 默认 [ResumeSeekMode.KEYFRAME] 以邻近关键帧快速起播；EXACT 按精确时间定位。
      */
