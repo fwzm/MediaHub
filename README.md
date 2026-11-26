@@ -76,6 +76,7 @@ core/                核心层（无业务）
   model/             统一领域模型（纯 Kotlin，无 Android 依赖）
   network/           ApiClient（API）+ MediaHttpClient（媒体流）+ 结构化错误
   database/          Room（服务器/账号/进度）+ DataStore（偏好）+ Repository
+  download/          离线下载内核（状态机 / 断点续传 / 索引清理 / 本地播放关联；纯 Kotlin）
   security/          Android Keystore 加密存储（SecretStorage / TokenStore）
   logging/           统一日志（分类、脱敏、内存缓冲）
 player/
