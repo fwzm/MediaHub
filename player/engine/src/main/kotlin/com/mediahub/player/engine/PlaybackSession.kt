@@ -34,6 +34,7 @@ data class PlaybackSession(
      * 首选字幕语言（空 = 不自动开启字幕）。匹配不到时引擎必须保持字幕关闭。
      */
     val preferredTextLanguages: List<String> = emptyList(),
+    /**
      * 续播定位策略（条目 124）：换源/换集/续播时的起播 seek 精度。
      * 默认 [ResumeSeekMode.KEYFRAME] 以邻近关键帧快速起播；EXACT 按精确时间定位。
      */
