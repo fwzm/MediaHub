@@ -6,6 +6,22 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 /** Room 迁移（Phase 1B-2.5：servers 去 baseUrl、加 note/icon；新增 server_endpoints 表）。 */
 object Migrations {
 
+    /** 搜索体验（条目 52/120）：新增 search_history 表（query 主键去重 + 时间倒序）。 */
+    val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS search_history (" +
+                    "query TEXT NOT NULL, " +
+                    "updatedAtEpochMs INTEGER NOT NULL, " +
+                    "PRIMARY KEY(query))",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_search_history_updatedAtEpochMs " +
+                    "ON search_history(updatedAtEpochMs)",
+            )
+        }
+    }
+
     /** P2 字幕中心切片一：新增 subtitle_memory 表（匹配记忆，键=视频版本指纹）。 */
     /**
      * W6-B：servers 加跨设备来源同步身份（ADR-S001）。

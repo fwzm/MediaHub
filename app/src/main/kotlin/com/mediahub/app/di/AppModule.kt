@@ -38,6 +38,8 @@ import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.database.prefs.UserPreferencesRepository
 import com.mediahub.core.database.prefs.UserPreferencesStore
 import com.mediahub.core.database.repository.ServerStore
+import com.mediahub.core.download.DownloadManager
+import com.mediahub.core.download.DownloadedMediaLocator
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.base.DefaultProviderRegistry
 import com.mediahub.provider.emby.session.EmbySessionStore
@@ -226,6 +228,7 @@ object AppModule {
                 Migrations.MIGRATION_2_3,
                 Migrations.MIGRATION_3_4,
                 Migrations.MIGRATION_4_5,
+                Migrations.MIGRATION_5_6,
             )
             .build()
 
@@ -337,6 +340,24 @@ object AppModule {
         com.mediahub.feature.search.engine.GlobalSearchEngine(perServerTimeoutMs = 8_000, maxConcurrency = 4)
 
     /**
+     * 网盘/媒体库离线下载内核（ADR-009）：索引与文件放在 filesDir/downloads，
+     * 传输复用媒体流客户端（长读、系统 VPN / 代理由 OkHttp 栈接管）。
+     */
+    @Provides
+    @Singleton
+    fun provideDownloadManager(
+        @ApplicationContext context: Context,
+        mediaHttpClient: MediaHttpClient,
+    ): DownloadManager = DownloadManager(
+        rootDir = File(context.filesDir, "downloads"),
+        httpClient = mediaHttpClient.okHttpClient(),
+    )
+
+    @Provides
+    @Singleton
+    fun provideDownloadedMediaLocator(manager: DownloadManager): DownloadedMediaLocator = manager
+
+    /**
      * W6-110：诊断日志导出出口（LogBuffer → 文件）。
      *
      * 目录用 cacheDir/diagnostics：可被系统清理、不占用户存储；导出时逐行再脱敏一次（见 DiagnosticsReport）。
@@ -377,6 +398,12 @@ abstract class RegistryModule {
     @Binds
     @Singleton
     abstract fun bindSubtitleMemoryStore(impl: com.mediahub.core.database.repository.SubtitleMemoryRepository): com.mediahub.core.database.repository.SubtitleMemoryStore
+
+    @Binds
+    @Singleton
+    abstract fun bindSearchHistoryStore(
+        impl: com.mediahub.core.database.repository.SearchHistoryRepository,
+    ): com.mediahub.core.database.repository.SearchHistoryStore
 
     @Binds
     @Singleton

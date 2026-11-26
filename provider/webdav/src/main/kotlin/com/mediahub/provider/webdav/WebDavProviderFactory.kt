@@ -80,6 +80,8 @@ class WebDavProviderFactory @Inject constructor(
                 server = server,
                 session = session,
                 logger = logger,
+                // 条目 136：容器未知时按真实响应识别无扩展名 HLS。
+                probePlaylistMime = api::probePlaylistMime,
             ),
             subtitleDiscovery = WebDavSubtitleDiscoveryProvider(
                 server = server,

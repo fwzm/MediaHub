@@ -18,6 +18,7 @@ import com.mediahub.model.PlayerVisualPreset
 import com.mediahub.model.ProfessionalInfoPreferences
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.UserPreferences
+import com.mediahub.model.VideoAspectMemory
 import com.mediahub.model.VisualPerformanceMode
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -65,6 +66,7 @@ class UserPreferencesStore internal constructor(
                 ?: prefs.remove(Keys.PREFERRED_AUDIO_LANGUAGE)
             updated.preferredSubtitleLanguage?.takeIf { it.isNotBlank() }?.let { prefs[Keys.PREFERRED_SUBTITLE_LANGUAGE] = it }
                 ?: prefs.remove(Keys.PREFERRED_SUBTITLE_LANGUAGE)
+            prefs[Keys.VIDEO_ASPECT_OVERRIDES] = VideoAspectMemory.encode(updated.videoAspectOverrides)
         }
     }
 
@@ -102,6 +104,7 @@ class UserPreferencesStore internal constructor(
             professionalInfo = readProfessionalInfo(prefs),
             preferredAudioLanguage = prefs[Keys.PREFERRED_AUDIO_LANGUAGE],
             preferredSubtitleLanguage = prefs[Keys.PREFERRED_SUBTITLE_LANGUAGE],
+            videoAspectOverrides = VideoAspectMemory.decode(prefs[Keys.VIDEO_ASPECT_OVERRIDES]),
         )
 
     private fun readSubtitleStyle(prefs: Preferences): SubtitleStyle =
@@ -239,5 +242,6 @@ class UserPreferencesStore internal constructor(
         val PROFESSIONAL_INFO_EXPERT_MODE = booleanPreferencesKey("player_professional_info_expert_mode")
         val PREFERRED_AUDIO_LANGUAGE = stringPreferencesKey("preferred_audio_language")
         val PREFERRED_SUBTITLE_LANGUAGE = stringPreferencesKey("preferred_subtitle_language")
+        val VIDEO_ASPECT_OVERRIDES = stringPreferencesKey("video_aspect_overrides")
     }
 }
