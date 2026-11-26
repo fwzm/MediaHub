@@ -137,6 +137,23 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
    设置 → 播放 →「精确续播」默认关闭：EXO 用 `SeekParameters.CLOSEST_SYNC`、mpv 用 `hr-seek=no`，
    从邻近关键帧快速起播；开启后 EXO 用 `SeekParameters.EXACT`、mpv 用 `hr-seek=yes` 按精确时间定位，首帧更慢。
 
+### 播放画面与手势
+1. **双击分区**：默认保持 `左 40% 快退 / 中 20% 播放暂停 / 右 40% 快进`；
+   在设置里开启「双击两侧显隐控制栏」后，最外侧各 10% 改为显隐控制栏，10%–40% 快退、40%–60% 播放暂停、
+   60%–90% 快进（`PlayerGestureZonePolicy`，有坐标单测钉住，快进快退不被覆盖）。
+2. **双指缩放**：1×–3× 手动缩放画面，`player_zoom_reset`「还原画面」一键回到 1×。
+3. **安全边距**：控制栏顶部取状态栏与 `displayCutout` 较大者，底部取导航栏与 `systemGestures` 较大者，
+   左右加 cutout 内边距（`PlayerInsetPolicy`，有 insets 单测）。
+4. **底部系统手势区**：落在导航/系统手势保留区的上滑不再被播放器当作亮度/音量调节，直接交给系统返回桌面。
+5. **音频偏小**：多声道编码（AC3/EAC3/DTS/TrueHD/FLAC 等）启用 mpv `audio-normalize-downmix`，修正下混增益而不是抬高音量上限。
+6. **杜比视界**：设备明确不支持 `HdrType.DOLBY_VISION` 时路由到 mpv，并置 `hwdec=no` + 色调映射兜底，避免黑屏。
+7. **共享纹理失败**：`SURFACE_ERROR` 先摘除并重挂 Surface 在原位置续播（每 session 一次），仍失败才降级 mpv，并给出可读提示。
+8. **本地数据访问失败**：SAF 在 `SecurityException` 之外的厂商异常（`IllegalStateException` / `UnsupportedOperationException` 等）
+   统一归类为「目录授权失效」，引导重新授权而不是崩溃或显示空目录。
+
+以上手势 / 缩放 / insets / 错误归类均以 JVM 单测覆盖；杜比硬解失败、真实共享纹理失败、刘海屏与底部手势区、
+厂商 SAF 异常仍需真机验证，当前 `NOT_RUN`。
+
 ### WebDAV（只读）
 1. 首页 → 添加媒体库 → WebDAV → 填服务器地址（目录 URL，保存时统一补结尾 `/`）/ 用户名 / 密码 → 登录并添加。
 2. 认证探测 = 对配置根发一次 `Depth: 0` 的 `PROPFIND`：只有响应能代表该根目录（同 origin、非空、状态成功）才落盘密码；

@@ -34,8 +34,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.requiredSize
@@ -75,6 +79,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -100,7 +106,9 @@ import com.mediahub.feature.player.gesture.GestureSeekPreview
 import com.mediahub.feature.player.gesture.GestureSpeedPreview
 import com.mediahub.feature.player.gesture.PlayerGestureController
 import com.mediahub.feature.player.gesture.GestureLevelPreview
+import com.mediahub.feature.player.gesture.PlayerChromeInsets
 import com.mediahub.feature.player.gesture.PlayerGestureLayer
+import com.mediahub.feature.player.gesture.PlayerInsetPolicy
 import com.mediahub.feature.player.gesture.PlayerLevelKind
 import com.mediahub.core.ui.effects.PlayerVisualOverlay
 import com.mediahub.core.ui.effects.PlayerVisualMaskConfig
@@ -338,6 +346,29 @@ fun PlayerRoute(
     val scrubPreview by gestureController.scrubPreview.collectAsStateWithLifecycle()
     val speedPreview by gestureController.speedPreview.collectAsStateWithLifecycle()
     val levelPreview by gestureController.levelPreview.collectAsStateWithLifecycle()
+    // 缺陷 33：双指缩放倍率（只作用于视频/字幕层，不影响手势与控制层）。
+    val zoom by gestureController.zoom.collectAsStateWithLifecycle()
+
+    // 缺陷 32：控制层安全区。沉浸式隐藏状态栏后 statusBars 可能为 0，
+    // 但刘海/挖孔仍然存在，必须与 displayCutout 取最大值。
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    val statusBarPadding = WindowInsets.statusBars.asPaddingValues()
+    val cutoutPadding = WindowInsets.displayCutout.asPaddingValues()
+    val navigationBarPadding = WindowInsets.navigationBars.asPaddingValues()
+    val systemGesturePadding = WindowInsets.systemGestures.asPaddingValues()
+    val chromeInsets = PlayerInsetPolicy.resolve(
+        statusBarTopDp = statusBarPadding.calculateTopPadding().value,
+        cutoutTopDp = cutoutPadding.calculateTopPadding().value,
+        cutoutLeftDp = cutoutPadding.calculateLeftPadding(layoutDirection).value,
+        cutoutRightDp = cutoutPadding.calculateRightPadding(layoutDirection).value,
+        navigationBarBottomDp = navigationBarPadding.calculateBottomPadding().value,
+        systemGestureBottomDp = systemGesturePadding.calculateBottomPadding().value,
+    )
+    // 缺陷 41：底部系统手势区（上滑返回桌面）必须让给系统。
+    val bottomSystemInsetPx = with(density) {
+        systemGesturePadding.calculateBottomPadding().toPx()
+    }
     var forceVisualFallback by remember(viewModel) {
         mutableStateOf(Build.VERSION.SDK_INT < RendererBackendSelector.RUNTIME_SHADER_MIN_API)
     }
@@ -496,6 +527,11 @@ fun PlayerRoute(
                             )
                         }
                     },
+                    update = { view ->
+                        // 缺陷 33：缩放直接作用在 SurfaceView 上（graphicsLayer 无法变换独立 Surface）。
+                        view.scaleX = zoom
+                        view.scaleY = zoom
+                    },
                     modifier = Modifier.fillMaxSize(),
                 )
 
@@ -509,6 +545,8 @@ fun PlayerRoute(
                     update = { view ->
                         applySubtitleStyle(view, preferences)
                         view.setCues(subtitleCues?.cues)
+                        view.scaleX = zoom
+                        view.scaleY = zoom
                     },
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -542,6 +580,7 @@ fun PlayerRoute(
                 if (b >= 0f) b else readSystemBrightness(context)
             },
             onVolume = { readVolumeFraction() },
+            bottomSystemInsetPx = bottomSystemInsetPx,
         )
 
         // 手势预览指示（U3-B）：scrub / 连续快退 / 长按倍速
@@ -614,6 +653,9 @@ fun PlayerRoute(
                         forceVisualFallback = forceVisualFallback,
                         onVisualBackendChanged = reportVisualBackend,
                         subtitleSelected = engineState.selectedSubtitle != null || subtitleCenter.selectedExternalId != null,
+                        zoom = zoom,
+                        chromeInsets = chromeInsets,
+                        onResetZoom = gestureController::resetZoom,
                         onBack = exitPlayer,
                         onTogglePlayPause = viewModel.engine::togglePlayPause,
                         onSeek = { viewModel.engine.seekTo(it) },
@@ -889,6 +931,9 @@ private fun PlayerControls(
     forceVisualFallback: Boolean,
     onVisualBackendChanged: (RendererBackend) -> Unit,
     subtitleSelected: Boolean,
+    zoom: Float = 1f,
+    chromeInsets: PlayerChromeInsets = PlayerChromeInsets(0f, 0f, 0f, 0f),
+    onResetZoom: () -> Unit = {},
     onBack: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onSeek: (Long) -> Unit,
@@ -937,7 +982,11 @@ private fun PlayerControls(
                 .fillMaxWidth()
                 .align(Alignment.TopCenter)
                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
-                .statusBarsPadding()
+                .padding(
+                    start = chromeInsets.leftDp.dp,
+                    top = chromeInsets.topDp.dp,
+                    end = chromeInsets.rightDp.dp,
+                )
                 .padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1057,7 +1106,11 @@ private fun PlayerControls(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .navigationBarsPadding()
+                        .padding(
+                            start = chromeInsets.leftDp.dp,
+                            bottom = chromeInsets.bottomDp.dp,
+                            end = chromeInsets.rightDp.dp,
+                        )
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                 ) {
                     Row(
@@ -1142,6 +1195,15 @@ private fun PlayerControls(
                                     stringResource(R.string.player_playback_speed, state.speed),
                                     color = MaterialTheme.colorScheme.onSurface,
                                 )
+                            }
+                            // 缺陷 33：缩放后提供显式的"还原画面"入口。
+                            if (zoom > 1.001f) {
+                                TextButton(onClick = onResetZoom) {
+                                    Text(
+                                        stringResource(R.string.player_zoom_reset),
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
                             }
                             // 条目 9：画面比例循环切换，并按内容记忆。
                             TextButton(onClick = onCycleAspectMode) {

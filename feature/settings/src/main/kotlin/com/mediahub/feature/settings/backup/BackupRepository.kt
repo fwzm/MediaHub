@@ -299,6 +299,7 @@ class BackupRepository @Inject constructor(
                     longPressSpeedMax = dto.gestures.longPressSpeedMax,
                     longPressDirectionalEnabled = dto.gestures.longPressDirectionalEnabled,
                     longPressDefaultSpeed = dto.gestures.longPressDefaultSpeed,
+                    doubleTapSidesToggleOverlay = dto.gestures.doubleTapSidesToggleOverlay,
                 ),
             )
         }
@@ -759,6 +760,7 @@ class BackupRepository @Inject constructor(
             longPressSpeedMax = prefs.gestures.longPressSpeedMax,
             longPressDirectionalEnabled = prefs.gestures.longPressDirectionalEnabled,
             longPressDefaultSpeed = prefs.gestures.longPressDefaultSpeed,
+            doubleTapSidesToggleOverlay = prefs.gestures.doubleTapSidesToggleOverlay,
         ),
     )
 }

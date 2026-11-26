@@ -26,11 +26,12 @@ class PlaybackEngineSelectorDeviceRoutingTest {
         video: CapabilityEvidence = CapabilityEvidence.UNKNOWN,
         audio: CapabilityEvidence = CapabilityEvidence.UNKNOWN,
         hdr: CapabilityEvidence = CapabilityEvidence.UNKNOWN,
+        dolbyVision: CapabilityEvidence = CapabilityEvidence.UNKNOWN,
     ) = DevicePlaybackAssessment(
         video = AxisAssessment(video, "test-video"),
         audio = AxisAssessment(audio, "test-audio"),
         hdr = AxisAssessment(hdr, "test-hdr"),
-        dolbyVision = AxisAssessment.unknown("test-dv"),
+        dolbyVision = AxisAssessment(dolbyVision, "test-dv"),
     )
 
     @Test
@@ -110,6 +111,51 @@ class PlaybackEngineSelectorDeviceRoutingTest {
         val selection = PlaybackEngineSelector.select(
             source(), PlaybackEngineMode.AUTO, emptySet(),
             device = device(hdr = CapabilityEvidence.UNSUPPORTED),
+        )
+        assertEquals(EngineKind.MEDIA3, selection.kind)
+    }
+
+    @Test
+    fun `unsupported dolby vision routes to mpv so the picture is not black`() {
+        val dvSource = PlaybackSource(
+            url = "http://media/stream",
+            videoCodec = "hevc",
+            audioCodec = "eac3",
+            hdrType = com.mediahub.model.HdrType.DOLBY_VISION,
+        )
+        val selection = PlaybackEngineSelector.select(
+            dvSource, PlaybackEngineMode.AUTO, emptySet(),
+            device = device(dolbyVision = CapabilityEvidence.UNSUPPORTED),
+        )
+        assertEquals(EngineKind.MPV, selection.kind)
+    }
+
+    @Test
+    fun `unknown dolby vision evidence keeps the existing fast path`() {
+        val dvSource = PlaybackSource(
+            url = "http://media/stream",
+            videoCodec = "hevc",
+            audioCodec = "eac3",
+            hdrType = com.mediahub.model.HdrType.DOLBY_VISION,
+        )
+        val selection = PlaybackEngineSelector.select(
+            dvSource, PlaybackEngineMode.AUTO, emptySet(),
+            device = device(dolbyVision = CapabilityEvidence.UNKNOWN),
+        )
+        assertEquals(EngineKind.MEDIA3, selection.kind)
+    }
+
+    @Test
+    fun `dolby vision on a capable display keeps media3`() {
+        val dvSource = PlaybackSource(
+            url = "http://media/stream",
+            videoCodec = "hevc",
+            audioCodec = "eac3",
+            hdrType = com.mediahub.model.HdrType.DOLBY_VISION,
+        )
+        val selection = PlaybackEngineSelector.select(
+            dvSource, PlaybackEngineMode.AUTO, emptySet(),
+            device = device(dolbyVision = CapabilityEvidence.SUPPORTED),
         )
         assertEquals(EngineKind.MEDIA3, selection.kind)
     }
