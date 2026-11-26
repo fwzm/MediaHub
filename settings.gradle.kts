@@ -26,6 +26,7 @@ include(":app")
 
 include(":core:common")
 include(":core:model")
+include(":core:download")
 include(":core:network")
 include(":core:database")
 include(":core:security")
@@ -43,6 +44,7 @@ include(":provider:emby")
 include(":provider:jellyfin")
 include(":provider:webdav")
 include(":provider:local")
+include(":provider:iptv")
 
 include(":metadata")
 

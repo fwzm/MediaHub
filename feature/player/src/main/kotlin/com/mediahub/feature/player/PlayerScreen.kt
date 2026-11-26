@@ -34,10 +34,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -60,6 +65,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -70,8 +76,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -91,12 +100,15 @@ import com.mediahub.model.AudioTrack
 import com.mediahub.model.PlayerVisualPreset
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.UserPreferences
+import com.mediahub.model.VideoAspectMode
 import com.mediahub.model.SubtitleTrack
 import com.mediahub.feature.player.gesture.GestureSeekPreview
 import com.mediahub.feature.player.gesture.GestureSpeedPreview
 import com.mediahub.feature.player.gesture.PlayerGestureController
 import com.mediahub.feature.player.gesture.GestureLevelPreview
+import com.mediahub.feature.player.gesture.PlayerChromeInsets
 import com.mediahub.feature.player.gesture.PlayerGestureLayer
+import com.mediahub.feature.player.gesture.PlayerInsetPolicy
 import com.mediahub.feature.player.gesture.PlayerLevelKind
 import com.mediahub.core.ui.effects.PlayerVisualOverlay
 import com.mediahub.core.ui.effects.PlayerVisualMaskConfig
@@ -144,6 +156,8 @@ fun PlayerRoute(
     val serverDisplayName by viewModel.serverDisplayName.collectAsStateWithLifecycle()
     val serverIcon by viewModel.serverIcon.collectAsStateWithLifecycle()
     val downloadSpeedBps by viewModel.engine.downloadSpeedBps.collectAsStateWithLifecycle()
+    val cacheReadSpeedBps by viewModel.engine.cacheReadSpeedBps.collectAsStateWithLifecycle()
+    val isReadingFromCache by viewModel.engine.isReadingFromCache.collectAsStateWithLifecycle()
     val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
     val subtitleCues by viewModel.engine.subtitleCues.collectAsStateWithLifecycle()
     val artworkPalette by viewModel.artworkPalette.collectAsStateWithLifecycle()
@@ -151,6 +165,7 @@ fun PlayerRoute(
     val subtitleCenter by viewModel.subtitleCenter.collectAsStateWithLifecycle()
     val danmakuState by viewModel.danmakuState.collectAsStateWithLifecycle()
     val playbackSource by viewModel.playbackSource.collectAsStateWithLifecycle()
+    val videoAspectMode by viewModel.videoAspectMode.collectAsStateWithLifecycle()
     val audioSpectrumBridge = rememberAudioSpectrumBridge(viewModel.engine.audioBands)
 
     // 兜底（系统返回手势/组合销毁）：异步 final flush；正常返回按钮走同步 stopAndFlush（ADR-023）。
@@ -230,6 +245,9 @@ fun PlayerRoute(
         }
     }
     val sysUiPrefs by viewModel.playerSystemUiPrefs.collectAsStateWithLifecycle()
+    val versionSwitchAvailable by viewModel.versionSwitchAvailable.collectAsStateWithLifecycle()
+    val versions by viewModel.versions.collectAsStateWithLifecycle()
+    val selectedVersionId by viewModel.selectedVersionId.collectAsStateWithLifecycle()
     val sysUiController = remember(activity) { activity?.let { PlayerSystemUiController(it) } }
     LaunchedEffect(sysUiController, sysUiPrefs) {
         val prefs = sysUiPrefs ?: return@LaunchedEffect
@@ -239,8 +257,27 @@ fun PlayerRoute(
         onDispose { sysUiController?.exitPlayback() }
     }
 
+    // 条目 104：播放中保持屏幕常亮；暂停、解析失败或退出播放页时恢复系统锁屏行为。
+    val keepScreenOn = KeepScreenOnPolicy.shouldKeepScreenOn(resolve, state.playWhenReady)
+    DisposableEffect(activity, keepScreenOn) {
+        val window = activity?.window
+        if (keepScreenOn) {
+            window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            if (keepScreenOn) window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
+    var showVersionDialog by remember { mutableStateOf(false) }
+    // 版本列表懒加载：打开面板时才向数据源要详情，避免拖慢起播。
+    LaunchedEffect(showVersionDialog) {
+        if (showVersionDialog) viewModel.loadVersions()
+    }
     var showVisualEffectsSettings by remember { mutableStateOf(false) }
     var showInfoPanel by remember { mutableStateOf(false) }
     var showDanmakuPanel by remember { mutableStateOf(false) }
@@ -314,6 +351,29 @@ fun PlayerRoute(
     val scrubPreview by gestureController.scrubPreview.collectAsStateWithLifecycle()
     val speedPreview by gestureController.speedPreview.collectAsStateWithLifecycle()
     val levelPreview by gestureController.levelPreview.collectAsStateWithLifecycle()
+    // 缺陷 33：双指缩放倍率（只作用于视频/字幕层，不影响手势与控制层）。
+    val zoom by gestureController.zoom.collectAsStateWithLifecycle()
+
+    // 缺陷 32：控制层安全区。沉浸式隐藏状态栏后 statusBars 可能为 0，
+    // 但刘海/挖孔仍然存在，必须与 displayCutout 取最大值。
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    val statusBarPadding = WindowInsets.statusBars.asPaddingValues()
+    val cutoutPadding = WindowInsets.displayCutout.asPaddingValues()
+    val navigationBarPadding = WindowInsets.navigationBars.asPaddingValues()
+    val systemGesturePadding = WindowInsets.systemGestures.asPaddingValues()
+    val chromeInsets = PlayerInsetPolicy.resolve(
+        statusBarTopDp = statusBarPadding.calculateTopPadding().value,
+        cutoutTopDp = cutoutPadding.calculateTopPadding().value,
+        cutoutLeftDp = cutoutPadding.calculateLeftPadding(layoutDirection).value,
+        cutoutRightDp = cutoutPadding.calculateRightPadding(layoutDirection).value,
+        navigationBarBottomDp = navigationBarPadding.calculateBottomPadding().value,
+        systemGestureBottomDp = systemGesturePadding.calculateBottomPadding().value,
+    )
+    // 缺陷 41：底部系统手势区（上滑返回桌面）必须让给系统。
+    val bottomSystemInsetPx = with(density) {
+        systemGesturePadding.calculateBottomPadding().toPx()
+    }
     var forceVisualFallback by remember(viewModel) {
         mutableStateOf(Build.VERSION.SDK_INT < RendererBackendSelector.RUNTIME_SHADER_MIN_API)
     }
@@ -432,27 +492,71 @@ fun PlayerRoute(
                     }
                 },
         ) {
-        // 视频渲染 Surface（Media3/mpv 统一走 attachSurface）
-        AndroidView(
-            factory = { context ->
-                SurfaceView(context).apply {
-                    holder.addCallback(object : SurfaceHolder.Callback {
-                        override fun surfaceCreated(holder: SurfaceHolder) {
-                            viewModel.engine.attachSurface(holder.surface)
+        // 视频渲染 Surface（Media3/mpv 统一走 attachSurface）+ 字幕 overlay。
+        // 条目 9/137：按视频真实宽高比布局，首帧不拉伸；字幕层与视频同尺寸，
+        // Media3 的「视高比例」字号才与 mpv 的 720p 基准一致。
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .clipToBounds(),
+        ) {
+            val contentSize = VideoContentSizing.size(
+                mode = videoAspectMode,
+                containerWidth = maxWidth.value,
+                containerHeight = maxHeight.value,
+                videoWidth = state.videoWidth,
+                videoHeight = state.videoHeight,
+            )
+            val frameModifier = if (videoAspectMode == VideoAspectMode.CROP) {
+                Modifier.requiredSize(contentSize.width.dp, contentSize.height.dp)
+            } else {
+                Modifier.size(contentSize.width.dp, contentSize.height.dp)
+            }
+            Box(modifier = Modifier.align(Alignment.Center).then(frameModifier)) {
+                AndroidView(
+                    factory = { context ->
+                        SurfaceView(context).apply {
+                            holder.addCallback(object : SurfaceHolder.Callback {
+                                override fun surfaceCreated(holder: SurfaceHolder) {
+                                    viewModel.engine.attachSurface(holder.surface)
+                                }
+
+                                override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
+                                override fun surfaceDestroyed(holder: SurfaceHolder) {
+                                    viewModel.engine.attachSurface(null)
+                                }
+                            })
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                            )
                         }
-                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
-                        override fun surfaceDestroyed(holder: SurfaceHolder) {
-                            viewModel.engine.attachSurface(null)
+                    },
+                    update = { view ->
+                        // 缺陷 33：缩放直接作用在 SurfaceView 上（graphicsLayer 无法变换独立 Surface）。
+                        view.scaleX = zoom
+                        view.scaleY = zoom
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+
+                // 字幕 overlay（Media3 独立 SubtitleView；mpv 内部 libass 渲染，subtitleCues=null 时不显示）
+                AndroidView(
+                    factory = { context ->
+                        SubtitleView(context).apply {
+                            applySubtitleStyle(this, preferences)
                         }
-                    })
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    )
-                }
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
+                    },
+                    update = { view ->
+                        applySubtitleStyle(view, preferences)
+                        view.setCues(subtitleCues?.cues)
+                        view.scaleX = zoom
+                        view.scaleY = zoom
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
 
         // 只画左右窄边与底部 controls chrome；中心视频和字幕安全区没有 shader 像素。
         PlayerVisualOverlay(
@@ -472,7 +576,7 @@ fun PlayerRoute(
             onBackendChanged = reportVisualBackend,
         )
 
-        // 弹幕层（条目 12/74/96/125）：视频之上、字幕与 OSD 之下。
+        // 弹幕层（条目 12/74/96/125）：视频之上、OSD 与手势层之下；字幕已随视频容器一起缩放渲染。
         // 布局引擎在画面内预留顶部 18% 与底部 30%，因此不会遮挡标题/字幕/控制层。
         if (danmakuState.enabled && danmakuState.comments.isNotEmpty()) {
             val danmakuPosition by rememberUpdatedState(state.positionMs)
@@ -486,20 +590,6 @@ fun PlayerRoute(
             )
         }
 
-        // 字幕 overlay（Media3 独立 SubtitleView；mpv 内部 libass 渲染，subtitleCues=null 时不显示）
-        AndroidView(
-            factory = { context ->
-                SubtitleView(context).apply {
-                    applySubtitleStyle(this, preferences)
-                }
-            },
-            update = { view ->
-                applySubtitleStyle(view, preferences)
-                view.setCues(subtitleCues?.cues)
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
-
         // 手势层（U3-B）：单击 Overlay / 双击矩阵 / 水平 scrub / 双击按住快退 / 长按倍速
         PlayerGestureLayer(
             controller = gestureController,
@@ -509,6 +599,7 @@ fun PlayerRoute(
                 if (b >= 0f) b else readSystemBrightness(context)
             },
             onVolume = { readVolumeFraction() },
+            bottomSystemInsetPx = bottomSystemInsetPx,
         )
 
         // 手势预览指示（U3-B）：scrub / 连续快退 / 长按倍速
@@ -571,6 +662,8 @@ fun PlayerRoute(
                         serverDisplayName = serverDisplayName,
                         serverIcon = serverIcon,
                         downloadSpeedBps = downloadSpeedBps,
+                        cacheReadSpeedBps = cacheReadSpeedBps,
+                        isReadingFromCache = isReadingFromCache,
                         batteryLevel = batteryLevel,
                         diagnostics = diagnostics,
                         visualRequest = visualState.renderRequest,
@@ -580,6 +673,9 @@ fun PlayerRoute(
                         onVisualBackendChanged = reportVisualBackend,
                         subtitleSelected = engineState.selectedSubtitle != null || subtitleCenter.selectedExternalId != null,
                         danmakuCount = danmakuState.count,
+                        zoom = zoom,
+                        chromeInsets = chromeInsets,
+                        onResetZoom = gestureController::resetZoom,
                         onBack = exitPlayer,
                         onTogglePlayPause = viewModel.engine::togglePlayPause,
                         onSeek = { viewModel.engine.seekTo(it) },
@@ -587,11 +683,15 @@ fun PlayerRoute(
                             val next = SPEEDS[(SPEEDS.indexOf(state.speed) + 1).let { if (it >= SPEEDS.size) 0 else it }]
                             viewModel.engine.setSpeed(next)
                         },
+                        videoAspectMode = videoAspectMode,
+                        onCycleAspectMode = viewModel::cycleVideoAspectMode,
                         onShowVisualEffects = { showVisualEffectsSettings = true },
                         onShowInfo = { showInfoPanel = true },
                         onShowAudio = { showAudioDialog = true },
                         onShowSubtitle = { showSubtitleDialog = true },
                         onShowDanmaku = { showDanmakuPanel = true },
+                        onShowVersion = { showVersionDialog = true },
+                        versionSwitchingEnabled = versionSwitchAvailable,
                     )
                 }
 
@@ -755,8 +855,7 @@ fun PlayerRoute(
                 tracks = selectionSnapshot.audioTracks,
                 onDismiss = { showAudioDialog = false },
                 onSelect = { track: AudioTrack ->
-                    PlayerTrackSelection.addressOf(selectionSnapshot, track, selectionKind)
-                        ?.let(viewModel.engine::selectAudioTrack)
+                    viewModel.onAudioTrackSelected(track)
                     showAudioDialog = false
                 },
             )
@@ -764,7 +863,6 @@ fun PlayerRoute(
     }
     if (showSubtitleDialog) {
         val selectionSnapshot = engineState
-        val selectionKind = engineKind
         PlayerVisualTheme(palette = visualState.chromePalette) {
             SubtitleSheet(
                 tracks = selectionSnapshot.subtitleTracks,
@@ -774,9 +872,7 @@ fun PlayerRoute(
                 offsetSupported = viewModel.engine.subtitleCapabilities.offsetAdjust,
                 onDismiss = { showSubtitleDialog = false },
                 onSelect = { track: SubtitleTrack? ->
-                    if (track == null) viewModel.onEmbeddedSubtitleSelected(null)
-                    else PlayerTrackSelection.addressOf(selectionSnapshot, track, selectionKind)
-                        ?.let(viewModel::onEmbeddedSubtitleSelected)
+                    viewModel.onSubtitleTrackSelected(track)
                 },
                 onStyleChange = { newStyle -> viewModel.updateSubtitleStyle { newStyle } },
                 onSelectExternal = viewModel::selectExternalSubtitle,
@@ -798,6 +894,19 @@ fun PlayerRoute(
                 onSend = viewModel::sendDanmaku,
                 onRefresh = viewModel::refreshDanmaku,
                 onDismiss = { showDanmakuPanel = false },
+            )
+        }
+    }
+    if (showVersionDialog) {
+        PlayerVisualTheme(palette = visualState.chromePalette) {
+            VersionSheet(
+                versions = versions,
+                selectedId = selectedVersionId,
+                onDismiss = { showVersionDialog = false },
+                onSelect = { versionId ->
+                    showVersionDialog = false
+                    viewModel.switchVersion(versionId)
+                },
             )
         }
     }
@@ -839,7 +948,7 @@ private fun applySubtitleStyle(subtitleView: androidx.media3.ui.SubtitleView?, p
     subtitleView.setApplyEmbeddedStyles(style.applyEmbeddedStyles)
 }
 
-private const val BASE_SUBTITLE_FRACTION = 0.0533f
+private val BASE_SUBTITLE_FRACTION = SubtitleStyle.BASE_FONT_FRACTION_OF_VIDEO_HEIGHT
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -849,6 +958,8 @@ private fun PlayerControls(
     serverDisplayName: String?,
     serverIcon: String?,
     downloadSpeedBps: Long,
+    cacheReadSpeedBps: Long,
+    isReadingFromCache: Boolean,
     batteryLevel: Int?,
     diagnostics: PlaybackDiagnosticsState?,
     visualRequest: PlayerVisualRenderRequest,
@@ -858,15 +969,22 @@ private fun PlayerControls(
     onVisualBackendChanged: (RendererBackend) -> Unit,
     subtitleSelected: Boolean,
     danmakuCount: Int,
+    zoom: Float = 1f,
+    chromeInsets: PlayerChromeInsets = PlayerChromeInsets(0f, 0f, 0f, 0f),
+    onResetZoom: () -> Unit = {},
     onBack: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onSeek: (Long) -> Unit,
     onCycleSpeed: () -> Unit,
+    videoAspectMode: VideoAspectMode,
+    onCycleAspectMode: () -> Unit,
     onShowVisualEffects: () -> Unit,
     onShowInfo: () -> Unit,
     onShowAudio: () -> Unit,
     onShowSubtitle: () -> Unit,
     onShowDanmaku: () -> Unit,
+    onShowVersion: () -> Unit = {},
+    versionSwitchingEnabled: Boolean = false,
 ) {
     val seekBarColors = SliderDefaults.colors(
         thumbColor = MaterialTheme.colorScheme.primary,
@@ -880,6 +998,21 @@ private fun PlayerControls(
         disabledInactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
         disabledInactiveTickColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
     )
+    val showBufferingIndicator by produceState(
+        initialValue = false,
+        state.isBuffering,
+        isReadingFromCache,
+    ) {
+        value = false
+        if (state.isBuffering) {
+            delay(BufferingIndicatorPolicy.GRACE_MS)
+            value = BufferingIndicatorPolicy.shouldShow(
+                isBuffering = state.isBuffering,
+                isReadingFromCache = isReadingFromCache,
+                bufferingAgeMs = BufferingIndicatorPolicy.GRACE_MS,
+            )
+        }
+    }
     BoxWithConstraints(modifier = modifier.testTag(PlayerVisualTestTags.PLAYER_CONTROLS)) {
         // Use the full player height, not the tall controls content, to protect subtitle pixels.
         val maxAmbientHeight = maxHeight * (1f - PlayerVisualMaskConfig().bottomStart)
@@ -888,7 +1021,11 @@ private fun PlayerControls(
                 .fillMaxWidth()
                 .align(Alignment.TopCenter)
                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
-                .statusBarsPadding()
+                .padding(
+                    start = chromeInsets.leftDp.dp,
+                    top = chromeInsets.topDp.dp,
+                    end = chromeInsets.rightDp.dp,
+                )
                 .padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -928,6 +1065,11 @@ private fun PlayerControls(
                 }
                 TextButton(onClick = onShowSubtitle) {
                     Text(stringResource(R.string.player_subtitles), color = MaterialTheme.colorScheme.primary)
+                }
+                if (versionSwitchingEnabled) {
+                    TextButton(onClick = onShowVersion) {
+                        Text(stringResource(R.string.player_versions), color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
             if (serverDisplayName != null) {
@@ -1009,7 +1151,11 @@ private fun PlayerControls(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .navigationBarsPadding()
+                        .padding(
+                            start = chromeInsets.leftDp.dp,
+                            bottom = chromeInsets.bottomDp.dp,
+                            end = chromeInsets.rightDp.dp,
+                        )
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                 ) {
                     Row(
@@ -1018,7 +1164,7 @@ private fun PlayerControls(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text(
-                            text = formatSpeed(downloadSpeedBps),
+                            text = formatSpeed(downloadSpeedBps, cacheReadSpeedBps),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -1061,7 +1207,7 @@ private fun PlayerControls(
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (state.isBuffering) {
+                            if (showBufferingIndicator) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.padding(end = 12.dp),
                                     color = MaterialTheme.colorScheme.primary,
@@ -1092,6 +1238,22 @@ private fun PlayerControls(
                             TextButton(onClick = onCycleSpeed) {
                                 Text(
                                     stringResource(R.string.player_playback_speed, state.speed),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                            // 缺陷 33：缩放后提供显式的"还原画面"入口。
+                            if (zoom > 1.001f) {
+                                TextButton(onClick = onResetZoom) {
+                                    Text(
+                                        stringResource(R.string.player_zoom_reset),
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
+                            // 条目 9：画面比例循环切换，并按内容记忆。
+                            TextButton(onClick = onCycleAspectMode) {
+                                Text(
+                                    stringResource(videoAspectMode.labelRes()),
                                     color = MaterialTheme.colorScheme.onSurface,
                                 )
                             }
@@ -1252,14 +1414,28 @@ private fun formatTime(ms: Long): String {
 }
 
 @Composable
-private fun formatSpeed(bytesPerSecond: Long): String {
-    if (bytesPerSecond <= 0) return stringResource(R.string.player_download_speed_unknown)
+private fun formatSpeed(bytesPerSecond: Long, cacheReadBps: Long = 0L): String {
+    if (bytesPerSecond <= 0) {
+        // 条目 19：缓存命中 seek 时网络速度为 0，但内容来自本地缓存，不应显示「未知」。
+        return if (cacheReadBps > 0) {
+            stringResource(R.string.player_download_speed_cache)
+        } else {
+            stringResource(R.string.player_download_speed_unknown)
+        }
+    }
     val kb = bytesPerSecond / 1024.0
     return if (kb < 1024) {
         stringResource(R.string.player_download_speed_kb, kb)
     } else {
         stringResource(R.string.player_download_speed_mb, kb / 1024.0)
     }
+}
+
+private fun VideoAspectMode.labelRes(): Int = when (this) {
+    VideoAspectMode.FIT -> R.string.player_aspect_fit
+    VideoAspectMode.CROP -> R.string.player_aspect_crop
+    VideoAspectMode.RATIO_16_9 -> R.string.player_aspect_16_9
+    VideoAspectMode.RATIO_4_3 -> R.string.player_aspect_4_3
 }
 
 private fun readBatteryLevel(context: Context): Int? {

@@ -88,6 +88,12 @@ class SwitchablePlaybackEngine(
     private val _downloadSpeedBps = MutableStateFlow(0L)
     override val downloadSpeedBps: StateFlow<Long> = _downloadSpeedBps.asStateFlow()
 
+    private val _cacheReadSpeedBps = MutableStateFlow(0L)
+    override val cacheReadSpeedBps: StateFlow<Long> = _cacheReadSpeedBps.asStateFlow()
+
+    private val _isReadingFromCache = MutableStateFlow(false)
+    override val isReadingFromCache: StateFlow<Boolean> = _isReadingFromCache.asStateFlow()
+
     private val _audioBands = MutableStateFlow<AudioBandLevels?>(null)
     override val audioBands: StateFlow<AudioBandLevels?> = _audioBands.asStateFlow()
 
@@ -102,6 +108,8 @@ class SwitchablePlaybackEngine(
     private var subtitleOperation = 0L
     private var attachedSurface: Surface? = null
     private var fellBackThisSession = false
+    /** 本 session 是否已经为重绑 Surface 尝试过一次（缺陷 47，防止无限重试）。 */
+    private var surfaceRecoveryAttempted = false
     private var released = false
     private var requestedPlayWhenReady: Boolean? = null // stateLock; retained across replacement gap
     /** UI 的采样需求意图；引擎切换后必须原样重施给新引擎。 */
@@ -123,6 +131,7 @@ class SwitchablePlaybackEngine(
             // A pending fallback belongs to the previous session. Cancel it and invalidate its
             // generation before selecting/starting the new engine.
             fallbackJob?.cancel()
+            surfaceRecoveryAttempted = false
             fallbackJob = null
             sessionGeneration += 1
             this.session = session
@@ -392,6 +401,8 @@ class SwitchablePlaybackEngine(
                 launch { engine.events.collect { _events.trySend(it) } }
                 launch { engine.subtitleCues.collect { _subtitleCues.value = it } }
                 launch { engine.downloadSpeedBps.collect { _downloadSpeedBps.value = it } }
+                launch { engine.cacheReadSpeedBps.collect { _cacheReadSpeedBps.value = it } }
+                launch { engine.isReadingFromCache.collect { _isReadingFromCache.value = it } }
             }
             audioForwardJob?.cancel()
             audioForwardJob = null
@@ -438,6 +449,11 @@ class SwitchablePlaybackEngine(
                 if (current !== engine || released || fellBackThisSession) return@collect
                 if (modeProvider() != PlaybackEngineMode.AUTO) return@collect
                 val error = state.error ?: return@collect
+                // 缺陷 47：共享纹理/表面创建失败先尝试重绑 Surface（摘除→重挂→原位重播），
+                // 仍失败才降级 mpv；重绑只做一次，避免错误流抖动造成无限循环。
+                if (error.code == PlaybackError.Code.SURFACE_ERROR && trySurfaceRecovery(engine)) {
+                    return@collect
+                }
                 if (error.code in FALLBACK_ERROR_CODES) {
                     fallbackToMpv(engine, "播放错误 ${error.code.name}")
                 }
@@ -463,6 +479,30 @@ class SwitchablePlaybackEngine(
                 }
             }
         }
+    }
+
+    /**
+     * 摘除并重挂当前 Surface，然后在原位置恢复播放意图（缺陷 47）。
+     * 返回 true 表示已发起恢复；false 表示没有 Surface 或本 session 已尝试过。
+     */
+    private fun trySurfaceRecovery(engine: PlaybackEnginePort): Boolean {
+        val surface = synchronized(stateLock) {
+            if (surfaceRecoveryAttempted || released || current !== engine) return false
+            val s = attachedSurface ?: return false
+            surfaceRecoveryAttempted = true
+            s
+        }
+        val position = engine.uiState.value.positionMs
+        val play = engine.uiState.value.playWhenReady
+        scope.launch {
+            engine.attachSurface(null)
+            delay(SURFACE_REATTACH_DELAY_MS)
+            if (released || current !== engine) return@launch
+            engine.attachSurface(surface)
+            engine.seekTo(position, SeekMode.COMMIT)
+            engine.setPlayWhenReady(play)
+        }
+        return true
     }
 
     private fun fallbackToMpv(failedEngine: PlaybackEnginePort, reason: String) {
@@ -565,10 +605,12 @@ class SwitchablePlaybackEngine(
         (expectedEngine == null || current === expectedEngine)
 
     private companion object {
+        const val SURFACE_REATTACH_DELAY_MS = 120L
         /** mpv 可能救回的错误类型；网络/鉴权/DRM 不降级（同一网络与凭据救不回）。 */
         val FALLBACK_ERROR_CODES = setOf(
             PlaybackError.Code.DECODER_ERROR,
             PlaybackError.Code.UNSUPPORTED_CODEC,
+            PlaybackError.Code.SURFACE_ERROR,
             PlaybackError.Code.UNKNOWN,
         )
     }

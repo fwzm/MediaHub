@@ -427,6 +427,53 @@ class EmbyPlaybackProviderTest {
         assertEquals("/emby/Videos/m1/stream.mp4", source.url.toHttpUrl().encodedPath)
     }
 
+    // ---- 19：多版本闭环——指定 versionId 必须播那一版 ----
+
+    private fun twoVersionJson() = """
+        {"PlaySessionId":"ps-mv","MediaSources":[
+            {"Id":"src1","Container":"mkv","SupportsDirectStream":true},
+            {"Id":"src2","Container":"mp4","SupportsDirectStream":true}]}
+    """.trimIndent()
+
+    @Test
+    fun `requested version id wins over server order`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(twoVersionJson()))
+        val source = provider().resolvePlayback(movie, PlaybackOptions(versionId = "src2"))
+        assertEquals("src2", source.url.toHttpUrl().queryParameter("MediaSourceId"))
+        assertEquals("mp4", source.container)
+        assertEquals("/emby/Videos/m1/stream.mp4", source.url.toHttpUrl().encodedPath)
+    }
+
+    @Test
+    fun `unknown version id throws NotFound without falling back`() = runBlocking {
+        seedSession()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(twoVersionJson()))
+        val thrown = runCatching {
+            provider().resolvePlayback(movie, PlaybackOptions(versionId = "gone"))
+        }.exceptionOrNull()
+        assertTrue("expected NotFound, got $thrown", thrown is ProviderException.NotFound)
+        assertEquals("不得为不存在的版本回退默认源", 1, server.requestCount)
+    }
+
+    @Test
+    fun `requested version without direct stream throws needs transcode`() = runBlocking {
+        seedSession()
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"PlaySessionId":"ps-mv","MediaSources":[
+                    {"Id":"src1","Container":"mkv","SupportsDirectStream":true},
+                    {"Id":"src2","Container":"mp4","SupportsDirectStream":false,
+                     "SupportsTranscoding":true}]}"""
+            )
+        )
+        val thrown = runCatching {
+            provider().resolvePlayback(movie, PlaybackOptions(versionId = "src2"))
+        }.exceptionOrNull()
+        assertTrue(thrown is ProviderException.NotYetImplemented)
+        assertTrue(thrown!!.message!!.contains("需要转码"))
+    }
+
     private class FakeSecretStorage : SecretStorage {
         private val map = mutableMapOf<String, String>()
         override suspend fun put(key: String, value: String) { map[key] = value }

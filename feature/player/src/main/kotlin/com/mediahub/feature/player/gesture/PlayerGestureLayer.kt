@@ -32,14 +32,27 @@ fun PlayerGestureLayer(
     modifier: Modifier = Modifier,
     onBrightness: () -> Float = { 0.5f },
     onVolume: () -> Float = { 0.5f },
+    /** 底部系统手势区高度（px）。从该区域起始的上滑让给系统（缺陷 41）。 */
+    bottomSystemInsetPx: Float = 0f,
 ) {
     // 稳定引用：pointerInput 只以 controller 为 key，避免 lambda 实例变化重启手势
     val currentOnBrightness by rememberUpdatedState(onBrightness)
     val currentOnVolume by rememberUpdatedState(onVolume)
+    val currentBottomInset by rememberUpdatedState(bottomSystemInsetPx)
     Box(
-        modifier = modifier.pointerInput(controller) {
-            detectPlayerGestures(controller, { currentOnBrightness() }, { currentOnVolume() })
-        },
+        modifier = modifier
+            // 双指缩放必须先于单指状态机拿到事件；只消费双指手势。
+            .pointerInput(controller) {
+                detectPinchZoom(controller)
+            }
+            .pointerInput(controller) {
+                detectPlayerGestures(
+                    controller = controller,
+                    onBrightness = { currentOnBrightness() },
+                    onVolume = { currentOnVolume() },
+                    bottomSystemInsetPx = { currentBottomInset },
+                )
+            },
     )
 }
 
@@ -49,6 +62,7 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectPl
     controller: PlayerGestureController,
     onBrightness: () -> Float,
     onVolume: () -> Float,
+    bottomSystemInsetPx: () -> Float,
 ) = awaitEachGesture {
     val down = awaitFirstDown(requireUnconsumed = false)
     if (down.isConsumed) return@awaitEachGesture
@@ -66,6 +80,8 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectPl
         while (true) {
             val event = awaitPointerEvent(PointerEventPass.Main)
             if (event.changes.any { it.isConsumed }) return@withTimeoutOrNull GesturePhase.IGNORE
+            // 第二根手指按下 → 交给双指缩放，不在单指状态机里做任何判定。
+            if (event.changes.count { it.pressed } >= 2) return@withTimeoutOrNull GesturePhase.IGNORE
             val change = event.changes.firstOrNull { it.pressed } ?: event.changes.first()
             lastX = change.position.x
             val dx = lastX - startX
@@ -109,6 +125,15 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectPl
 
         GesturePhase.VERTICAL -> {
             val screenHeight = size.height.toFloat().takeIf { it > 0f } ?: 1f
+            // 缺陷 41：底部系统手势区起始的上滑交给系统（返回桌面），不进入亮度/音量。
+            if (PlayerGestureZonePolicy.isReservedSystemSwipe(
+                    startY = startY,
+                    heightPx = screenHeight,
+                    bottomInsetPx = bottomSystemInsetPx(),
+                )
+            ) {
+                return@awaitEachGesture
+            }
             controller.onVerticalStart(startX / width, onBrightness(), onVolume())
             var completed = false
             try {
@@ -205,3 +230,52 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.han
 }
 
 private const val REWIND_TICK_MS = 333L
+
+/**
+ * 双指缩放（缺陷 33）：只在第二根手指按下后消费事件。
+ * 单指事件完全不消费，交给 [detectPlayerGestures] 的原有单击/双击/scrub/长按。
+ */
+private suspend fun PointerInputScope.detectPinchZoom(controller: PlayerGestureController) =
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        if (down.isConsumed) return@awaitEachGesture
+
+        var active = false
+        var startSpan = 0f
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            if (!active) {
+                if (event.changes.any { it.isConsumed }) return@awaitEachGesture
+                val pressed = event.changes.filter { it.pressed }
+                if (pressed.size < 2) {
+                    if (event.changes.none { it.pressed }) return@awaitEachGesture
+                    continue
+                }
+                val span = spanOf(pressed)
+                if (span <= 0f) return@awaitEachGesture
+                active = true
+                startSpan = span
+                controller.onZoomStart()
+            } else {
+                val pressed = event.changes.filter { it.pressed }
+                if (pressed.size < 2) {
+                    controller.onZoomEnd()
+                    return@awaitEachGesture
+                }
+                val span = spanOf(pressed)
+                if (startSpan > 0f && span > 0f) {
+                    controller.onZoomDelta(span / startSpan)
+                }
+                event.changes.forEach { it.consume() }
+            }
+        }
+        @Suppress("UNREACHABLE_CODE")
+        controller.onZoomEnd()
+    }
+
+private fun spanOf(changes: List<androidx.compose.ui.input.pointer.PointerInputChange>): Float {
+    if (changes.size < 2) return 0f
+    val dx = changes[0].position.x - changes[1].position.x
+    val dy = changes[0].position.y - changes[1].position.y
+    return kotlin.math.hypot(dx, dy)
+}

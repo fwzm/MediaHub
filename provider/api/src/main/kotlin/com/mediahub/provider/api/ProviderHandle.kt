@@ -26,6 +26,7 @@ data class ProviderHandle(
     val subtitleDiscovery: MediaSubtitleDiscoveryProvider? = null,
     val progress: MediaProgressProvider? = null,
     val favorite: MediaFavoriteProvider? = null,
+    val epg: MediaEpgProvider? = null,
 ) {
     val serverId: String get() = provider.serverId
     val type: com.mediahub.model.ServerType get() = provider.type
@@ -44,6 +45,7 @@ data class ProviderHandle(
         if (subtitleDiscovery != null) add(ProviderCapability.SUBTITLE_DISCOVERY)
         if (progress != null) add(ProviderCapability.PROGRESS)
         if (favorite != null) add(ProviderCapability.FAVORITE)
+        if (epg != null) add(ProviderCapability.EPG)
     }
 
     init {
@@ -57,5 +59,6 @@ data class ProviderHandle(
     val hasAnyCapability: Boolean
         get() = auth != null || library != null || detail != null || browse != null ||
             playback != null || search != null || identityLookup != null || query != null ||
-            subtitle != null || subtitleDiscovery != null || progress != null || favorite != null
+            subtitle != null || subtitleDiscovery != null || progress != null || favorite != null ||
+            epg != null
 }

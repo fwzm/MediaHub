@@ -100,6 +100,8 @@ class PlaybackEngine(
 
     /** 真实媒体下载速度（B/s，TransferListener 统计）。 */
     override val downloadSpeedBps: StateFlow<Long> = speedMonitor.bytesPerSecond
+    override val cacheReadSpeedBps: StateFlow<Long> = speedMonitor.cacheBytesPerSecond
+    override val isReadingFromCache: StateFlow<Boolean> = speedMonitor.isReadingFromCache
 
     private val _subtitleCues = MutableStateFlow<CueGroup?>(null)
     override val subtitleCues: StateFlow<CueGroup?> = _subtitleCues.asStateFlow()
@@ -198,8 +200,12 @@ class PlaybackEngine(
 
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
+                // 条目 137：像素宽高比（变形视频）也要计入显示宽高比，否则首帧仍会拉伸。
+                val displayWidth = (videoSize.width * videoSize.pixelWidthHeightRatio)
+                    .toInt()
+                    .coerceAtLeast(videoSize.width)
                 _uiState.update {
-                    it.copy(videoWidth = videoSize.width, videoHeight = videoSize.height)
+                    it.copy(videoWidth = displayWidth, videoHeight = videoSize.height)
                 }
             }
 
@@ -264,6 +270,12 @@ class PlaybackEngine(
         externalSubtitles.clear()
         lastSelectedSubtitle = null
         clearTextSelectionOverrides()
+        // 音轨/字幕语言偏好（清单 6/82）：空字幕偏好会清空文本偏好，回到不自动开启的默认行为。
+        TrackPreferencePolicy.prepare(
+            trackSelector,
+            session.preferredAudioLanguages,
+            session.preferredTextLanguages,
+        )
         session.trace?.record(PlaybackStartupTrace.Milestone.MEDIA_REQUEST_STARTED)
         session.trace?.record(PlaybackStartupTrace.Milestone.ENGINE_PREPARE_STARTED)
         headersHolder.setHeaders(buildRequestHeaders(session.source))
@@ -274,6 +286,7 @@ class PlaybackEngine(
         // G3：降级重播必须尊重暂停意图（默认 null = 沿用既有「起播即播放」行为）。
         player.playWhenReady = session.startPaused != true
         val startPosition = session.startPositionMs ?: session.resumePositionMs
+        player.setSeekParameters(ResumeSeekParameters.forMode(session.resumeSeekMode))
         if (startPosition != null && startPosition > 0) {
             player.seekTo(startPosition)
         }
@@ -691,6 +704,11 @@ class PlaybackEngine(
             "media3ErrorCode" to e.errorCode.toString(),
             "message" to (e.message ?: ""),
         )
+        // 缺陷 47/87：厂商把"共享纹理失败/数据访问失败"放在异常链 message 里，
+        // Media3 没有稳定错误码；先按取证字符串归类，识别不了再走原有错误码映射。
+        PlaybackFailureClassifier.classify(e)?.let { code ->
+            return PlaybackError(code, details = details, cause = e)
+        }
         return when (e.errorCode) {
             PlaybackException.ERROR_CODE_DECODING_FAILED,
             PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
