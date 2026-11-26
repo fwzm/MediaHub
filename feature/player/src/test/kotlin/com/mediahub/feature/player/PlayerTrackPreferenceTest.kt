@@ -361,6 +361,10 @@ class PlayerTrackPreferenceTest {
         override fun observeContinueWatching(limit: Int): Flow<List<PlaybackProgress>> = flowOf(emptyList())
         override suspend fun getResume(serverId: String, itemId: String): Long? = null
         override suspend fun save(progress: PlaybackProgress) = Unit
+
+        // 条目 72/63：main 的 ProgressStore 新增本地快照读取与清空能力，只读 fake 返回空实现。
+        override suspend fun get(serverId: String, itemId: String): PlaybackProgress? = null
+        override suspend fun clearAll(): Int = 0
     }
 
     private class FakeServerStore(private val server: MediaServer) : ServerStore {
