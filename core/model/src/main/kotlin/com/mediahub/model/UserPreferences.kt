@@ -29,6 +29,8 @@ data class UserPreferences(
     val playerVisualEffects: PlayerVisualEffectsPreferences = PlayerVisualEffectsPreferences.Default,
     /** 播放专业信息面板（默认专业）：expertMode 只控制面板信息密度，不影响播放本身。 */
     val professionalInfo: ProfessionalInfoPreferences = ProfessionalInfoPreferences.Default,
+    /** 画面比例记忆（条目 9）：key = serverId/itemId，下次播放同一内容时恢复。 */
+    val videoAspectOverrides: Map<String, VideoAspectMode> = emptyMap(),
 )
 
 /**
@@ -87,5 +89,12 @@ data class SubtitleStyle(
         const val EDGE_TYPE_NONE = 0
         const val EDGE_TYPE_OUTLINE = 1
         const val EDGE_TYPE_DROP_SHADOW = 2
+
+        /**
+         * mpv 的 `sub-font-size` 以 720p 画布为基准（18sp 档位对应 38）。
+         * Media3 用「视高比例」设置字号，二者必须由同一基准换算，跨内核字幕才一致（条目 137）。
+         */
+        const val BASE_FONT_SIZE_AT_720P = 38f
+        const val BASE_FONT_FRACTION_OF_VIDEO_HEIGHT = BASE_FONT_SIZE_AT_720P / 720f
     }
 }

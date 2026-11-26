@@ -26,7 +26,7 @@ internal object MpvSubtitlePresentation {
         val shadow = edge == SubtitleStyle.EDGE_TYPE_DROP_SHADOW
         val backColor = if (!hasBackground && shadow) style.edgeColor else style.backgroundColor
         return linkedMapOf(
-            "sub-font-size" to (38.0 * size / 18.0 * scale.toDouble()).toString(),
+            "sub-font-size" to (SubtitleStyle.BASE_FONT_SIZE_AT_720P * size / 18.0 * scale.toDouble()).toString(),
             "sub-color" to rgba(style.textColor),
             "sub-outline-color" to rgba(style.edgeColor),
             "sub-back-color" to rgba(backColor),

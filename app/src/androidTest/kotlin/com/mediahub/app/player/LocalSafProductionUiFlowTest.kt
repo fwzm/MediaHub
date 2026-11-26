@@ -18,6 +18,7 @@ import com.mediahub.app.MainActivity
 import com.mediahub.app.di.AppModule
 import com.mediahub.core.database.prefs.UserPreferencesStore
 import com.mediahub.core.database.repository.ServerRepository
+import com.mediahub.feature.detail.DetailTestTags
 import com.mediahub.model.PlaybackEngineMode
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -130,7 +131,7 @@ class LocalSafProductionUiFlowTest {
             val close = hasContentDescription(context.getString(com.mediahub.feature.player.R.string.player_close))
             if (compose.onAllNodes(close).fetchSemanticsNodes().isEmpty()) compose.onRoot().performTouchInput { click(center) }
             waitNode(close).performClick()
-            waitNode(hasText("立即播放", substring = false))
+            waitNode(hasTestTag(DetailTestTags.PRIMARY_PLAY_ACTION))
         }
 
         try {
@@ -154,7 +155,7 @@ class LocalSafProductionUiFlowTest {
             waitNode(hasText(label)).performClick()
             waitNode(hasText("嵌套")).performClick()
             waitNode(hasText("电影 a+b%", substring = false)).performClick()
-            waitNode(hasText("立即播放", substring = false)).performClick()
+            waitNode(hasTestTag(DetailTestTags.PRIMARY_PLAY_ACTION)).performClick()
             val info = hasText(context.getString(com.mediahub.feature.player.R.string.player_info_entry)) and hasClickAction()
             if (compose.onAllNodes(info).fetchSemanticsNodes().isEmpty()) compose.onRoot().performTouchInput { click(center) }
             waitNode(info).performClick()

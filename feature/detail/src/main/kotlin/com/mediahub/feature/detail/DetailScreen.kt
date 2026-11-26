@@ -31,6 +31,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -46,10 +47,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.BackdropImage
 import com.mediahub.core.ui.PosterImage
@@ -62,6 +66,7 @@ import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
 import com.mediahub.model.PlaybackLaunchSnapshot
+import com.mediahub.model.PlaybackProgress
 import kotlin.math.roundToInt
 
 /**
@@ -82,7 +87,13 @@ fun DetailRoute(
     val seriesState by viewModel.seriesState.collectAsStateWithLifecycle()
     val sourceState by viewModel.sourceState.collectAsStateWithLifecycle()
     val favoriteState by viewModel.favoriteState.collectAsStateWithLifecycle()
+    val localProgress by viewModel.localProgress.collectAsStateWithLifecycle()
     val selectedVersionId by viewModel.selectedVersionId.collectAsStateWithLifecycle()
+
+    // 条目 72：从播放器返回、页面重新可见时刷新本地续播进度。
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        viewModel.refreshLocalProgress()
+    }
 
     Scaffold(
         topBar = {
@@ -167,6 +178,7 @@ fun DetailRoute(
                 onOpenItem = onOpenItem,
                 sourceState = sourceState,
                 onSwitchSource = onSwitchSource,
+                localProgress = localProgress,
                 selectedVersionId = selectedVersionId,
                 onSelectVersion = viewModel::selectVersion,
                 )
@@ -186,6 +198,8 @@ fun DetailBody(
     onOpenItem: ((MediaItem) -> Unit)? = null,
     sourceState: SourceResolutionState = SourceResolutionState.Idle,
     onSwitchSource: ((serverId: String, itemId: String, title: String) -> Unit)? = null,
+    /** 条目 72：本地快照续播进度（已缓存 / 本地内容没有远端进度可显示）。 */
+    localProgress: PlaybackProgress? = null,
     selectedVersionId: String? = null,
     onSelectVersion: (String) -> Unit = {},
 ) {
@@ -262,17 +276,36 @@ fun DetailBody(
             }
         }
 
+        // 条目 72：服务器没有 UserData 进度时（已缓存 / 本地内容），
+        // 用本地快照回显续播位置，避免播完回来仍是"立即播放"。
+        val resumeProgress = localProgress?.takeIf { item.userData?.playedPercentage == null }
         Button(
             onClick = { onPlay(item) },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 20.dp)
-                .height(54.dp),
+                .height(54.dp)
+                .testTag(DetailTestTags.PRIMARY_PLAY_ACTION),
             shape = MaterialTheme.shapes.medium,
         ) {
             Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(26.dp))
             Spacer(Modifier.width(8.dp))
-            Text("立即播放", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = resumeProgress?.let { "继续播放 · ${formatPlaybackPosition(it.positionMs)}" }
+                    ?: "立即播放",
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
+        if (resumeProgress != null && resumeProgress.durationMs > 0L) {
+            LinearProgressIndicator(
+                progress = {
+                    (resumeProgress.positionMs.toFloat() / resumeProgress.durationMs).coerceIn(0f, 1f)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .height(3.dp),
+            )
         }
 
         // ---- 多版本选择（同服务器 MediaSource） ----
@@ -571,5 +604,18 @@ private fun SourceSelector(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
         )
+    }
+}
+
+/** 条目 72：续播位置展示（mm:ss / h:mm:ss）。 */
+private fun formatPlaybackPosition(positionMs: Long): String {
+    val totalSeconds = (positionMs.coerceAtLeast(0L) / 1_000L)
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%d:%02d".format(minutes, seconds)
     }
 }

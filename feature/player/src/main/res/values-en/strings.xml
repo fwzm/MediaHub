@@ -12,6 +12,11 @@
     <string name="player_audio_unsupported_codec">No audio output detected (track: %1$s). This format may not be supported on this device. Try another audio track.</string>
     <string name="player_audio_tracks">Audio</string>
     <string name="player_subtitles">Subtitles</string>
+    <string name="player_aspect_fit">Fit</string>
+    <string name="player_aspect_crop">Fill</string>
+    <string name="player_aspect_16_9">16:9</string>
+    <string name="player_aspect_4_3">4:3</string>
+    <string name="player_download_speed_cache">Local cache</string>
     <string name="player_versions">Versions</string>
     <string name="player_versions_empty">Only one version is available for this media</string>
     <string name="player_diagnostic_http">HTTP %1$d</string>

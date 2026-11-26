@@ -2,6 +2,7 @@ package com.mediahub.player.engine
 
 import android.net.Uri
 import androidx.media3.common.C
+import androidx.media3.common.ParserException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.HttpDataSource
@@ -82,11 +83,13 @@ class Media3RateLimitBackoffPolicyTest {
         maxDelayMs: Long = Media3RateLimitBackoffPolicy.DEFAULT_MAX_DELAY_MS,
         defaultDelayMs: Long = Media3RateLimitBackoffPolicy.DEFAULT_DELAY_MS,
         delegate: LoadErrorHandlingPolicy = RecordingDelegate(delayMs = 1234L),
+        maxParserAttempts: Int = Media3RateLimitBackoffPolicy.DEFAULT_MAX_PARSER_ATTEMPTS,
     ) = Media3RateLimitBackoffPolicy(
         maxAttempts = maxAttempts,
         maxDelayMs = maxDelayMs,
         defaultDelayMs = defaultDelayMs,
         delegate = delegate,
+        maxParserAttempts = maxParserAttempts,
     )
 
     @Test
@@ -194,5 +197,60 @@ class Media3RateLimitBackoffPolicyTest {
             ),
         )
         assertTrue("必须被钳到上限，而不是溢出成 0/负值", delay == Media3RateLimitBackoffPolicy.DEFAULT_MAX_DELAY_MS)
+    }
+
+    // ---- 条目 136：EXO 解析错误的重试上限 ----
+
+    private fun parserFailure() = ParserException.createForMalformedManifest("bad playlist", null)
+
+    @Test
+    fun `parser failures keep the delegate cadence only within the parser budget`() {
+        val delegate = RecordingDelegate(delayMs = 1_500L)
+        val subject = policy(delegate = delegate, maxParserAttempts = 2)
+        val failure = parserFailure()
+
+        assertEquals(
+            "预算内的首次失败仍按委托策略退避",
+            1_500L,
+            subject.getRetryDelayMsFor(loadError(failure, errorCount = 1)),
+        )
+        assertEquals(
+            "解析错误超出预算必须停止重试，避免反复拉同一份内容",
+            C.TIME_UNSET,
+            subject.getRetryDelayMsFor(loadError(failure, errorCount = 2)),
+        )
+        assertEquals(
+            "更晚的解析错误同样不得再触发重试",
+            C.TIME_UNSET,
+            subject.getRetryDelayMsFor(loadError(failure, errorCount = 7)),
+        )
+        assertEquals("预算内只询问委托一次", 1, delegate.calls)
+    }
+
+    @Test
+    fun `a parser failure wrapped as a cause is still capped`() {
+        val subject = policy(maxParserAttempts = 2)
+        val wrapped = IOException("manifest load failed", parserFailure())
+
+        assertEquals(
+            C.TIME_UNSET,
+            subject.getRetryDelayMsFor(loadError(wrapped, errorCount = 2)),
+        )
+    }
+
+    @Test
+    fun `parser budget is independent from the 429 budget`() {
+        val subject = policy(maxAttempts = 2, maxParserAttempts = 2)
+
+        assertEquals(
+            "解析错误在 errorCount=1 仍可重试",
+            1_234L,
+            subject.getRetryDelayMsFor(loadError(parserFailure(), errorCount = 1)),
+        )
+        assertEquals(
+            "429 的预算不受解析错误影响",
+            Media3RateLimitBackoffPolicy.DEFAULT_DELAY_MS,
+            subject.getRetryDelayMsFor(loadError(invalidResponse(429), errorCount = 1)),
+        )
     }
 }

@@ -18,6 +18,7 @@ import com.mediahub.model.PlayerVisualPreset
 import com.mediahub.model.ProfessionalInfoPreferences
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.UserPreferences
+import com.mediahub.model.VideoAspectMemory
 import com.mediahub.model.VisualPerformanceMode
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -61,6 +62,7 @@ class UserPreferencesStore internal constructor(
             writeGestures(prefs, updated.gestures)
             writePlayerVisualEffects(prefs, updated.playerVisualEffects)
             writeProfessionalInfo(prefs, updated.professionalInfo)
+            prefs[Keys.VIDEO_ASPECT_OVERRIDES] = VideoAspectMemory.encode(updated.videoAspectOverrides)
         }
     }
 
@@ -96,6 +98,7 @@ class UserPreferencesStore internal constructor(
             gestures = readGestures(prefs),
             playerVisualEffects = readPlayerVisualEffects(prefs),
             professionalInfo = readProfessionalInfo(prefs),
+            videoAspectOverrides = VideoAspectMemory.decode(prefs[Keys.VIDEO_ASPECT_OVERRIDES]),
         )
 
     private fun readSubtitleStyle(prefs: Preferences): SubtitleStyle =
@@ -231,5 +234,6 @@ class UserPreferencesStore internal constructor(
         val VISUAL_AUDIO_REACTIVE = booleanPreferencesKey("player_visual_effects_audio_reactive")
         val VISUAL_PERFORMANCE_MODE = stringPreferencesKey("player_visual_effects_performance_mode")
         val PROFESSIONAL_INFO_EXPERT_MODE = booleanPreferencesKey("player_professional_info_expert_mode")
+        val VIDEO_ASPECT_OVERRIDES = stringPreferencesKey("video_aspect_overrides")
     }
 }

@@ -4,9 +4,10 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.NavArgCodec
+import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
-import com.mediahub.core.logging.Logger
 import com.mediahub.core.logging.LogTag
+import com.mediahub.core.logging.Logger
 import com.mediahub.feature.detail.source.CanonicalSourceResolver
 import com.mediahub.feature.detail.source.SourceResolution
 import com.mediahub.feature.detail.version.shouldShowVersionPanel
@@ -15,6 +16,7 @@ import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
 import com.mediahub.model.PageRequest
 import com.mediahub.model.PlaybackLaunchSnapshot
+import com.mediahub.model.PlaybackProgress
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderHandle
@@ -38,6 +40,13 @@ class DetailViewModel @Inject constructor(
     private val registry: MediaProviderRegistry,
     private val sourceResolver: CanonicalSourceResolver,
     private val logger: Logger,
+    /**
+     * 条目 72：本地进度回读。
+     *
+     * 已缓存 / 本地内容没有远端 PROGRESS 能力，播放时只有本地快照被写入；
+     * 详情页若不读回来，就会永远显示"立即播放"。这里只读、不写。
+     */
+    private val progressStore: ProgressStore,
 ) : ViewModel() {
 
     val serverId: String = checkNotNull(savedStateHandle["serverId"])
@@ -48,6 +57,12 @@ class DetailViewModel @Inject constructor(
 
     private val _seriesState = MutableStateFlow(SeriesBrowseState())
     val seriesState: StateFlow<SeriesBrowseState> = _seriesState.asStateFlow()
+
+    /** 条目 72：本地快照里的续播进度；null = 没有记录或本视角不适用。 */
+    private val _localProgress = MutableStateFlow<PlaybackProgress?>(null)
+    val localProgress: StateFlow<PlaybackProgress?> = _localProgress.asStateFlow()
+
+    private var localProgressJob: Job? = null
 
     private val _sourceState = MutableStateFlow<SourceResolutionState>(SourceResolutionState.Idle)
     val sourceState: StateFlow<SourceResolutionState> = _sourceState.asStateFlow()
@@ -80,6 +95,7 @@ class DetailViewModel @Inject constructor(
                     ?: throw ProviderException.NotYetImplemented(serverId, "该数据源的详情能力尚未接入")
                 val detail = detailProvider.getItemDetail(itemId)
                 _uiState.value = DetailUiState.Content(detail)
+                refreshLocalProgress()
                 // 刷新后版本列表可能变化：旧选中 id 不在新列表里就回到服务端默认版本
                 _selectedVersionId.value = _selectedVersionId.value
                     ?.takeIf { id -> detail.versions.any { it.id == id } }
@@ -100,6 +116,29 @@ class DetailViewModel @Inject constructor(
             } catch (e: Exception) {
                 logger.w(LogTag.UI, "详情加载失败 serverId=$serverId itemId=$itemId", e)
                 _uiState.value = DetailUiState.Error(userMessage(e))
+            }
+        }
+    }
+
+    /**
+     * 条目 72：从本地快照回读续播进度。
+     *
+     * 由打开详情页时与页面 ON_RESUME 时调用（从播放器返回后必须刷新，
+     * 否则详情页仍显示播放前的旧状态）。读失败只记录，不影响详情内容。
+     */
+    fun refreshLocalProgress() {
+        localProgressJob?.cancel()
+        localProgressJob = viewModelScope.launch {
+            val progress = try {
+                progressStore.get(serverId, itemId)
+            } catch (e: Exception) {
+                logger.w(LogTag.UI, "读取本地播放进度失败 serverId=$serverId itemId=$itemId", e)
+                null
+            }
+            // 已播完（>=99%）不再提示续播：避免"继续播放"落到片尾。
+            _localProgress.value = progress?.takeIf { p ->
+                p.positionMs > 0L &&
+                    (p.durationMs <= 0L || p.positionMs.toDouble() / p.durationMs < FINISHED_FRACTION)
             }
         }
     }
@@ -251,6 +290,9 @@ class DetailViewModel @Inject constructor(
     }
 
     companion object {
+        /** 条目 72：本地进度达到该比例即视为看完，不再提示续播。 */
+        private const val FINISHED_FRACTION = 0.99
+
         /** 季排序：普通季(1,2,3…)→Specials(seasonNumber=0)→未知(seasonNumber=null) */
         fun sortSeasons(seasons: List<MediaItem>): List<MediaItem> {
             val normal = seasons.filter { (it.seasonNumber ?: 0) > 0 }
