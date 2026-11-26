@@ -198,7 +198,10 @@ internal object RestoreImageCodec {
         writeBoolean(p.professionalInfo.expertMode)
     }
     private fun DataInputStream.preferences(version: Int) = UserPreferences(
-        PlaybackEngineMode.valueOf(required()), readFloat(), readInt(), readBoolean(), readBoolean(), readBoolean(), text()?.toLong(),
+        PlaybackEngineMode.valueOf(required()), readFloat(), readInt(), readBoolean(), readBoolean(), readBoolean(),
+        // preciseResumeSeek 不进入快照格式（跨端契约未扩展），恢复时保持默认 false。
+        false,
+        text()?.toLong(),
         readBoolean(), readBoolean(), readBoolean(),
         SubtitleStyle(readInt(), readInt(), readInt(), readInt(), readFloat(), readFloat(), readBoolean()),
         PlayerGestures(readBoolean(), readBoolean(), readInt(), readBoolean(), readInt(), readBoolean(), readFloat(), readFloat(), readBoolean(), readFloat()),

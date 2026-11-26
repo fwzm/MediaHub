@@ -68,6 +68,16 @@ class UserPreferencesStoreTest {
     }
 
     @Test
+    fun `precise resume preference survives a store round trip`() = runBlocking {
+        assertFalse(store.flow.first().preciseResumeSeek)
+
+        store.update { it.copy(preciseResumeSeek = true) }
+
+        val recreatedStore = UserPreferencesStore(dataStore)
+        assertTrue(recreatedStore.flow.first().preciseResumeSeek)
+    }
+
+    @Test
     fun `aspect ratio memory survives a store round trip and keeps unrelated keys`() = runBlocking {
         val overrides = mapOf(
             VideoAspectMemory.key("server-1", "item-1") to VideoAspectMode.CROP,
@@ -81,6 +91,7 @@ class UserPreferencesStoreTest {
 
         assertEquals(overrides, restored.videoAspectOverrides)
         assertEquals(22, restored.subtitleSizeSp)
+
     }
 
     @Test
