@@ -68,6 +68,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -83,6 +84,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.ensureActive
@@ -961,6 +963,9 @@ class PlayerViewModel @Inject constructor(
     private var eventsTapStarted = false
     /** engine.events 是单消费者 Channel：先 tap 一次，再分发给同步管线与连播逻辑。 */
     private val playbackEventBus = MutableSharedFlow<PlaybackEventMessage>(extraBufferCapacity = 32)
+    /** 播完且没有续播时发出的自动退出请求（#46），UI 收到后走既有 exitPlayer 路径。 */
+    private val _completionExit = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val completionExit: SharedFlow<Unit> = _completionExit
 
     val uiState: StateFlow<PlayerCombinedState> =
         combine(engine.uiState, _resolveState) { player, resolve ->
@@ -1202,22 +1207,26 @@ class PlayerViewModel @Inject constructor(
     }
 
     /**
-     * 一集播完：开关打开、当前是剧集且拿得到 seriesId 时安排下一集。
+     * 播放结束：能连播就安排下一集；确实没有下一集时，按完成策略在宽限期后请求自动退出。
      *
-     * 关掉 autoPlayNextEpisode 时什么都不做（不弹提示、不排队）；同一集重复 Ended 只安排一次；
-     * 切换失败过一次就整轮停住（autoplayBlocked），避免失败后连环跳集。
+     * 关掉 autoPlayNextEpisode、不是剧集、拿不到 seriesId、或已经是末集，都归入 NO_NEXT；
+     * 同一集重复 Ended 只处理一次；切换失败过一次就整轮停住（autoplayBlocked），避免失败后连环跳集。
+     * 退出信号仍由 UI 走既有 exitPlayer -> stopAndFlush 路径（ADR-023），不绕过 final flush。
      */
     private fun onPlaybackEnded() {
         if (stopped || autoplayBlocked || autoplayInFlight) return
-        if (!latestPreferences.autoPlayNextEpisode) return
         val played = currentItem ?: return
         if (played.id == autoplayHandledItemId) return
-        if (played.type != MediaType.EPISODE) return
         autoplayHandledItemId = played.id
         autoplayInFlight = true
         autoplayJob = viewModelScope.launch {
             try {
-                advanceToNextEpisode(played)
+                val outcome = if (latestPreferences.autoPlayNextEpisode && played.type == MediaType.EPISODE) {
+                    advanceToNextEpisode(played)
+                } else {
+                    AdvanceOutcome.NO_NEXT
+                }
+                if (outcome == AdvanceOutcome.NO_NEXT) requestAutoExit(played)
             } finally {
                 autoplayInFlight = false
             }
@@ -1230,12 +1239,12 @@ class PlayerViewModel @Inject constructor(
      * 不新写一套播放流程：改 itemId、清空启动快照后直接走 [resolveInternal]，
      * 由它完成 detail → resume → resolvePlayback → engine.play → 字幕中心。
      */
-    private suspend fun advanceToNextEpisode(finished: MediaItem) {
-        val library = handle?.library ?: return
+    private suspend fun advanceToNextEpisode(finished: MediaItem): AdvanceOutcome {
+        val library = handle?.library ?: return AdvanceOutcome.NO_NEXT
         // 详情页直传的启动快照只有 type/title，缺 seriesId/seasonId/集号：
         // 缺了这层元数据跨季判断无从下手（连播会静默失效），先补一次 detail。
         val played = hydrateEpisodeMetadata(finished)
-        val seriesId = played.seriesId?.takeIf { it.isNotBlank() } ?: return
+        val seriesId = played.seriesId?.takeIf { it.isNotBlank() } ?: return AdvanceOutcome.NO_NEXT
         val seasons = runCatching { library.getSeasons(seriesId) }.getOrNull().orEmpty()
         val currentSeasonEpisodes = played.seasonId
             ?.let { seasonId -> runCatching { library.getEpisodes(seasonId) }.getOrNull() }
@@ -1253,8 +1262,8 @@ class PlayerViewModel @Inject constructor(
                 break
             }
         }
-        val targetId = nextEpisodeId ?: return
-        if (stopped) return
+        val targetId = nextEpisodeId ?: return AdvanceOutcome.NO_NEXT
+        if (stopped) return AdvanceOutcome.FAILED
         logger.i(LogTag.PLAYER, "自动连播 serverId=$serverId from=$itemId to=$targetId")
         itemId = targetId
         // 启动快照属于上一集：不清空会把上一集的 type/runtime/poster/container 套到新一集。
@@ -1268,6 +1277,24 @@ class PlayerViewModel @Inject constructor(
         _versions.value = emptyList()
         versionsLoaded = false
         resolveInternal(autoplay = true)
+        return AdvanceOutcome.STARTED
+    }
+
+    /** 连播尝试的结果：只有确实没有下一集时才允许走「播放完成自动退出」。 */
+    private enum class AdvanceOutcome { STARTED, NO_NEXT, FAILED }
+
+    /**
+     * 播放完成自动退出（审计 #46）：先留宽限期让用户重播/返回，超时且仍未退出才发出信号。
+     *
+     * 音频/直播不参与（见 [PlaybackCompletionPolicy]）：音频保留队列语义，直播没有自然结尾。
+     * 显式退出走 stopAndFlush 已取消本协程，因此 stopped 判定只是兜底。
+     */
+    private suspend fun requestAutoExit(played: MediaItem) {
+        if (!PlaybackCompletionPolicy.shouldAutoExit(played.type)) return
+        delay(PlaybackCompletionPolicy.AUTO_EXIT_GRACE_MS)
+        if (stopped) return
+        logger.i(LogTag.PLAYER, "播放完成自动退出 serverId=$serverId itemId=${played.id}")
+        _completionExit.tryEmit(Unit)
     }
 
     /** 用 detail 补齐快照缺的季/集元数据（已有 seriesId+seasonId 时零额外请求）。 */

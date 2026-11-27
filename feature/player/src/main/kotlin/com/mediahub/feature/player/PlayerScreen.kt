@@ -472,6 +472,11 @@ fun PlayerRoute(
         exitPlayer()
     }
 
+    // 审计 #46：电影/末集/无连播播完后自动退出；宽限期由 ViewModel 计时，这里收到信号即走同一条退出路径。
+    LaunchedEffect(viewModel) {
+        viewModel.completionExit.collect { exitPlayer() }
+    }
+
     PlayerVisualTheme(palette = visualState.chromePalette) {
         Box(
             modifier = Modifier
