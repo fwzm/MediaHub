@@ -11,6 +11,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.mediahub.model.DanmakuPreferences
 import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.PlayerGestures
 import com.mediahub.model.PlayerVisualEffectsPreferences
@@ -18,6 +19,7 @@ import com.mediahub.model.PlayerVisualPreset
 import com.mediahub.model.ProfessionalInfoPreferences
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.UserPreferences
+import com.mediahub.model.VideoAspectMemory
 import com.mediahub.model.VisualPerformanceMode
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -52,6 +54,7 @@ class UserPreferencesStore internal constructor(
             prefs[Keys.HW_DECODING] = updated.enableHardwareDecoding
             prefs[Keys.PREFER_DIRECT_PLAY] = updated.preferDirectPlay
             prefs[Keys.AUTO_NEXT] = updated.autoPlayNextEpisode
+            prefs[Keys.PRECISE_RESUME] = updated.preciseResumeSeek
             updated.maxBitrateBps?.let { prefs[Keys.MAX_BITRATE] = it }
                 ?: prefs.remove(Keys.MAX_BITRATE)
             prefs[Keys.SHOW_INFO] = updated.showPlayerInfoOverlay
@@ -62,6 +65,12 @@ class UserPreferencesStore internal constructor(
             writePlayerVisualEffects(prefs, updated.playerVisualEffects)
             writeProfessionalInfo(prefs, updated.professionalInfo)
             prefs[Keys.WATCH_STATS_ENABLED] = updated.watchStatsEnabled
+            writeDanmaku(prefs, updated.danmaku)
+            updated.preferredAudioLanguage?.takeIf { it.isNotBlank() }?.let { prefs[Keys.PREFERRED_AUDIO_LANGUAGE] = it }
+                ?: prefs.remove(Keys.PREFERRED_AUDIO_LANGUAGE)
+            updated.preferredSubtitleLanguage?.takeIf { it.isNotBlank() }?.let { prefs[Keys.PREFERRED_SUBTITLE_LANGUAGE] = it }
+                ?: prefs.remove(Keys.PREFERRED_SUBTITLE_LANGUAGE)
+            prefs[Keys.VIDEO_ASPECT_OVERRIDES] = VideoAspectMemory.encode(updated.videoAspectOverrides)
         }
     }
 
@@ -89,6 +98,7 @@ class UserPreferencesStore internal constructor(
             enableHardwareDecoding = prefs[Keys.HW_DECODING] ?: true,
             preferDirectPlay = prefs[Keys.PREFER_DIRECT_PLAY] ?: true,
             autoPlayNextEpisode = prefs[Keys.AUTO_NEXT] ?: true,
+            preciseResumeSeek = prefs[Keys.PRECISE_RESUME] ?: false,
             maxBitrateBps = prefs[Keys.MAX_BITRATE],
             showPlayerInfoOverlay = prefs[Keys.SHOW_INFO] ?: false,
             autoLandscape = prefs[Keys.AUTO_LANDSCAPE] ?: true,
@@ -98,6 +108,10 @@ class UserPreferencesStore internal constructor(
             playerVisualEffects = readPlayerVisualEffects(prefs),
             professionalInfo = readProfessionalInfo(prefs),
             watchStatsEnabled = prefs[Keys.WATCH_STATS_ENABLED] ?: true,
+            danmaku = readDanmaku(prefs),
+            preferredAudioLanguage = prefs[Keys.PREFERRED_AUDIO_LANGUAGE],
+            preferredSubtitleLanguage = prefs[Keys.PREFERRED_SUBTITLE_LANGUAGE],
+            videoAspectOverrides = VideoAspectMemory.decode(prefs[Keys.VIDEO_ASPECT_OVERRIDES]),
         )
 
     private fun readSubtitleStyle(prefs: Preferences): SubtitleStyle =
@@ -136,6 +150,7 @@ class UserPreferencesStore internal constructor(
             longPressSpeedMax = (prefs[Keys.GESTURE_SPEED_MAX] ?: 5.0f).coerceIn(2f, 8f),
             longPressDirectionalEnabled = prefs[Keys.GESTURE_LONG_PRESS_DIR] ?: true,
             longPressDefaultSpeed = (prefs[Keys.GESTURE_LONG_PRESS_DEFAULT_SPEED] ?: 2.0f).coerceIn(1f, 4f),
+            doubleTapSidesToggleOverlay = prefs[Keys.GESTURE_DT_SIDES_OVERLAY] ?: false,
         )
 
     private fun writeGestures(
@@ -152,6 +167,7 @@ class UserPreferencesStore internal constructor(
         prefs[Keys.GESTURE_SPEED_MAX] = gestures.longPressSpeedMax.coerceIn(2f, 8f)
         prefs[Keys.GESTURE_LONG_PRESS_DIR] = gestures.longPressDirectionalEnabled
         prefs[Keys.GESTURE_LONG_PRESS_DEFAULT_SPEED] = gestures.longPressDefaultSpeed.coerceIn(1f, 4f)
+        prefs[Keys.GESTURE_DT_SIDES_OVERLAY] = gestures.doubleTapSidesToggleOverlay
     }
 
     private fun readPlayerVisualEffects(prefs: Preferences): PlayerVisualEffectsPreferences =
@@ -195,6 +211,27 @@ class UserPreferencesStore internal constructor(
         prefs[Keys.PROFESSIONAL_INFO_EXPERT_MODE] = professionalInfo.expertMode
     }
 
+    private fun readDanmaku(prefs: Preferences): DanmakuPreferences =
+        DanmakuPreferences(
+            enabled = prefs[Keys.DANMAKU_ENABLED] ?: true,
+            opacity = (prefs[Keys.DANMAKU_OPACITY] ?: DanmakuPreferences().opacity)
+                .coerceIn(DanmakuPreferences.MIN_OPACITY, 1f),
+            strokeWidthDp = (prefs[Keys.DANMAKU_STROKE_WIDTH] ?: DanmakuPreferences().strokeWidthDp)
+                .coerceIn(0f, DanmakuPreferences.MAX_STROKE_WIDTH_DP),
+            onlineEnabled = prefs[Keys.DANMAKU_ONLINE_ENABLED] ?: false,
+        )
+
+    private fun writeDanmaku(
+        prefs: MutablePreferences,
+        danmaku: DanmakuPreferences,
+    ) {
+        prefs[Keys.DANMAKU_ENABLED] = danmaku.enabled
+        prefs[Keys.DANMAKU_OPACITY] = danmaku.opacity.coerceIn(DanmakuPreferences.MIN_OPACITY, 1f)
+        prefs[Keys.DANMAKU_STROKE_WIDTH] =
+            danmaku.strokeWidthDp.coerceIn(0f, DanmakuPreferences.MAX_STROKE_WIDTH_DP)
+        prefs[Keys.DANMAKU_ONLINE_ENABLED] = danmaku.onlineEnabled
+    }
+
     private inline fun <reified T : Enum<T>> enumValueOrNull(stored: String): T? =
         enumValues<T>().firstOrNull { value -> value.name == stored }
 
@@ -205,6 +242,7 @@ class UserPreferencesStore internal constructor(
         val HW_DECODING = booleanPreferencesKey("enable_hardware_decoding")
         val PREFER_DIRECT_PLAY = booleanPreferencesKey("prefer_direct_play")
         val AUTO_NEXT = booleanPreferencesKey("auto_play_next_episode")
+        val PRECISE_RESUME = booleanPreferencesKey("precise_resume_seek")
         val MAX_BITRATE = longPreferencesKey("max_bitrate_bps")
         val SHOW_INFO = booleanPreferencesKey("show_player_info_overlay")
         val AUTO_LANDSCAPE = booleanPreferencesKey("auto_landscape")
@@ -226,6 +264,7 @@ class UserPreferencesStore internal constructor(
         val GESTURE_SPEED_MAX = floatPreferencesKey("gesture_long_press_speed_max")
         val GESTURE_LONG_PRESS_DIR = booleanPreferencesKey("gesture_long_press_directional")
         val GESTURE_LONG_PRESS_DEFAULT_SPEED = floatPreferencesKey("gesture_long_press_default_speed")
+        val GESTURE_DT_SIDES_OVERLAY = booleanPreferencesKey("gesture_double_tap_sides_overlay")
         val VISUAL_ENABLED = booleanPreferencesKey("player_visual_effects_enabled")
         val VISUAL_PRESET = stringPreferencesKey("player_visual_effects_preset")
         val VISUAL_INTENSITY = floatPreferencesKey("player_visual_effects_intensity")
@@ -234,5 +273,12 @@ class UserPreferencesStore internal constructor(
         val VISUAL_PERFORMANCE_MODE = stringPreferencesKey("player_visual_effects_performance_mode")
         val PROFESSIONAL_INFO_EXPERT_MODE = booleanPreferencesKey("player_professional_info_expert_mode")
         val WATCH_STATS_ENABLED = booleanPreferencesKey("watch_stats_enabled")
+        val DANMAKU_ENABLED = booleanPreferencesKey("danmaku_enabled")
+        val DANMAKU_OPACITY = floatPreferencesKey("danmaku_opacity")
+        val DANMAKU_STROKE_WIDTH = floatPreferencesKey("danmaku_stroke_width_dp")
+        val DANMAKU_ONLINE_ENABLED = booleanPreferencesKey("danmaku_online_enabled")
+        val PREFERRED_AUDIO_LANGUAGE = stringPreferencesKey("preferred_audio_language")
+        val PREFERRED_SUBTITLE_LANGUAGE = stringPreferencesKey("preferred_subtitle_language")
+        val VIDEO_ASPECT_OVERRIDES = stringPreferencesKey("video_aspect_overrides")
     }
 }

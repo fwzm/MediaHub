@@ -4,6 +4,12 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.NavArgCodec
+import com.mediahub.core.danmaku.DanDanPlayConfig
+import com.mediahub.core.danmaku.DanmakuComment
+import com.mediahub.core.danmaku.DanmakuEpisode
+import com.mediahub.core.danmaku.DanmakuQuery
+import com.mediahub.core.danmaku.DanmakuRepository
+import com.mediahub.core.danmaku.InMemoryDanmakuCache
 import com.mediahub.core.database.prefs.UserPreferencesRepository
 import com.mediahub.core.database.repository.SubtitleMemoryEntry
 import com.mediahub.core.database.repository.SubtitleMemoryKeys
@@ -12,18 +18,24 @@ import com.mediahub.core.database.repository.WatchStatsRecorder
 import com.mediahub.core.network.PlaybackNetworkTraceRegistry
 import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
+import com.mediahub.core.download.DownloadedMediaLocator
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.ui.effects.VisualPalette
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
 import com.mediahub.model.MediaTypeGuesser
+import com.mediahub.model.DanmakuPreferences
+import com.mediahub.model.MediaVersion
 import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.PlaybackSource
 import com.mediahub.model.PlayerVisualEffectsPreferences
 import com.mediahub.model.ProfessionalInfoPreferences
+import com.mediahub.model.ResumeSeekMode
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.SubtitleFormats
+import com.mediahub.model.AudioTrack
+import com.mediahub.model.SubtitleTrack
 import com.mediahub.model.UpNextResolver
 import com.mediahub.player.engine.EnginePreferenceHistory
 import com.mediahub.player.engine.ExternalSubtitle
@@ -41,19 +53,29 @@ import com.mediahub.player.compatibility.DeviceCapabilitiesProvider
 import com.mediahub.player.compatibility.DevicePlaybackAssessment
 import com.mediahub.player.compatibility.DevicePlaybackAssessor
 import com.mediahub.player.engine.SwitchablePlaybackEngine
+import com.mediahub.player.engine.TrackPreferencePolicy
 import com.mediahub.player.engine.TrackSelection
+import com.mediahub.feature.player.danmaku.DanmakuDefaults
+import com.mediahub.feature.player.danmaku.DanmakuTextError
+import com.mediahub.feature.player.danmaku.DanmakuTextPolicy
+import com.mediahub.feature.player.danmaku.DanmakuUiState
+import com.mediahub.feature.player.danmaku.withSearchResults
+import com.mediahub.feature.player.danmaku.withSnapshot
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.DiscoveredSubtitle
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderHandle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -63,9 +85,9 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -126,6 +148,9 @@ data class PlayerCombinedState(
     /** G3：用户播放意图（缓冲时 isPlaying=false 但本字段仍为 true）。 */
     val playWhenReady: Boolean = false,
     val isEnded: Boolean = false,
+    /** 视频编码尺寸（0 = 未知）；用于按真实宽高比呈现首帧（条目 137）。 */
+    val videoWidth: Int = 0,
+    val videoHeight: Int = 0,
 )
 
 private object SubtitleMemoryOwnership {
@@ -159,6 +184,13 @@ class PlayerViewModel @Inject constructor(
      * 观影统计记录器（条目 141）。null = 未接线（单元测试 / 无统计环境），播放行为不受影响。
      */
     private val watchStatsRecorder: WatchStatsRecorder? = null,
+    private val danmakuRepository: DanmakuRepository = DanmakuRepository(InMemoryDanmakuCache()),
+    private val danDanPlayConfig: DanDanPlayConfig = DanDanPlayConfig(),
+    /**
+     * 本地下载命中器（条目 61）：已下载/已存在的内容优先走本地 `file://`，
+     * 不依赖远端 resolvePlayback，断网也能播放。null = 未接入下载内核（测试/无下载能力）。
+     */
+    private val downloadedMediaLocator: DownloadedMediaLocator? = null,
 ) : ViewModel() {
     private val serverId: String = checkNotNull(savedStateHandle["serverId"])
     // itemId 经 NavArgCodec(Base64 URL_SAFE) 传输，兼容文件路径中的 '/'（见 core:common）
@@ -171,12 +203,49 @@ class PlayerViewModel @Inject constructor(
     private var launchRuntime: String = savedStateHandle["runtime"] ?: ""
     private var launchPoster: String = savedStateHandle["poster"] ?: ""
     private var launchContainer: String = savedStateHandle["container"] ?: ""
+    // 多版本闭环：详情页选中的版本随路由传入；播放器内可再切换（切集时清空）。
+    private var selectedVersion: String? =
+        (savedStateHandle.get<String>("version") ?: "").takeIf { it.isNotBlank() }
+    private val _versions = MutableStateFlow<List<MediaVersion>>(emptyList())
+    val versions: StateFlow<List<MediaVersion>> = _versions.asStateFlow()
+    private val _selectedVersionId = MutableStateFlow(selectedVersion)
+    val selectedVersionId: StateFlow<String?> = _selectedVersionId.asStateFlow()
+    private val _versionSwitchAvailable = MutableStateFlow(false)
+    /** 数据源具备详情能力时才允许在播放器内拉版本列表并切换。 */
+    val versionSwitchAvailable: StateFlow<Boolean> = _versionSwitchAvailable.asStateFlow()
+    private var versionsLoaded = false
 
     /** 启动快照携带的容器（详情页直传；可能为空串=未提供）。 */
     val launchContainerOrNull: String?
         get() = launchContainer.takeIf { it.isNotBlank() }
     /** 最新偏好缓存（modeProvider 同步读取，避免 play() 挂起读 DataStore）。 */
     private var latestPreferences: com.mediahub.model.UserPreferences = com.mediahub.model.UserPreferences()
+
+    /**
+     * 显式选轨记录（清单 78）：只记录用户手动选过的轨，换集时按语言/标题在新一集重放。
+     *
+     * 音轨没有"关闭"语义；字幕额外区分"用户明确关闭"，避免首选字幕语言在下一集
+     * 把用户刚关掉的字幕重新打开。
+     */
+    private var explicitAudioChoice: TrackIdentity? = null
+
+    private var explicitSubtitleChoice: SubtitleChoice = SubtitleChoice.Unset
+
+    private var trackPreferenceJob: Job? = null
+
+    private data class TrackIdentity(val language: String?, val title: String?) {
+        fun matches(language: String?, title: String?): Boolean {
+            val wanted = languageKey(this.language)
+            if (wanted != null && wanted == languageKey(language)) return true
+            return !this.title.isNullOrBlank() && this.title == title
+        }
+    }
+
+    private sealed interface SubtitleChoice {
+        data object Unset : SubtitleChoice
+        data object Off : SubtitleChoice
+        data class Selected(val identity: TrackIdentity) : SubtitleChoice
+    }
 
     /**
      * 引擎绑定到 ViewModel 作用域，onCleared 时释放；请求头上下文 per-engine（ADR-018）。
@@ -216,14 +285,71 @@ class PlayerViewModel @Inject constructor(
     private val _preferences = MutableStateFlow<com.mediahub.model.UserPreferences?>(null)
     val preferences: StateFlow<com.mediahub.model.UserPreferences?> = _preferences.asStateFlow()
 
+    private val _danmakuState = MutableStateFlow(DanmakuUiState())
+    val danmakuState: StateFlow<DanmakuUiState> = _danmakuState.asStateFlow()
+    private var danmakuItem: MediaItem? = null
+    private var danmakuKey: String? = null
+    private var danmakuJob: Job? = null
+    private var localDanmakuCounter: Long = 0L
+    /** 画面比例模式（条目 9）：随内容记忆，播放器内可循环切换。 */
+    private val _videoAspectMode = MutableStateFlow(com.mediahub.model.VideoAspectMode.FIT)
+    val videoAspectMode: StateFlow<com.mediahub.model.VideoAspectMode> = _videoAspectMode.asStateFlow()
+    /** 本会话内用户手动切换过比例：迟到的偏好读取不得覆盖。 */
+    private var aspectModeManual = false
+
+    private fun currentAspectKey(): String =
+        com.mediahub.model.VideoAspectMemory.key(serverId, itemId)
+
+    private fun restoreAspectMode() {
+        aspectModeManual = false
+        _videoAspectMode.value =
+            latestPreferences.videoAspectOverrides[currentAspectKey()]
+                ?: com.mediahub.model.VideoAspectMode.FIT
+    }
+
+    /** 循环切换画面比例，并按内容记忆（下次播放同一内容时恢复）。 */
+    fun cycleVideoAspectMode() {
+        val next = _videoAspectMode.value.next()
+        _videoAspectMode.value = next
+        aspectModeManual = true
+        viewModelScope.launch {
+            userPreferencesRepository.update { current ->
+                current.copy(
+                    videoAspectOverrides = com.mediahub.model.VideoAspectMemory.remember(
+                        current.videoAspectOverrides,
+                        currentAspectKey(),
+                        next,
+                    ),
+                )
+            }
+        }
+    }
+
     init {
         viewModelScope.launch {
             userPreferencesRepository.flow.collect { stored ->
                 latestPreferences = stored
+                if (!aspectModeManual) {
+                    _videoAspectMode.value =
+                        stored.videoAspectOverrides[currentAspectKey()]
+                            ?: com.mediahub.model.VideoAspectMode.FIT
+                }
                 engine.setSubtitlePresentation(stored.subtitleStyle, stored.subtitleSizeSp)
                 // 条目 122：关闭观影统计后不再产生新记录（已有记录保留）。
                 watchStatsRecorder?.setEnabled(stored.watchStatsEnabled)
                 _preferences.value = stored
+                val danmaku = stored.danmaku
+                _danmakuState.update {
+                    it.copy(
+                        enabled = danmaku.enabled,
+                        opacity = danmaku.opacity.coerceIn(DanmakuPreferences.MIN_OPACITY, 1f),
+                        strokeWidthDp = danmaku.strokeWidthDp.coerceIn(
+                            0f,
+                            DanmakuPreferences.MAX_STROKE_WIDTH_DP,
+                        ),
+                        onlineEnabled = danmaku.onlineEnabled,
+                    )
+                }
             }
         }
     }
@@ -252,6 +378,167 @@ class PlayerViewModel @Inject constructor(
     fun resetPlayerVisualEffects() {
         viewModelScope.launch { userPreferencesRepository.resetPlayerVisualEffects() }
     }
+
+    // ---- 弹幕（条目 12/16/59/74/96/98/101/125）----
+
+    fun setDanmakuEnabled(enabled: Boolean) {
+        updateDanmakuPreferences { it.copy(enabled = enabled) }
+        if (enabled && _danmakuState.value.comments.isEmpty()) {
+            danmakuItem?.let { loadDanmaku(it, force = false) }
+        }
+    }
+
+    fun setDanmakuOpacity(value: Float) {
+        updateDanmakuPreferences {
+            it.copy(opacity = value.coerceIn(DanmakuPreferences.MIN_OPACITY, 1f))
+        }
+    }
+
+    fun setDanmakuStrokeWidth(valueDp: Float) {
+        updateDanmakuPreferences {
+            it.copy(strokeWidthDp = valueDp.coerceIn(0f, DanmakuPreferences.MAX_STROKE_WIDTH_DP))
+        }
+    }
+
+    fun setDanmakuOnlineEnabled(enabled: Boolean) {
+        updateDanmakuPreferences { it.copy(onlineEnabled = enabled) }
+        danmakuItem?.let { loadDanmaku(it, force = false) }
+    }
+
+    fun refreshDanmaku() {
+        danmakuItem?.let { loadDanmaku(it, force = true) }
+    }
+
+    /** 在当前播放位置发送一条本地弹幕；内容校验与清洗由 [DanmakuTextPolicy] 负责。 */
+    fun sendDanmaku(raw: String) {
+        val validation = DanmakuTextPolicy.validate(raw)
+        if (!validation.canSend) {
+            val message = when (validation.error) {
+                DanmakuTextError.TOO_LONG -> "弹幕最多 ${DanmakuDefaults.MAX_TEXT_LENGTH} 个字"
+                else -> "弹幕内容不能为空"
+            }
+            _danmakuState.update { it.copy(notice = message) }
+            return
+        }
+        val key = danmakuKey ?: return
+        localDanmakuCounter += 1
+        val comment = DanmakuComment(
+            id = "local-${engine.uiState.value.positionMs}-${System.currentTimeMillis()}-$localDanmakuCounter",
+            timeMs = engine.uiState.value.positionMs.coerceAtLeast(0L),
+            text = validation.normalized,
+            colorArgb = DanmakuComment.DEFAULT_COLOR_ARGB,
+            fontSizeSp = DanmakuComment.DEFAULT_FONT_SIZE_SP,
+            source = DanmakuComment.SOURCE_LOCAL,
+        )
+        viewModelScope.launch {
+            val snapshot = danmakuRepository.addLocalComment(key, comment)
+            if (danmakuKey == key) {
+                _danmakuState.update { it.copy(comments = snapshot.comments, notice = null) }
+            }
+        }
+    }
+
+    fun searchDanmaku(keyword: String) {
+        val item = danmakuItem ?: return
+        if (keyword.isBlank()) return
+        _danmakuState.update {
+            it.copy(searching = true, searchQuery = keyword, notice = null, searchResults = emptyList())
+        }
+        viewModelScope.launch {
+            val result = danmakuRepository.searchEpisodes(danmakuQuery(item, force = false), keyword)
+            _danmakuState.update { it.withSearchResults(result.episodes, result.error) }
+        }
+    }
+
+    fun selectDanmakuEpisode(episode: DanmakuEpisode) {
+        val item = danmakuItem ?: return
+        val key = danmakuKey ?: return
+        danmakuJob?.cancel()
+        _danmakuState.update {
+            it.copy(loading = true, searching = false, notice = null, searchResults = emptyList())
+        }
+        danmakuJob = viewModelScope.launch {
+            val snapshot = danmakuRepository.loadEpisode(
+                query = danmakuQuery(item, force = false),
+                episodeId = episode.id,
+            )
+            if (danmakuKey != key) return@launch
+            _danmakuState.update { it.withSnapshot(snapshot) }
+        }
+    }
+
+    private fun updateDanmakuPreferences(transform: (DanmakuPreferences) -> DanmakuPreferences) {
+        val updated = transform(latestPreferences.danmaku)
+        latestPreferences = latestPreferences.copy(danmaku = updated)
+        _danmakuState.update { state ->
+            state.copy(
+                enabled = updated.enabled,
+                opacity = updated.opacity.coerceIn(DanmakuPreferences.MIN_OPACITY, 1f),
+                strokeWidthDp = updated.strokeWidthDp.coerceIn(
+                    0f,
+                    DanmakuPreferences.MAX_STROKE_WIDTH_DP,
+                ),
+                onlineEnabled = updated.onlineEnabled,
+            )
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.update { it.copy(danmaku = updated) }
+        }
+    }
+
+    private fun invalidateDanmakuSession() {
+        danmakuJob?.cancel()
+        danmakuJob = null
+        danmakuItem = null
+        danmakuKey = null
+        _danmakuState.update {
+            it.copy(
+                comments = emptyList(),
+                loading = false,
+                fromCache = false,
+                sourceLabel = null,
+                notice = null,
+                searchResults = emptyList(),
+            )
+        }
+    }
+
+    private fun startDanmaku(item: MediaItem) {
+        danmakuItem = item
+        danmakuKey = "$serverId:${item.id}"
+        _danmakuState.update {
+            it.copy(
+                comments = emptyList(),
+                loading = false,
+                fromCache = false,
+                sourceLabel = null,
+                notice = null,
+                searchResults = emptyList(),
+            )
+        }
+        loadDanmaku(item, force = false)
+    }
+
+    private fun loadDanmaku(item: MediaItem, force: Boolean) {
+        val key = "$serverId:${item.id}"
+        danmakuJob?.cancel()
+        _danmakuState.update { it.copy(loading = true, notice = null) }
+        danmakuJob = viewModelScope.launch {
+            val snapshot = danmakuRepository.load(danmakuQuery(item, force))
+            if (danmakuKey != key) return@launch
+            _danmakuState.update { it.withSnapshot(snapshot) }
+        }
+    }
+
+    private fun danmakuQuery(item: MediaItem, force: Boolean): DanmakuQuery = DanmakuQuery(
+        itemKey = "$serverId:${item.id}",
+        seriesTitle = item.title,
+        episodeTitle = item.title,
+        durationMs = item.runtimeMs,
+        onlineEnabled = latestPreferences.danmaku.onlineEnabled,
+        danDanPlay = danDanPlayConfig,
+        forceRefresh = force,
+    )
 
     // ---- 字幕中心（P2 切片一：发现/导入/外挂加载/偏移/匹配记忆） ----
 
@@ -383,7 +670,22 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    /** 内嵌字幕轨手动选择：标记本会话手动优先，迟到的发现/记忆不再覆盖。 */
+    /**
+     * 音轨手动选择（清单 6/78）：立即生效并记录身份，供下一集自动继承。
+     */
+    fun onAudioTrackSelected(track: AudioTrack) {
+        if (stopped) return
+        val selection = PlayerTrackSelection.addressOf(engine.uiState.value, track, engine.kind) ?: return
+        if (!engine.isTrackSelectionCurrent(selection)) return
+        engine.selectAudioTrack(selection)
+        explicitAudioChoice = TrackIdentity(track.language, track.title)
+    }
+
+    /**
+     * 内嵌字幕轨手动选择：标记本会话手动优先，迟到的发现/记忆不再覆盖。
+     *
+     * null = 用户明确关闭字幕；该意图同样会被下一集继承（不会被首选字幕语言重新打开）。
+     */
     fun onEmbeddedSubtitleSelected(selection: TrackSelection?) {
         if (stopped) return
         if (!engine.isTrackSelectionCurrent(selection)) return
@@ -391,6 +693,81 @@ class PlayerViewModel @Inject constructor(
         engine.selectSubtitleTrack(selection)
         _subtitleCenter.update { it.copy(selectedExternalId = null) }
         persistMemory(subtitleId = null)
+        if (selection == null) explicitSubtitleChoice = SubtitleChoice.Off
+    }
+
+    /**
+     * 字幕行手动选择（清单 6/78）：立即生效，并把轨道身份记下来供下一集继承。
+     *
+     * null = 关闭字幕。
+     */
+    fun onSubtitleTrackSelected(track: SubtitleTrack?) {
+        if (stopped) return
+        val selection = PlayerTrackSelection.addressOf(engine.uiState.value, track, engine.kind)
+        if (track != null && selection == null) return
+        onEmbeddedSubtitleSelected(selection)
+        if (track != null) {
+            explicitSubtitleChoice = SubtitleChoice.Selected(TrackIdentity(track.language, track.title))
+        }
+    }
+
+    /** 会话音频语言：用户首选优先；未设置时沿用系统 Locale 顺序（既有行为）。 */
+    private fun sessionAudioLanguages(): List<String> {
+        val preferred = latestPreferences.preferredAudioLanguage?.takeIf { it.isNotBlank() }
+        return TrackPreferencePolicy.audioLanguages(
+            preferred?.let { listOf(it) } ?: TrackPreferencePolicy.systemLanguageTags(),
+        )
+    }
+
+    /** 会话字幕语言：未设置首选字幕语言时保持空列表（不自动开启字幕）。 */
+    private fun sessionTextLanguages(): List<String> =
+        TrackPreferencePolicy.textLanguages(latestPreferences.preferredSubtitleLanguage)
+
+    /**
+     * 新一集轨道就绪后重放用户意图（清单 78/82）：
+     * 1. 显式选中的音轨/字幕轨优先继承；
+     * 2. 显式关闭字幕保持关闭；
+     * 3. 否则按首选字幕语言选匹配轨，匹配不到不做任何事（不自动开启）。
+     */
+    private fun scheduleTrackPreferenceApply(generation: Long) {
+        trackPreferenceJob?.cancel()
+        val hasAudioChoice = explicitAudioChoice != null
+        val hasSubtitleChoice = explicitSubtitleChoice != SubtitleChoice.Unset
+        val hasPreferredSubtitle = !latestPreferences.preferredSubtitleLanguage.isNullOrBlank()
+        if (!hasAudioChoice && !hasSubtitleChoice && !hasPreferredSubtitle) return
+        trackPreferenceJob = viewModelScope.launch {
+            val state = withTimeoutOrNull(TRACK_PREFERENCE_TIMEOUT_MS) {
+                engine.uiState.first { it.audioTracks.isNotEmpty() || it.subtitleTracks.isNotEmpty() }
+            } ?: return@launch
+            if (stopped || resolveGeneration.get() != generation) return@launch
+            applyTrackPreferences(state)
+        }
+    }
+
+    private fun applyTrackPreferences(state: com.mediahub.player.engine.PlaybackUiState) {
+        explicitAudioChoice?.let { identity ->
+            state.audioTracks.firstOrNull { identity.matches(it.language, it.title) }
+                ?.let { PlayerTrackSelection.addressOf(state, it, engine.kind) }
+                ?.let(engine::selectAudioTrack)
+        }
+        when (val choice = explicitSubtitleChoice) {
+            SubtitleChoice.Unset -> {
+                val preferred = latestPreferences.preferredSubtitleLanguage
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let(::languageKey) ?: return
+                state.subtitleTracks
+                    .firstOrNull { languageKey(it.language) == preferred }
+                    ?.let { PlayerTrackSelection.addressOf(state, it, engine.kind) }
+                    ?.let(engine::selectSubtitleTrack)
+            }
+
+            SubtitleChoice.Off -> engine.selectSubtitleTrack(null)
+
+            is SubtitleChoice.Selected -> state.subtitleTracks
+                .firstOrNull { choice.identity.matches(it.language, it.title) }
+                ?.let { PlayerTrackSelection.addressOf(state, it, engine.kind) }
+                ?.let(engine::selectSubtitleTrack)
+        }
     }
 
     /**
@@ -594,20 +971,29 @@ class PlayerViewModel @Inject constructor(
     private var eventsTapStarted = false
     /** engine.events 是单消费者 Channel：先 tap 一次，再分发给同步管线与连播逻辑。 */
     private val playbackEventBus = MutableSharedFlow<PlaybackEventMessage>(extraBufferCapacity = 32)
+    /** 播完且没有续播时发出的自动退出请求（#46），UI 收到后走既有 exitPlayer 路径。 */
+    private val _completionExit = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val completionExit: SharedFlow<Unit> = _completionExit
 
     val uiState: StateFlow<PlayerCombinedState> =
         combine(engine.uiState, _resolveState) { player, resolve ->
+            // 条目 21：换源/换集会先进入 Resolving，再等新源解析完成才 engine.play。
+            // 这段窗口里引擎仍是上一个会话，必须清零进度/缓冲/时长/播放意图，
+            // 否则进度条会停在旧位置，看起来像新视频从旧时间继续。
+            val ready = resolve is ResolveState.Ready
             PlayerCombinedState(
                 resolve = resolve,
-                isPlaying = player.isPlaying,
-                isBuffering = player.isBuffering,
-                positionMs = player.positionMs,
-                durationMs = player.durationMs,
+                isPlaying = ready && player.isPlaying,
+                isBuffering = ready && player.isBuffering,
+                positionMs = if (ready) player.positionMs else 0L,
+                durationMs = if (ready) player.durationMs else 0L,
                 speed = player.speed,
                 mediaTitle = player.mediaTitle,
                 error = player.error,
-                playWhenReady = player.playWhenReady,
-                isEnded = player.isEnded,
+                playWhenReady = ready && player.playWhenReady,
+                isEnded = ready && player.isEnded,
+                videoWidth = player.videoWidth,
+                videoHeight = player.videoHeight,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerCombinedState())
 
@@ -621,14 +1007,53 @@ class PlayerViewModel @Inject constructor(
     }
 
     /**
+     * 拉取当前媒体的版本列表（懒加载，只在用户打开版本面板时触发）。
+     * 失败只记日志，不改变正在进行的播放。
+     */
+    fun loadVersions() {
+        if (versionsLoaded) return
+        val detail = handle?.detail ?: return
+        versionsLoaded = true
+        viewModelScope.launch {
+            try {
+                val loaded = detail.getItemDetail(itemId).versions
+                if (loaded.isNotEmpty()) {
+                    _versions.value = loaded
+                    // 路由带来的版本若已不存在（服务端增删版本），回落到服务端默认源
+                    if (selectedVersion != null && loaded.none { it.id == selectedVersion }) {
+                        selectedVersion = null
+                        _selectedVersionId.value = null
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                versionsLoaded = false
+                logger.w(LogTag.PLAYER, "加载版本列表失败 itemId=$itemId", e)
+            }
+        }
+    }
+
+    /** 播放器内切换版本：重新解析并起播指定 MediaSourceId 对应的源。 */
+    fun switchVersion(versionId: String) {
+        if (stopped || versionId == selectedVersion) return
+        if (_versions.value.none { it.id == versionId }) return
+        selectedVersion = versionId
+        _selectedVersionId.value = versionId
+        resolveInternal(autoplay = false)
+    }
+
+    /**
      * [resolve] 的实现。autoplay=true 表示本次解析由「播完自动连播」触发：
      * 失败时永久停住本轮播放（autoplayBlocked），不重试也不连环跳集。
      */
     private fun resolveInternal(autoplay: Boolean) {
         if (stopped) return
+        restoreAspectMode()
         resolveJob?.cancel()
         val generation = resolveGeneration.incrementAndGet()
         invalidateSubtitleSession()
+        invalidateDanmakuSession()
         resolveJob = viewModelScope.launch {
             _resolveState.value = ResolveState.Resolving
             _playbackSource.value = null
@@ -648,18 +1073,29 @@ class PlayerViewModel @Inject constructor(
                 if (stopped || resolveGeneration.get() != generation) return@launch
                 _serverDisplayName.value = server.displayName
                 _serverIcon.value = server.icon
+                // 条目 61：本地已下载内容优先，直接播放 file:// 源（离线可用）。
+                val localSource = downloadedMediaLocator?.resolveLocalPlayback(serverId, itemId)
                 val providerHandle = registry.create(server)
-                    ?: throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
+                    ?: if (localSource == null) {
+                        throw ProviderException.NotYetImplemented(serverId, "该媒体源类型")
+                    } else {
+                        null
+                    }
                 handle = providerHandle
+                // 下载内核（#110）把 providerHandle 变成可空（有本地已下载源时 registry 可返回 null），
+                // 版本切换能力只在拿到 provider 详情时才存在，故必须走安全调用。
+                _versionSwitchAvailable.value = providerHandle?.detail != null
 
-                val detailProvider = providerHandle.detail
-                val playbackProvider = providerHandle.playback
-                    ?: throw ProviderException.NotYetImplemented(serverId, "该数据源的播放能力尚未接入")
+                val detailProvider = providerHandle?.detail
+                val playbackProvider = providerHandle?.playback
+                if (localSource == null && playbackProvider == null) {
+                    throw ProviderException.NotYetImplemented(serverId, "该数据源的播放能力尚未接入")
+                }
 
                 // review P2-5：browse-only 数据源（如本地文件树）无详情能力时，
                 // 按 itemId 重建条目并推断媒体类型（避免退化为 OTHER 污染"继续观看"元数据）。
                 // Player Startup 优化：详情页已传快照（type 非空）时跳过 detail 拉取。
-                val item = if (launchType.isNotBlank()) {
+                val item = if (launchType.isNotBlank() || localSource != null) {
                     MediaItem(
                         serverId = serverId,
                         id = itemId,
@@ -668,7 +1104,7 @@ class PlayerViewModel @Inject constructor(
                         title = itemTitle.ifBlank { itemId.substringAfterLast('/') },
                         runtimeMs = launchRuntime.toLongOrNull(),
                         posterUrl = launchPoster.ifBlank { null },
-                        container = launchContainer.ifBlank { null },
+                        container = launchContainer.ifBlank { localSource?.container ?: "" }.ifBlank { null },
                     )
                 } else {
                     detailProvider?.getItemDetail(itemId)?.item ?: MediaItem(
@@ -686,9 +1122,13 @@ class PlayerViewModel @Inject constructor(
                 val resume = progressStore.getResume(serverId, itemId)
                 coroutineContext.ensureActive()
                 if (stopped || resolveGeneration.get() != generation) return@launch
-                val source = playbackProvider.resolvePlayback(
+                val source = localSource ?: playbackProvider!!.resolvePlayback(
                     item,
-                    PlaybackOptions(startPositionMs = resume, enableDirectPlay = true),
+                    PlaybackOptions(
+                        startPositionMs = resume,
+                        enableDirectPlay = true,
+                        versionId = selectedVersion,
+                    ),
                 )
                 coroutineContext.ensureActive()
                 if (stopped || resolveGeneration.get() != generation) return@launch
@@ -707,15 +1147,23 @@ class PlayerViewModel @Inject constructor(
                         itemType = item.type,
                         posterUrl = item.posterUrl,
                         trace = trace,
+                        preferredAudioLanguages = sessionAudioLanguages(),
+                        preferredTextLanguages = sessionTextLanguages(),
+                        resumeSeekMode = if (latestPreferences.preciseResumeSeek) {
+                            ResumeSeekMode.EXACT
+                        } else {
+                            ResumeSeekMode.KEYFRAME
+                        },
                     )
                 )
+                scheduleTrackPreferenceApply(generation)
 
                 if (!syncStarted) {
                     // engine.events 只允许被订阅一次：先 tap，再由 playbackEventBus 分发。
                     syncCoordinator.start(
                         progress = engine.progress,
                         events = playbackEventBus,
-                        remoteIntervalMs = providerHandle.progress?.remoteReportIntervalMs
+                        remoteIntervalMs = providerHandle?.progress?.remoteReportIntervalMs
                             ?: 10_000L,
                     )
                     startEventsTap()
@@ -723,6 +1171,8 @@ class PlayerViewModel @Inject constructor(
                 }
                 // 字幕中心：同目录发现 + 匹配记忆回放（异步，不阻塞 Ready）。
                 startSubtitleCenter(item, source)
+                // 弹幕：本地优先、在线可选，异步加载，不阻塞 Ready。
+                startDanmaku(item)
                 if (!autoplay) autoplayBlocked = false
                 _resolveState.value = ResolveState.Ready
                 startWatchStats()
@@ -766,22 +1216,26 @@ class PlayerViewModel @Inject constructor(
     }
 
     /**
-     * 一集播完：开关打开、当前是剧集且拿得到 seriesId 时安排下一集。
+     * 播放结束：能连播就安排下一集；确实没有下一集时，按完成策略在宽限期后请求自动退出。
      *
-     * 关掉 autoPlayNextEpisode 时什么都不做（不弹提示、不排队）；同一集重复 Ended 只安排一次；
-     * 切换失败过一次就整轮停住（autoplayBlocked），避免失败后连环跳集。
+     * 关掉 autoPlayNextEpisode、不是剧集、拿不到 seriesId、或已经是末集，都归入 NO_NEXT；
+     * 同一集重复 Ended 只处理一次；切换失败过一次就整轮停住（autoplayBlocked），避免失败后连环跳集。
+     * 退出信号仍由 UI 走既有 exitPlayer -> stopAndFlush 路径（ADR-023），不绕过 final flush。
      */
     private fun onPlaybackEnded() {
         if (stopped || autoplayBlocked || autoplayInFlight) return
-        if (!latestPreferences.autoPlayNextEpisode) return
         val played = currentItem ?: return
         if (played.id == autoplayHandledItemId) return
-        if (played.type != MediaType.EPISODE) return
         autoplayHandledItemId = played.id
         autoplayInFlight = true
         autoplayJob = viewModelScope.launch {
             try {
-                advanceToNextEpisode(played)
+                val outcome = if (latestPreferences.autoPlayNextEpisode && played.type == MediaType.EPISODE) {
+                    advanceToNextEpisode(played)
+                } else {
+                    AdvanceOutcome.NO_NEXT
+                }
+                if (outcome == AdvanceOutcome.NO_NEXT) requestAutoExit(played)
             } finally {
                 autoplayInFlight = false
             }
@@ -794,12 +1248,12 @@ class PlayerViewModel @Inject constructor(
      * 不新写一套播放流程：改 itemId、清空启动快照后直接走 [resolveInternal]，
      * 由它完成 detail → resume → resolvePlayback → engine.play → 字幕中心。
      */
-    private suspend fun advanceToNextEpisode(finished: MediaItem) {
-        val library = handle?.library ?: return
+    private suspend fun advanceToNextEpisode(finished: MediaItem): AdvanceOutcome {
+        val library = handle?.library ?: return AdvanceOutcome.NO_NEXT
         // 详情页直传的启动快照只有 type/title，缺 seriesId/seasonId/集号：
         // 缺了这层元数据跨季判断无从下手（连播会静默失效），先补一次 detail。
         val played = hydrateEpisodeMetadata(finished)
-        val seriesId = played.seriesId?.takeIf { it.isNotBlank() } ?: return
+        val seriesId = played.seriesId?.takeIf { it.isNotBlank() } ?: return AdvanceOutcome.NO_NEXT
         val seasons = runCatching { library.getSeasons(seriesId) }.getOrNull().orEmpty()
         val currentSeasonEpisodes = played.seasonId
             ?.let { seasonId -> runCatching { library.getEpisodes(seasonId) }.getOrNull() }
@@ -817,8 +1271,8 @@ class PlayerViewModel @Inject constructor(
                 break
             }
         }
-        val targetId = nextEpisodeId ?: return
-        if (stopped) return
+        val targetId = nextEpisodeId ?: return AdvanceOutcome.NO_NEXT
+        if (stopped) return AdvanceOutcome.FAILED
         logger.i(LogTag.PLAYER, "自动连播 serverId=$serverId from=$itemId to=$targetId")
         // 条目 141：换集前先结算上一集的观影会话，避免串集/少算。
         watchStatsRecorder?.finish()
@@ -828,7 +1282,30 @@ class PlayerViewModel @Inject constructor(
         launchRuntime = ""
         launchPoster = ""
         launchContainer = ""
+        // 版本属于上一集：不清空会把上一集的 MediaSourceId 套到新一集（服务端会拒绝）。
+        selectedVersion = null
+        _selectedVersionId.value = null
+        _versions.value = emptyList()
+        versionsLoaded = false
         resolveInternal(autoplay = true)
+        return AdvanceOutcome.STARTED
+    }
+
+    /** 连播尝试的结果：只有确实没有下一集时才允许走「播放完成自动退出」。 */
+    private enum class AdvanceOutcome { STARTED, NO_NEXT, FAILED }
+
+    /**
+     * 播放完成自动退出（审计 #46）：先留宽限期让用户重播/返回，超时且仍未退出才发出信号。
+     *
+     * 音频/直播不参与（见 [PlaybackCompletionPolicy]）：音频保留队列语义，直播没有自然结尾。
+     * 显式退出走 stopAndFlush 已取消本协程，因此 stopped 判定只是兜底。
+     */
+    private suspend fun requestAutoExit(played: MediaItem) {
+        if (!PlaybackCompletionPolicy.shouldAutoExit(played.type)) return
+        delay(PlaybackCompletionPolicy.AUTO_EXIT_GRACE_MS)
+        if (stopped) return
+        logger.i(LogTag.PLAYER, "播放完成自动退出 serverId=$serverId itemId=${played.id}")
+        _completionExit.tryEmit(Unit)
     }
 
     /** 用 detail 补齐快照缺的季/集元数据（已有 seriesId+seasonId 时零额外请求）。 */
@@ -907,6 +1384,7 @@ class PlayerViewModel @Inject constructor(
         resolveGeneration.incrementAndGet()
         resolveJob?.cancel()
         autoplayJob?.cancel()
+        trackPreferenceJob?.cancel()
         invalidateSubtitleSession()
         withContext(NonCancellable + Dispatchers.Main.immediate) {
             try {
@@ -955,6 +1433,7 @@ class PlayerViewModel @Inject constructor(
         watchStatsJob?.cancel()
         // 周期 checkpoint 已落盘；此处只清理未结算的内存累加，避免下一会话串数据。
         watchStatsRecorder?.reset()
+        trackPreferenceJob?.cancel()
         invalidateSubtitleSession()
         // 兜底：若未走 stopAndFlush（如进程销毁/异常路径），确保停止采样并释放资源。
         if (!stopped) {
@@ -963,5 +1442,20 @@ class PlayerViewModel @Inject constructor(
             finally { try { engine.release() } finally { stopCompleted.complete(Unit) } }
         }
         super.onCleared()
+    }
+}
+
+/** 等待新一集轨道发现的上限；超时表示容器没有可恢复的轨道，放弃本次重放。 */
+private const val TRACK_PREFERENCE_TIMEOUT_MS = 10_000L
+
+/** 语言标签收敛到语言子标签，并统一常见 ISO 639-2 三字码，便于跨引擎比较。 */
+private fun languageKey(tag: String?): String? {
+    val key = tag?.substringBefore('-')?.trim()?.lowercase() ?: return null
+    return when (key) {
+        "zho", "chi" -> "zh"
+        "eng" -> "en"
+        "jpn" -> "ja"
+        "kor" -> "ko"
+        else -> key.ifEmpty { null }
     }
 }

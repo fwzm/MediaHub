@@ -6,12 +6,14 @@ import com.mediahub.core.database.dao.AccountDao
 import com.mediahub.core.database.dao.HiddenContentDao
 import com.mediahub.core.database.dao.PlaybackProgressDao
 import com.mediahub.core.database.dao.ServerDao
+import com.mediahub.core.database.dao.SearchHistoryDao
 import com.mediahub.core.database.dao.ServerEndpointDao
 import com.mediahub.core.database.dao.SubtitleMemoryDao
 import com.mediahub.core.database.dao.WatchStatsDao
 import com.mediahub.core.database.entity.AccountEntity
 import com.mediahub.core.database.entity.HiddenContentEntity
 import com.mediahub.core.database.entity.PlaybackProgressEntity
+import com.mediahub.core.database.entity.SearchHistoryEntity
 import com.mediahub.core.database.entity.ServerEndpointEntity
 import com.mediahub.core.database.entity.ServerEntity
 import com.mediahub.core.database.entity.SubtitleMemoryEntity
@@ -24,10 +26,11 @@ import com.mediahub.core.database.entity.WatchSessionEntity
         AccountEntity::class,
         PlaybackProgressEntity::class,
         SubtitleMemoryEntity::class,
+        SearchHistoryEntity::class,
         WatchSessionEntity::class,
         HiddenContentEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -36,6 +39,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun accountDao(): AccountDao
     abstract fun playbackProgressDao(): PlaybackProgressDao
     abstract fun subtitleMemoryDao(): SubtitleMemoryDao
+    abstract fun searchHistoryDao(): SearchHistoryDao
     abstract fun watchStatsDao(): WatchStatsDao
     abstract fun hiddenContentDao(): HiddenContentDao
 

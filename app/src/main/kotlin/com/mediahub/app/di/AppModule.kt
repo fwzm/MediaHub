@@ -12,6 +12,12 @@ import com.mediahub.core.common.sync.FileSourceSyncBaselineStore
 import java.io.File
 import com.mediahub.core.database.AppDatabase
 import com.mediahub.core.database.Migrations
+import com.mediahub.core.danmaku.DanDanPlayClient
+import com.mediahub.core.danmaku.DanDanPlayConfig
+import com.mediahub.core.danmaku.DanDanPlaySource
+import com.mediahub.core.danmaku.DanmakuCache
+import com.mediahub.core.danmaku.DanmakuRepository
+import com.mediahub.core.danmaku.FileDanmakuCache
 import com.mediahub.core.logging.CompositeLogger
 import com.mediahub.core.logging.LogBuffer
 import com.mediahub.core.logging.LogcatLogger
@@ -38,6 +44,8 @@ import com.mediahub.core.database.repository.ServerRepository
 import com.mediahub.core.database.prefs.UserPreferencesRepository
 import com.mediahub.core.database.prefs.UserPreferencesStore
 import com.mediahub.core.database.repository.ServerStore
+import com.mediahub.core.download.DownloadManager
+import com.mediahub.core.download.DownloadedMediaLocator
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.base.DefaultProviderRegistry
 import com.mediahub.provider.emby.session.EmbySessionStore
@@ -227,6 +235,7 @@ object AppModule {
                 Migrations.MIGRATION_3_4,
                 Migrations.MIGRATION_4_5,
                 Migrations.MIGRATION_5_6,
+                Migrations.MIGRATION_6_7,
             )
             .build()
 
@@ -338,6 +347,54 @@ object AppModule {
         com.mediahub.feature.search.engine.GlobalSearchEngine(perServerTimeoutMs = 8_000, maxConcurrency = 4)
 
     /**
+     * 弹幕磁盘缓存：cacheDir/danmaku，文件名是条目键的 SHA-256，带 TTL。
+     * 只做已解析载荷的持久化，不缓存任何凭据或原始响应头。
+     */
+    @Provides
+    @Singleton
+    fun provideDanmakuCache(@ApplicationContext context: Context): DanmakuCache =
+        FileDanmakuCache(File(context.cacheDir, "danmaku"))
+
+    /**
+     * 弹弹play 凭据：来自本地 Gradle 属性（见 app/build.gradle.kts）。
+     * 默认空串 = 未配置，在线源关闭并给出明确错误，不会静默打网。
+     */
+    @Provides
+    @Singleton
+    fun provideDanDanPlayConfig(): DanDanPlayConfig = DanDanPlayConfig(
+        appId = BuildConfig.DANDANPLAY_APP_ID,
+        appSecret = BuildConfig.DANDANPLAY_APP_SECRET,
+    )
+
+    /**
+     * 网盘/媒体库离线下载内核（ADR-009）：索引与文件放在 filesDir/downloads，
+     * 传输复用媒体流客户端（长读、系统 VPN / 代理由 OkHttp 栈接管）。
+     */
+    @Provides
+    @Singleton
+    fun provideDownloadManager(
+        @ApplicationContext context: Context,
+        mediaHttpClient: MediaHttpClient,
+    ): DownloadManager = DownloadManager(
+        rootDir = File(context.filesDir, "downloads"),
+        httpClient = mediaHttpClient.okHttpClient(),
+    )
+
+    @Provides
+    @Singleton
+    fun provideDanmakuRepository(
+        cache: DanmakuCache,
+        httpClientFactory: HttpClientFactory,
+    ): DanmakuRepository = DanmakuRepository(
+        cache = cache,
+        sources = listOf(DanDanPlaySource(DanDanPlayClient(httpClientFactory.apiClient()))),
+    )
+
+    @Provides
+    @Singleton
+    fun provideDownloadedMediaLocator(manager: DownloadManager): DownloadedMediaLocator = manager
+
+    /**
      * W6-110：诊断日志导出出口（LogBuffer → 文件）。
      *
      * 目录用 cacheDir/diagnostics：可被系统清理、不占用户存储；导出时逐行再脱敏一次（见 DiagnosticsReport）。
@@ -392,6 +449,12 @@ abstract class RegistryModule {
     @Binds
     @Singleton
     abstract fun bindSubtitleMemoryStore(impl: com.mediahub.core.database.repository.SubtitleMemoryRepository): com.mediahub.core.database.repository.SubtitleMemoryStore
+
+    @Binds
+    @Singleton
+    abstract fun bindSearchHistoryStore(
+        impl: com.mediahub.core.database.repository.SearchHistoryRepository,
+    ): com.mediahub.core.database.repository.SearchHistoryStore
 
     @Binds
     @Singleton

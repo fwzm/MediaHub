@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -29,9 +30,18 @@ class ProviderImageAuthStoreTest {
         override val serverType: ServerType,
         private val scopeSuffix: String?,
         private val headerName: String,
+        /** true = 模拟 Emby 反代兼容：baseUrl 带非空 path 时额外登记 baseUrl 自身。 */
+        private val addBaseScopeForSubPath: Boolean = false,
     ) : ProviderImageAuthContributor {
         override fun authScopeUrl(baseUrl: String): String =
             if (scopeSuffix == null) baseUrl.trimEnd('/') else baseUrl.trimEnd('/') + scopeSuffix
+
+        override fun authScopeUrls(baseUrl: String): List<String> {
+            val scope = authScopeUrl(baseUrl)
+            if (!addBaseScopeForSubPath) return listOf(scope)
+            val path = baseUrl.trim().toHttpUrlOrNull()?.encodedPath.orEmpty().trim('/')
+            return if (path.isEmpty()) listOf(scope) else listOf(scope, baseUrl.trimEnd('/')).distinct()
+        }
 
         override suspend fun headersFor(serverId: String): Map<String, String> = mapOf(headerName to serverId)
     }
@@ -142,5 +152,107 @@ class ProviderImageAuthStoreTest {
         assertNull("无图片鉴权 contributor 的服务器不得伪造认证头", store.headersForUrl(
             url("http://127.0.0.1:33780/dav/"),
         ))
+    }
+
+    // ---- 场景 6（用户条目 22 / 审计 149）：反代子路径 baseUrl 的图片绝对 URL 归属 ----
+
+    private fun subPathEmby() = FakeContributor(
+        ServerType.EMBY, "/emby", "X-Emby-Token", addBaseScopeForSubPath = true,
+    )
+
+    private fun storeWith(contributors: Set<ProviderImageAuthContributor>, vararg servers: MediaServer) =
+        ProviderImageAuthStore(
+            serverStore = FakeServerStore(servers.toList()),
+            contributors = contributors,
+        ).also { it.onServersChanged(servers.toList()) }
+
+    @Test
+    fun `reverse proxy sub path base url also authenticates absolute item image urls`() {
+        val store = storeWith(
+            setOf(subPathEmby()),
+            server("srv-emby", ServerType.EMBY, "https://h.example.com/custom"),
+        )
+
+        // 服务端返回的图片绝对 URL 不含 /emby 前缀：旧实现匹配不到任何 scope → 401 空白。
+        assertEquals(
+            "srv-emby",
+            store.headersForUrl(url("https://h.example.com/custom/Items/1/Images/Primary"))!!["X-Emby-Token"],
+        )
+        assertEquals(
+            "srv-emby",
+            store.headersForUrl(url("https://h.example.com/custom/emby/Items/1/Images/Primary"))!!["X-Emby-Token"],
+        )
+    }
+
+    @Test
+    fun `reverse proxy sub path scope never leaks credentials to another origin`() {
+        val store = storeWith(
+            setOf(subPathEmby()),
+            server("srv-emby", ServerType.EMBY, "https://h.example.com/custom"),
+        )
+
+        assertNull(
+            "跨 origin 的图片 URL 必须无鉴权头",
+            store.headersForUrl(url("https://evil.example/custom/Items/1/Images/Primary")),
+        )
+        assertNull(store.serverIdForUrl(url("https://evil.example/custom/Items/1/Images/Primary")))
+    }
+
+    @Test
+    fun `reverse proxy sub path scopes do not bleed into sibling servers on the same origin`() {
+        val store = storeWith(
+            setOf(subPathEmby(), jellyfinLike),
+            server("srv-emby", ServerType.EMBY, "https://h.example.com/custom"),
+            server("srv-jf", ServerType.JELLYFIN, "https://h.example.com/custom/jellyfin"),
+        )
+
+        assertEquals(
+            "srv-emby",
+            store.headersForUrl(url("https://h.example.com/custom/emby/Items/1/Images/Primary"))!!["X-Emby-Token"],
+        )
+        assertEquals(
+            "srv-jf",
+            store.headersForUrl(url("https://h.example.com/custom/jellyfin/Items/1/Images/Primary"))!!["Authorization"],
+        )
+        assertNull(
+            "同 origin 无关路径不得归属任何服务器",
+            store.headersForUrl(url("https://h.example.com/other/Items/1/Images/Primary")),
+        )
+    }
+
+    @Test
+    fun `identical sub path base url for two servers fails closed instead of sharing tokens`() {
+        val store = storeWith(
+            setOf(subPathEmby(), jellyfinLike),
+            server("srv-emby", ServerType.EMBY, "https://h.example.com/custom"),
+            server("srv-jf", ServerType.JELLYFIN, "https://h.example.com/custom"),
+        )
+
+        assertNull(
+            "同一 path 前缀归属两台服务器时必须 fail closed",
+            store.headersForUrl(url("https://h.example.com/custom/Items/1/Images/Primary")),
+        )
+        assertEquals(
+            "协议前缀 scope 仍可唯一归属 Emby",
+            "srv-emby",
+            store.headersForUrl(url("https://h.example.com/custom/emby/Items/1/Images/Primary"))!!["X-Emby-Token"],
+        )
+    }
+
+    @Test
+    fun `bare origin base url does not claim the root path scope`() {
+        val store = storeWith(
+            setOf(subPathEmby()),
+            server("srv-emby", ServerType.EMBY, "https://h.example.com"),
+        )
+
+        assertNull(
+            "裸 origin 不得生成根路径 scope（否则吞并同 origin 其它服务器）",
+            store.headersForUrl(url("https://h.example.com/Items/1/Images/Primary")),
+        )
+        assertEquals(
+            "srv-emby",
+            store.headersForUrl(url("https://h.example.com/emby/Items/1/Images/Primary"))!!["X-Emby-Token"],
+        )
     }
 }

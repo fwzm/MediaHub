@@ -43,12 +43,13 @@ class RoomMigrationDeviceTest {
                         Migrations.MIGRATION_3_4,
                         Migrations.MIGRATION_4_5,
                         Migrations.MIGRATION_5_6,
+                        Migrations.MIGRATION_6_7,
                     )
                     .allowMainThreadQueries().build()
                 try {
                         // Opening through the real generated database also verifies the stored identity hash.
                         val db = room.openHelper.writableDatabase
-                        assertEquals(6, db.version)
+                        assertEquals(7, db.version)
                         // W6-B：同步身份三列由 MIGRATION_4_5 补齐，历史行取默认值
                         db.query("SELECT sync_source_id,sync_record_revision FROM servers WHERE id='s1'").use { c ->
                             assertTrue(c.moveToFirst()); assertTrue(c.isNull(0)); assertEquals(0L, c.getLong(1))
