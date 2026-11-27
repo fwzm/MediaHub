@@ -241,7 +241,7 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 - 技术栈：C# / .NET 10 + WinUI 3（Windows App SDK 1.8）+ libmpv（`--wid` 嵌入，D3D11 硬解），自包含部署
 - 代码位置：`windows/`；客户端自身说明见 [windows/README.md](windows/README.md)
 - 现状：本章状态取自 `main`（Windows 代码于 2026-11-11 随 PR #33 合并，merge commit `c22f85a9`），**未提供任何安装包**；
-  `feature/windows-client` 分支仍保留（PR #39 等 stacked 工作以它为 base），其上的 Windows 工作不在本章范围内
+  `feature/windows-client` 分支仍在（stacked 工作的历史落点；W6 的 [PR #39](https://github.com/fwzm/MediaHub/pull/39) 已于 2026-11-14 关闭、未合并），其上的 Windows 工作不在本章范围内
 
 > **读法**：本章只写有执行证据的结论。完整逐项状态（含 `UNVERIFIED` / `NOT_RUN` 标记）见
 > [windows/docs/CAPABILITY-MAP.md](windows/docs/CAPABILITY-MAP.md) 与 `windows/docs/W*-EVIDENCE.md`；
@@ -375,7 +375,7 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 - **已解决（2026-11-12）**：图片缓存的磁盘上限与磁盘 TTL 已从 `NOT_RUN` 移出。磁盘缓存抽成
   `ArtworkDiskCache`，256 MiB 上限、30 天 TTL、覆盖写与清空后的计量、以及孤儿 `.tmp` 清理
   由 `ArtworkDiskCacheTests` 覆盖；内存条目上限与在途去重仍无独立自动化证据。
-- **W6 跨设备来源同步**（[PR #39](https://github.com/fwzm/MediaHub/pull/39)，stacked 在 `feature/windows-client` 上，仍为 Draft）：
+- **W6 跨设备来源同步**（[PR #39](https://github.com/fwzm/MediaHub/pull/39) 已于 2026-11-14 关闭、未合并；但 Windows 侧代码已在 `main` 上 —— PR #33 的合并 `c22f85a9`（第一父 `8826d9a1`）带入了 `windows/src/MediaHub.Sync`（93 个文件）、`windows/src/MediaHub.SyncCli` 与 `windows/tests` 的同步/配对/归档用例，随 windows-ci 一起执行；`windows/docs` 内没有 W6 证据文档，同步页 GUI 仍 `GUI_UNVERIFIED`）：
   契约层、配对载荷/状态机/传输层（回环）、双向增量与设备注册表、凭据迁移（DPAPI 重封）、加密离线归档、同步 CLI、
   同步页「预览 → 逐条审批 → 应用 → 推进基线」、基线落盘与重启幂等、已配对设备登记与指纹钉扎、
   已配对设备清单与「忘记」、同步 CLI 的 `baseline` / `pair` 命令组（离线查询与预览，
@@ -524,7 +524,7 @@ dotnet test  MediaHub.Windows.sln -c Debug
 CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：仅在 `windows/**` 变更时运行，
 与 Android 流水线互相独立（Windows 改动不会拖慢 Android 验证，Android 改动也不消耗 Windows runner）。
 （实测补充：workflow 申报的 `paths` 只含 `windows/**`，但在 PR #33 上（该 PR 已于 2026-11-11 合并）「只改 README 的提交」是否触发 CI 并不稳定 —— 11-06 的 `d65bcda`/`1d1456d2` 没有产生任何 run，11-08 的 `09c088a6` 与 11-09 的 `e02d0877` 则各触发 windows-ci + Android CI、`check-runs=4`；因此 PR 的必需检查以最近一次确实产生 run 的 head 为准。）
-截至 `7740c01f`（2026-11-12；其 `windows/` 子树与 `main` 当前 head `06c16d2b` 逐字节相同 —— `git diff --stat 7740c01f origin/main -- windows/` 为空，因此这是 `main` 上那棵树的真实测量；`windows-ci` 的 `push` 只接 `feature/windows-*`，`main` 上的合并不会触发它，`main` 分支的 run 列表里只有 Android CI）：`MediaHub.Tests` **1973** + `MediaHub.WebDav.Tests` **104** = **2077 通过 / 0 失败 / 0 跳过**（windows-ci run **43249334935** 日志实测：`MediaHub.Tests: total=1973 baseline=1959 failed=0 notExecuted=0`、`MediaHub.WebDav.Tests: total=104 baseline=104`、`combined tests=2077`；比 W6 分支合入前的 1952 多 21 例 —— 12 例来自 `1ebd9ee2` 的 `ArtworkDiskCacheTests`（磁盘缓存上限与 TTL）与 `699a1f34` 的 `MpvSubtitleStyleTests`，另 9 例的归属未逐条核对）
+截至 `7740c01f`（2026-11-12；其 `windows/` 子树与 `main` 当前 head `fecabdd5` 逐字节相同 —— `git diff --stat 7740c01f origin/main -- windows/` 为空，因此这是 `main` 上那棵树的真实测量；`windows-ci` 的 `push` 只接 `feature/windows-*`，`main` 上的合并不会触发它，`main` 分支的 run 列表里只有 Android CI）：`MediaHub.Tests` **1973** + `MediaHub.WebDav.Tests` **104** = **2077 通过 / 0 失败 / 0 跳过**（windows-ci run **43249334935** 日志实测：`MediaHub.Tests: total=1973 baseline=1959 failed=0 notExecuted=0`、`MediaHub.WebDav.Tests: total=104 baseline=104`、`combined tests=2077`；比 W6 分支合入前的 1952 多 21 例 —— 12 例来自 `1ebd9ee2` 的 `ArtworkDiskCacheTests`（磁盘缓存上限与 TTL）与 `699a1f34` 的 `MpvSubtitleStyleTests`，另 9 例的归属未逐条核对）
 （合并前的历史锚点：`e02d0877` 上 `478 + 104 = 582`，windows-ci run **42650762907**；`478 = 469 + 9`，9 例由 W14 诊断日志落盘带来，W35–W65 都是文档/脚本门禁、未再加 C# 用例）
 （469 = 438 既有 + 31 例续播下限契约；历史口径 542 = 438 + 104 曾在 PR #33 里写过）。
 这不是本地口径而是 CI 实测：`windows-ci` 现在把两个套件**分两步**跑并各自产出 trx，再按套件名断言下限
@@ -537,7 +537,7 @@ W6-1…W6-14 合计 583（其中 W6-10 的接线 14、W6-13 的清单 UI 17）�
 W6-16 的回环传输 34、W6-17 的双向编排 22，另加 W12b 的对抗性回归 66、W6-18 的 transfer 命令组 19、
 W6-19 的 presenter 35、W6-21 的 skip 语义 9、W6-20 的 `--root`/导出路径 18、W6-24 的传输对端认证 45、W6-26 的 TLS 与指纹钉扎 37、W6-30 的投递确认 19、W6-31 的恶意帧回归 36、W6-33 的传输卡片 presenter 29、W6-37 的回执帧与握手超时分类修正 35、W6-39 的同步页回执接线 27、W6-43 的回执控件与结果行 3、W6-50 的 `transfer serve` 预算 19、W6-51 的显式主机入口 40、W6-66 的归档默认名 3、W6-67 的跨语言文本边界 11、W6-68 的 8 MiB 上限 5、W6-69 的配对文本边界 10、W6-70 的配对设备登记 14、W6-71 的配对卡片与登记 21、W6-72 的同步基线契约与接线 22
 —— 上列明细是历史累计口径，逐项相加与总数有出入，勿据此反推；总数以 CI 实测为准（W6 分支 `b937e39c` 的 windows-ci run 41873260398：`MediaHub.Tests: total=1952` + WebDav `104` = **2056**；主线 `e02d0877` 的 windows-ci run **42650762907**：`MediaHub.Tests: total=478 failed=0 notExecuted=0` + `MediaHub.WebDav.Tests: total=104` = **582**；`main` 血统 `7740c01f` 的 run 43249334935：`total=1973` + `104` = **2077**（更早的 `3d95c1d8`/run 43201950250 为 `total=1961` + `104` = `2065`））。
-> **CI 现状（截至 `7740c01f`，其 `windows/` 与 `main` head `06c16d2b` 相同）**：主干 `windows-ci` 全覆盖 success；主干 Android CI 在 `95fff582` 上首跑失败（visual-instrumentation API 32 的 `Run production visual paths on emulator` 报 `Error on ZipFile unknown archive`——装 Android Emulator 时下载包损坏，模拟器未起来 → `Require executed visual assertions` 退出码 1；同 run 的 API 36 为 success）——**已用重跑（attempt 2）证实为 CI 基础设施偶发失败：三个 job 全部 success，不是产品回归**。
+> **CI 现状（截至 `7740c01f`，其 `windows/` 与 `main` head `fecabdd5` 相同）**：`7740c01f` 上的 `windows-ci` 全部 job success（`main` 自身没有 windows-ci run，这是按树相同性借用的测量）；`main` head `fecabdd5` 的 Android CI run **45881609723** 的 attempt 2 三个 job 全部 success（attempt 1 因模拟器未起来、`Enforce visual instrumentation gate` 下游失败，重跑后通过）；主干 Android CI 在 `95fff582` 上首跑失败（visual-instrumentation API 32 的 `Run production visual paths on emulator` 报 `Error on ZipFile unknown archive`——装 Android Emulator 时下载包损坏，模拟器未起来 → `Require executed visual assertions` 退出码 1；同 run 的 API 36 为 success）——**已用重跑（attempt 2）证实为 CI 基础设施偶发失败：三个 job 全部 success，不是产品回归**。
 `MediaHub.WebDav.Tests` 的 104 例同样适用于该分支（见 [PR #39](https://github.com/fwzm/MediaHub/pull/39) 正文的验证表）。
 
 Android 侧（[`.github/workflows/android-ci.yml`](.github/workflows/android-ci.yml)）的单元门禁按模块、套件和方法核对。
