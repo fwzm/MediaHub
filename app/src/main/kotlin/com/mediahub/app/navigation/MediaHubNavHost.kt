@@ -1,12 +1,18 @@
 package com.mediahub.app.navigation
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -14,6 +20,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mediahub.app.R
 import com.mediahub.core.common.NavArgCodec
 import com.mediahub.feature.detail.DetailRoute
 import com.mediahub.feature.home.ContinueWatchingRoute
@@ -34,6 +41,21 @@ fun MediaHubNavHost() {
     NavHost(navController = navController, startDestination = Routes.HOME) {
 
         composable(Routes.HOME) {
+            // 首页返回键：首次提示、2s 内再按一次退出（避免用户以为一次返回无响应）。
+            val context = LocalContext.current
+            val activity = remember(context) { context.findActivity() }
+            val doubleBackExit = remember { DoubleBackExitController() }
+            BackHandler {
+                if (doubleBackExit.onBack()) {
+                    activity?.finish()
+                } else {
+                    Toast.makeText(
+                        context,
+                        R.string.home_press_back_again_to_exit,
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
             val homeEntry = navController.currentBackStackEntry
             // re-login 成功后 Home 状态立即刷新：观察导航返回的 auth_changed_server_id（评审 FINAL PATCH 3）
             var forceRestoreId by remember { mutableStateOf<String?>(null) }
@@ -277,6 +299,16 @@ fun MediaHubNavHost() {
             PlayerRoute(onBack = { navController.popBackStack() })
         }
     }
+}
+
+/** 从 Compose 的 Context 向上找到宿主 Activity（首页返回退出需要）。 */
+private fun Context.findActivity(): Activity? {
+    var current: Context = this
+    while (current is ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return null
 }
 
 /** 再次选中搜索入口时递增：搜索页据此重新聚焦输入框并弹出键盘（条目 35/99）。 */
