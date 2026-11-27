@@ -1422,3 +1422,40 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 
 ### exact-head CI 验收
 - 代码 head 1fb7dd4909a4fac72f4b2a83ed2e24d0f51de46c：windows-ci 41868713607 = success，台阶行与 licence 行见 RUNLOG round 40 小节；Android 41868713321 = success。
+
+## 6.27 第二十二层口径：失败证据必须与自己的 verdict 一致（W6-113an，2026-11-19）
+
+### 口径
+| 判据 | 读自 | 违反 |
+| --- | --- | --- |
+| Failed/Error 行必须恰好携带一个 Output/ErrorInfo，其 Message 非空白 | 结果行的 Output 子树 | RED |
+| Passed 行不得携带 ErrorInfo | 同上 | RED |
+| 同一 Output 内多于一个 ErrorInfo | 同上 | RED |
+| Message 文本必须按 local name 读取 | Message 子节点 | 读法错误会把真实文本读成空串（实现事故，已修） |
+
+### 为什么前二十一层看不见
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 2-5、13-19 层 | 计数、类/方法、参数行、outcome 桶、身份、运行头、程序集、词表、运行自述 | 全部按 id 与计数建表，Output 子树从未进入任何比较 |
+| 第 21 层 | Results 与 TestEntries 的位置对应 | 行内容仍然只比较 id |
+| 全层 | — | ErrorInfo / StackTrace / RunInfos / StdOut 在脚本里引用计数为 0 |
+
+### 依据（EXECUTED）
+- 真实 767 行失败语料：6 个 Failed 行全部带非空 Message+StackTrace，761 个 Passed 行全部无 ErrorInfo；6 条 RunInfo 与失败行同数，时间戳都在 [start, finish] 内。
+- 七例负向对照：clean-green 与 error-with-evidence 双绿，五个变异（Passed 带证据、Passed 带重复证据、Error 空白 Message、Error 无证据、Error 带重复证据）新闸门 RED 而旧闸门 PASS。
+- 两代 PowerShell 解析 0 error；真实语料双套件台阶行分别为 0/0 与 0/0（全部通过语料）。
+
+### 数据源与规模
+- check-test-suite-baseline.ps1 109,291 → 113,800 B，1,913 → 1,987 行，0 非 ASCII，sha256 26428d0621b8f7e81792da727da1f94e911bbb1e9528381c41d12866a4b632e6。
+- 台阶行：failureEvidence=<rows> failed=<with>/<failed> passed=<with>/<passed> blankMessages=<n> duplicates=<n>。
+
+### 负向对照
+- 七例矩阵全按预期；实现态 sha256 在对照前后一致，对照后 clean-green 复跑仍绿；旧闸门在五个变异上保持 PASS，证明新层不是旧层的重复。
+
+### 残留限制
+- 只要求 Message 非空白；不要求 StackTrace 非空（真实语料的 6 条都有，但生产者可能省略栈）。
+- ErrorInfo 的文本不做内容比对，也不与 RunInfos 的 [FAIL] 行交叉验证（后者列为下一层候选）。
+- 语料必须英文 UI 生成，否则第 20 层的列表词表判据先 RED。
+
+### exact-head CI 验收
+- 代码 head 1762cd35f40d529f443cdaaaea848f4ac79a1246：windows-ci 44465809330（push）/ 44465888575（pull_request）= success，台阶行 `failureEvidence=0 failed=0/0 passed=0/1973` 与 `…/104`；同 head Android CI 44465888544 = success（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
