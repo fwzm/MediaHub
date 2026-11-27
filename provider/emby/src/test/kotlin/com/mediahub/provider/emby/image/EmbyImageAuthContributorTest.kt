@@ -88,4 +88,21 @@ class EmbyImageAuthContributorTest {
         // 用户自定义反代子路径保留后再追加 /emby
         assertEquals("https://host/jf/emby", contributor.authScopeUrl("https://host/jf"))
     }
+
+    // ---- 用户条目 22 / 审计 149：反代子路径图片绝对 URL 归属 ----
+
+    @Test
+    fun `auth scope urls add the base url itself only for sub path bases`() {
+        val (contributor, _) = contributor()
+        // 裸 origin：不得声明根路径 scope（否则同 origin 全路径被吞并）
+        assertEquals(listOf("https://host/emby"), contributor.authScopeUrls("https://host"))
+        assertEquals(listOf("https://host/emby"), contributor.authScopeUrls("https://host/"))
+        // 反代子路径：协议前缀 + baseUrl 自身，图片绝对 URL 才能匹配到鉴权 scope
+        assertEquals(
+            listOf("https://host/custom/emby", "https://host/custom"),
+            contributor.authScopeUrls("https://host/custom"),
+        )
+        // 已以 /emby 结尾时两个 scope 收敛为一个，不重复登记
+        assertEquals(listOf("https://host/emby"), contributor.authScopeUrls("https://host/emby"))
+    }
 }

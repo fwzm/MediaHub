@@ -8,12 +8,14 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.mediahub.app.ui.theme.MediaHubTheme
+import com.mediahub.feature.detail.DetailTestTags
 import com.mediahub.feature.detail.DetailBody
 import com.mediahub.feature.detail.SeriesBrowseState
 import com.mediahub.feature.home.HomeContent
@@ -143,7 +145,7 @@ class CinematicVisualTest {
         }
         composeRule.onNodeWithText("星际漫游").assertIsDisplayed()
         composeRule.onNodeWithText("科幻").assertIsDisplayed()
-        composeRule.onNodeWithText("立即播放").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag(DetailTestTags.PRIMARY_PLAY_ACTION).assertIsDisplayed().performClick()
         composeRule.onNodeWithText("剧情简介").assertIsDisplayed()
         composeRule.waitForIdle()
         assert(played)

@@ -1,5 +1,6 @@
 package com.mediahub.player.engine
 
+import com.mediahub.model.HdrType
 import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.PlaybackSource
 import com.mediahub.player.compatibility.CapabilityEvidence
@@ -83,6 +84,14 @@ object PlaybackEngineSelector {
         // 5. 设备枚举明确不支持该视频编码 → mpv（FFmpeg 软解）。UNKNOWN 同样不参与判定。
         if (device.video.evidence == CapabilityEvidence.UNSUPPORTED) {
             return EngineSelection(EngineKind.MPV, "设备视频能力不足：${device.video.reason}")
+        }
+        // 5.1 杜比视界且设备明确不支持 → mpv。Media3 在 DV 硬解不可用的设备上常表现为
+        //     黑屏/花屏（缺陷 8/46）；mpv 走 FFmpeg 软解 + 色调映射可出可播画面。
+        //     UNKNOWN 不参与判定：没有证据时保持既有快速路径（ADR-042）。
+        if (source.hdrType == HdrType.DOLBY_VISION &&
+            device.dolbyVision.evidence == CapabilityEvidence.UNSUPPORTED
+        ) {
+            return EngineSelection(EngineKind.MPV, "设备不支持杜比视界：${device.dolbyVision.reason}")
         }
         // 6. 其余 → Media3。设备证据仅进入 trace/诊断，不在此处伪装成"支持"。
         return EngineSelection(EngineKind.MEDIA3, "AUTO 默认快速路径（${signature.key}）")

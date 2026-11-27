@@ -6,6 +6,15 @@ package com.mediahub.model
 enum class PlaybackEngineMode { AUTO, MEDIA3, MPV }
 
 /**
+ * 续播定位策略（条目 124）。
+ *
+ * - [KEYFRAME]：默认。从目标位置附近的关键帧恢复，起播更快，但位置可能早于记录值。
+ * - [EXACT]：按精确时间定位。EXO 使用 `SeekParameters.EXACT`，mpv 使用 `hr-seek=yes`；
+ *   代价是首帧更慢（需要解码到精确位置）。
+ */
+enum class ResumeSeekMode { KEYFRAME, EXACT }
+
+/**
  * 用户播放偏好（持久化于 DataStore，见 core:database）。
  * 播放兼容性评估器（player:compatibility）与播放器 UI 都消费该模型。
  */
@@ -16,6 +25,8 @@ data class UserPreferences(
     val enableHardwareDecoding: Boolean = true,
     val preferDirectPlay: Boolean = true,
     val autoPlayNextEpisode: Boolean = true,
+    /** 精确续播（条目 124）：默认从邻近关键帧快速起播，开启后按精确时间定位。 */
+    val preciseResumeSeek: Boolean = false,
     val maxBitrateBps: Long? = null,
     val showPlayerInfoOverlay: Boolean = false,
     /** 播放视频时自动横屏（进入播放器锁定 SENSOR_LANDSCAPE，退出恢复原方向）。 */
@@ -29,7 +40,43 @@ data class UserPreferences(
     val playerVisualEffects: PlayerVisualEffectsPreferences = PlayerVisualEffectsPreferences.Default,
     /** 播放专业信息面板（默认专业）：expertMode 只控制面板信息密度，不影响播放本身。 */
     val professionalInfo: ProfessionalInfoPreferences = ProfessionalInfoPreferences.Default,
+    /** 弹幕显示、样式与在线源开关。 */
+    val danmaku: DanmakuPreferences = DanmakuPreferences(),
+    /**
+     * 首选音频语言（BCP-47 语言子标签，如 `zh` / `en`；null = 未指定）。
+     *
+     * 未指定时保持既有策略：按系统 LocaleList 顺序匹配音频轨。
+     */
+    val preferredAudioLanguage: String? = null,
+    /**
+     * 首选字幕语言（BCP-47 语言子标签；null = 未指定，不自动开启字幕）。
+     *
+     * 只有匹配到该语言的字幕轨时才会默认选中；匹配不到不自动开启，
+     * 仍沿用容器 default/forced 标记的既有行为。
+     */
+    val preferredSubtitleLanguage: String? = null,
+    /** 画面比例记忆（条目 9）：key = serverId/itemId，下次播放同一内容时恢复。 */
+    val videoAspectOverrides: Map<String, VideoAspectMode> = emptyMap(),
 )
+
+/**
+ * 弹幕偏好。
+ *
+ * - [enabled] 只控制渲染层显隐，不删除已加载弹幕（数量徽标仍可读）。
+ * - [onlineEnabled] 默认关闭；开启前需配置 DanDanPlay AppId/AppSecret。
+ * - [opacity] / [strokeWidthDp] 由数据层与 UI 双重夹取，避免历史脏值导致不可读。
+ */
+data class DanmakuPreferences(
+    val enabled: Boolean = true,
+    val opacity: Float = 0.85f,
+    val strokeWidthDp: Float = 1.5f,
+    val onlineEnabled: Boolean = false,
+) {
+    companion object {
+        const val MIN_OPACITY: Float = 0.1f
+        const val MAX_STROKE_WIDTH_DP: Float = 6f
+    }
+}
 
 /**
  * 播放器手势偏好（U3-B，9 项）。
@@ -64,6 +111,11 @@ data class PlayerGestures(
     val longPressDirectionalEnabled: Boolean = true,
     /** 长按默认倍率（1.0-4.0，默认 2.0×；启动时锁定此档开始）。 */
     val longPressDefaultSpeed: Float = 2.0f,
+    /**
+     * 双击屏幕左右边缘显隐控制栏（默认关）。
+     * 开启后仅最外侧各 10% 让位给显隐，中间 10%-90% 仍保持原有双击 seek 分区。
+     */
+    val doubleTapSidesToggleOverlay: Boolean = false,
 )
 
 /**
@@ -87,5 +139,12 @@ data class SubtitleStyle(
         const val EDGE_TYPE_NONE = 0
         const val EDGE_TYPE_OUTLINE = 1
         const val EDGE_TYPE_DROP_SHADOW = 2
+
+        /**
+         * mpv 的 `sub-font-size` 以 720p 画布为基准（18sp 档位对应 38）。
+         * Media3 用「视高比例」设置字号，二者必须由同一基准换算，跨内核字幕才一致（条目 137）。
+         */
+        const val BASE_FONT_SIZE_AT_720P = 38f
+        const val BASE_FONT_FRACTION_OF_VIDEO_HEIGHT = BASE_FONT_SIZE_AT_720P / 720f
     }
 }

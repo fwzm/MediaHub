@@ -95,21 +95,25 @@ class ProviderImageAuthStore @Inject constructor(
     }
 
     private fun List<MediaServer>.toAuthScopes(): List<AuthScope> =
-        asSequence().mapNotNull { server ->
+        asSequence().flatMap { server ->
             val contributor = contributorByType[server.type]
             // Providers without image authentication still need a URL -> serverId
             // scope so the shared User-Agent policy can attribute their requests.
             // They keep a null contributor and therefore emit no auth headers.
-            val scopeUrl = runCatching {
-                (contributor?.authScopeUrl(server.baseUrl) ?: server.baseUrl).toHttpUrl()
+            val scopeUrls = runCatching {
+                contributor?.authScopeUrls(server.baseUrl) ?: listOf(server.baseUrl)
+            }.getOrDefault(emptyList())
+            // 一个服务器可声明多个 scope（反代子路径：协议前缀 + baseUrl 自身）；
+            // 每个 scope 各自计算 origin / path 前缀，匹配规则与单 scope 完全一致。
+            scopeUrls.asSequence().mapNotNull { url ->
+                val scopeUrl = runCatching { url.toHttpUrl() }.getOrNull() ?: return@mapNotNull null
+                AuthScope(
+                    origin = Origin(scopeUrl.scheme, scopeUrl.host, scopeUrl.port),
+                    scopeSegments = scopeUrl.encodedPath.split('/').filter { it.isNotEmpty() },
+                    serverId = server.id,
+                    contributor = contributor,
+                )
             }
-                .getOrNull() ?: return@mapNotNull null
-            AuthScope(
-                origin = Origin(scopeUrl.scheme, scopeUrl.host, scopeUrl.port),
-                scopeSegments = scopeUrl.encodedPath.split('/').filter { it.isNotEmpty() },
-                serverId = server.id,
-                contributor = contributor,
-            )
         }.toList()
 
     private fun isPathPrefix(requestSegments: List<String>, scopeSegments: List<String>): Boolean {

@@ -87,6 +87,57 @@ class SwitchablePlaybackEngineTest {
     }
 
 
+    /**
+     * 条目 21：换源/换集后门面必须立即以新会话重建状态。
+     * 旧会话的进度、时长、缓冲与播放意图都不得跨会话泄漏。
+     */
+    @Test
+    fun `switching to a new item resets progress buffering and duration`() = runTest(dispatcher) {
+        val first = FakeEngine(EngineKind.MEDIA3)
+        val second = FakeEngine(EngineKind.MEDIA3)
+        var active = first
+        val outer = SwitchablePlaybackEngine(
+            scope = backgroundScope,
+            media3Factory = PlaybackEngineCreator { active },
+            mpvFactory = PlaybackEngineCreator { FakeEngine(EngineKind.MPV) },
+            history = InMemoryEnginePreferenceHistory(),
+            modeProvider = { PlaybackEngineMode.MEDIA3 },
+            logger = noOpLogger,
+            audioSilentGraceMs = 2_000L,
+            deviceAssessmentProvider = { DevicePlaybackAssessment.UNKNOWN },
+        )
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { outer.uiState.collect { } }
+        try {
+            outer.play(session(source())); runCurrent()
+            first.updateState {
+                it.copy(
+                    positionMs = 90_000,
+                    durationMs = 120_000,
+                    isBuffering = true,
+                    isPlaying = true,
+                    playWhenReady = true,
+                )
+            }
+            runCurrent()
+            assertEquals(90_000L, outer.uiState.value.positionMs)
+
+            active = second
+            outer.play(session(source(container = "mp4")).copy(itemId = "item-2"))
+            assertEquals("换集后进度必须归零", 0L, outer.uiState.value.positionMs)
+            assertFalse("换集后缓冲状态必须清零", outer.uiState.value.isBuffering)
+            assertEquals("换集后时长必须按新源重算", 0L, outer.uiState.value.durationMs)
+            assertFalse(outer.uiState.value.isPlaying)
+            assertFalse(outer.uiState.value.playWhenReady)
+
+            // 旧引擎迟到的状态不得写回新会话
+            first.updateState { it.copy(positionMs = 95_000) }
+            runCurrent()
+            assertEquals(0L, outer.uiState.value.positionMs)
+        } finally {
+            outer.release()
+        }
+    }
+
     private val dispatcher = StandardTestDispatcher()
 
     private val noOpLogger = object : com.mediahub.core.logging.Logger {
