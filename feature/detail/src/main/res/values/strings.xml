@@ -3,4 +3,16 @@
     <!-- 收藏开关（task-25 / A2）：语义对齐 Windows 端 Favorite -->
     <string name="detail_action_favorite">收藏</string>
     <string name="detail_action_unfavorite">取消收藏</string>
+    <!-- 音轨/字幕语言偏好（清单 6） -->
+    <string name="detail_track_preferences_action">音轨与字幕偏好</string>
+    <string name="detail_track_preferences_title">音轨与字幕偏好</string>
+    <string name="detail_track_preferences_done">完成</string>
+    <string name="detail_preferred_audio_language">首选音频语言</string>
+    <string name="detail_preferred_subtitle_language">首选字幕语言</string>
+    <string name="detail_language_follow_system">跟随系统</string>
+    <string name="detail_subtitle_auto_off">不自动开启</string>
+    <string name="detail_language_chinese">中文</string>
+    <string name="detail_language_english">英语</string>
+    <string name="detail_language_japanese">日语</string>
+    <string name="detail_language_korean">韩语</string>
 </resources>

@@ -24,15 +24,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -47,10 +51,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.BackdropImage
 import com.mediahub.core.ui.MediaHubStatus
@@ -59,10 +66,12 @@ import com.mediahub.core.ui.ThumbImage
 import com.mediahub.feature.detail.source.shouldShowSourceSelector
 import com.mediahub.feature.detail.source.sourceRows
 import com.mediahub.feature.detail.source.truncationMessage
+import com.mediahub.feature.detail.version.VersionSelector
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
 import com.mediahub.model.PlaybackLaunchSnapshot
+import com.mediahub.model.PlaybackProgress
 import kotlin.math.roundToInt
 
 /**
@@ -83,6 +92,15 @@ fun DetailRoute(
     val seriesState by viewModel.seriesState.collectAsStateWithLifecycle()
     val sourceState by viewModel.sourceState.collectAsStateWithLifecycle()
     val favoriteState by viewModel.favoriteState.collectAsStateWithLifecycle()
+    val trackPreferences by viewModel.trackLanguagePreferences.collectAsStateWithLifecycle()
+    var showTrackPreferences by remember { mutableStateOf(false) }
+    val localProgress by viewModel.localProgress.collectAsStateWithLifecycle()
+    val selectedVersionId by viewModel.selectedVersionId.collectAsStateWithLifecycle()
+
+    // 条目 72：从播放器返回、页面重新可见时刷新本地续播进度。
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        viewModel.refreshLocalProgress()
+    }
 
     Scaffold(
         topBar = {
@@ -102,6 +120,13 @@ fun DetailRoute(
                     }
                 },
                 actions = {
+                    // 音轨/字幕语言偏好（清单 6）：详情页入口，选择持久化到 DataStore
+                    IconButton(onClick = { showTrackPreferences = true }) {
+                        Icon(
+                            Icons.Default.Language,
+                            contentDescription = stringResource(R.string.detail_track_preferences_action),
+                        )
+                    }
                     // 收藏开关（task-25 / A2）：只在该数据源具备 FAVORITE 能力时出现
                     val favorite = favoriteState
                     if (favorite != null) {
@@ -160,31 +185,120 @@ fun DetailRoute(
                     )
                 }
                 DetailBody(
-                detail = s.detail,
-                seriesState = seriesState,
-                modifier = Modifier.fillMaxSize().weight(1f, fill = true),
-                onPlay = { item ->
-                    onPlay(
-                        viewModel.serverId,
-                        viewModel.itemId,
-                        PlaybackLaunchSnapshot(
-                            itemId = item.id,
-                            type = item.type,
-                            title = item.title,
-                            runtimeMs = item.runtimeMs,
-                            posterUrl = item.posterUrl,
-                            container = item.container,
+                    detail = s.detail,
+                    seriesState = seriesState,
+                    modifier = Modifier.fillMaxSize().weight(1f, fill = true),
+                    onPlay = { item ->
+                        onPlay(
+                            viewModel.serverId,
+                            viewModel.itemId,
+                            viewModel.launchSnapshot(item),
                         )
-                    )
-                },
-                onSelectSeason = viewModel::selectSeason,
-                onRetryEpisodes = viewModel::retryEpisodes,
-                onOpenItem = onOpenItem,
-                sourceState = sourceState,
-                onSwitchSource = onSwitchSource,
+                    },
+                    onSelectSeason = viewModel::selectSeason,
+                    onRetryEpisodes = viewModel::retryEpisodes,
+                    onOpenItem = onOpenItem,
+                    sourceState = sourceState,
+                    onSwitchSource = onSwitchSource,
+                    localProgress = localProgress,
+                    selectedVersionId = selectedVersionId,
+                    onSelectVersion = viewModel::selectVersion,
                 )
             }
         }
+    }
+
+    if (showTrackPreferences) {
+        TrackLanguagePreferencesDialog(
+            preferences = trackPreferences ?: TrackLanguagePreferences(),
+            onDismiss = { showTrackPreferences = false },
+            onSelectAudio = viewModel::updatePreferredAudioLanguage,
+            onSelectSubtitle = viewModel::updatePreferredSubtitleLanguage,
+        )
+    }
+}
+
+/** 详情页可选语言；tag = null 表示"跟随系统"（音频）/ "不自动开启"（字幕）。 */
+private data class TrackLanguageOption(val tag: String?, val labelRes: Int)
+
+private val TRACK_LANGUAGE_OPTIONS = listOf(
+    TrackLanguageOption("zh", R.string.detail_language_chinese),
+    TrackLanguageOption("en", R.string.detail_language_english),
+    TrackLanguageOption("ja", R.string.detail_language_japanese),
+    TrackLanguageOption("ko", R.string.detail_language_korean),
+)
+
+@Composable
+private fun TrackLanguagePreferencesDialog(
+    preferences: TrackLanguagePreferences,
+    onDismiss: () -> Unit,
+    onSelectAudio: (String?) -> Unit,
+    onSelectSubtitle: (String?) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.detail_track_preferences_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    stringResource(R.string.detail_preferred_audio_language),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                TrackLanguageChoice(
+                    label = stringResource(R.string.detail_language_follow_system),
+                    selected = preferences.preferredAudioLanguage == null,
+                    onClick = { onSelectAudio(null) },
+                )
+                TRACK_LANGUAGE_OPTIONS.forEach { option ->
+                    TrackLanguageChoice(
+                        label = stringResource(option.labelRes),
+                        selected = preferences.preferredAudioLanguage == option.tag,
+                        onClick = { onSelectAudio(option.tag) },
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    stringResource(R.string.detail_preferred_subtitle_language),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                TrackLanguageChoice(
+                    label = stringResource(R.string.detail_subtitle_auto_off),
+                    selected = preferences.preferredSubtitleLanguage == null,
+                    onClick = { onSelectSubtitle(null) },
+                )
+                TRACK_LANGUAGE_OPTIONS.forEach { option ->
+                    TrackLanguageChoice(
+                        label = stringResource(option.labelRes),
+                        selected = preferences.preferredSubtitleLanguage == option.tag,
+                        onClick = { onSelectSubtitle(option.tag) },
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.detail_track_preferences_done))
+            }
+        },
+    )
+}
+
+@Composable
+private fun TrackLanguageChoice(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = onClick)
+        Spacer(Modifier.width(8.dp))
+        Text(label)
     }
 }
 
@@ -199,6 +313,10 @@ fun DetailBody(
     onOpenItem: ((MediaItem) -> Unit)? = null,
     sourceState: SourceResolutionState = SourceResolutionState.Idle,
     onSwitchSource: ((serverId: String, itemId: String, title: String) -> Unit)? = null,
+    /** 条目 72：本地快照续播进度（已缓存 / 本地内容没有远端进度可显示）。 */
+    localProgress: PlaybackProgress? = null,
+    selectedVersionId: String? = null,
+    onSelectVersion: (String) -> Unit = {},
 ) {
     val item = detail.item
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
@@ -273,18 +391,44 @@ fun DetailBody(
             }
         }
 
+        // 条目 72：服务器没有 UserData 进度时（已缓存 / 本地内容），
+        // 用本地快照回显续播位置，避免播完回来仍是"立即播放"。
+        val resumeProgress = localProgress?.takeIf { item.userData?.playedPercentage == null }
         Button(
             onClick = { onPlay(item) },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 20.dp)
-                .height(54.dp),
+                .height(54.dp)
+                .testTag(DetailTestTags.PRIMARY_PLAY_ACTION),
             shape = MaterialTheme.shapes.medium,
         ) {
             Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(26.dp))
             Spacer(Modifier.width(8.dp))
-            Text("立即播放", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = resumeProgress?.let { "继续播放 · ${formatPlaybackPosition(it.positionMs)}" }
+                    ?: "立即播放",
+                style = MaterialTheme.typography.titleMedium,
+            )
         }
+        if (resumeProgress != null && resumeProgress.durationMs > 0L) {
+            LinearProgressIndicator(
+                progress = {
+                    (resumeProgress.positionMs.toFloat() / resumeProgress.durationMs).coerceIn(0f, 1f)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .height(3.dp),
+            )
+        }
+
+        // ---- 多版本选择（同服务器 MediaSource） ----
+        VersionSelector(
+            versions = detail.versions,
+            selectedVersionId = selectedVersionId,
+            onSelectVersion = onSelectVersion,
+        )
 
         // ---- 1F C2：跨服务器来源选择（ADR-038） ----
         SourceSelector(
@@ -575,5 +719,18 @@ private fun SourceSelector(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
         )
+    }
+}
+
+/** 条目 72：续播位置展示（mm:ss / h:mm:ss）。 */
+private fun formatPlaybackPosition(positionMs: Long): String {
+    val totalSeconds = (positionMs.coerceAtLeast(0L) / 1_000L)
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%d:%02d".format(minutes, seconds)
     }
 }

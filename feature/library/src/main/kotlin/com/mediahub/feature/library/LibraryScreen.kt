@@ -67,6 +67,7 @@ import com.mediahub.core.ui.MediaHubStatus
 import com.mediahub.core.ui.PosterImage
 import com.mediahub.core.ui.ThumbImage
 import com.mediahub.core.ui.theme.MediaHubSpacing
+import com.mediahub.provider.api.ProviderErrorText
 import com.mediahub.model.MediaFilter
 import com.mediahub.model.MediaFilterField
 import com.mediahub.model.MediaItem
@@ -232,7 +233,13 @@ fun LibraryContent(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     MediaHubStatus(
                         title = "媒体库暂时无法载入",
-                        message = s.message,
+                        // 审计条目 83：按结构化错误码给出准确文案（403≠密码错误）；
+                        // 本地目录授权失败保留其专属文案。
+                        message = if (s.reauthorizeDirectory || s.errorCode == null) {
+                            s.message
+                        } else {
+                            ProviderErrorText.fromCode(s.errorCode, s.httpStatus)
+                        },
                         icon = Icons.Default.Refresh,
                         retryLabel = "重试",
                         onRetry = onRefresh,

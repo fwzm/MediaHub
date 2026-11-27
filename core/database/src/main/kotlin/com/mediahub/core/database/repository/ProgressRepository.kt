@@ -28,6 +28,11 @@ class ProgressRepository @Inject constructor(
     override suspend fun getResume(serverId: String, itemId: String): Long? =
         dao.get(serverId, itemId)?.positionMs
 
+    override suspend fun get(serverId: String, itemId: String): PlaybackProgress? =
+        dao.get(serverId, itemId)?.toDomain()
+
+    override suspend fun clearAll(): Int = dao.deleteAll()
+
     suspend fun clear(serverId: String, itemId: String) {
         dao.delete(serverId, itemId)
     }

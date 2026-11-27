@@ -3,6 +3,7 @@ package com.mediahub.feature.search
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.mediahub.core.database.repository.SearchHistoryStore
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 internal const val SEARCH_QUERY_KEY = "searchQuery"
 
@@ -41,14 +43,28 @@ class GlobalSearchViewModel @Inject constructor(
     private val registry: MediaProviderRegistry,
     private val engine: GlobalSearchEngine,
     private val logger: Logger,
+    private val historyStore: SearchHistoryStore,
 ) : ViewModel() {
 
     /** 输入框与正式搜索共用一个可恢复的 source of truth，避免进程重建后 UI/VM 分裂。 */
     val query: StateFlow<String> = savedStateHandle.getStateFlow(SEARCH_QUERY_KEY, "")
 
+    /** 本地搜索历史（最近使用在前，持久化与去重/上限由数据层保证）。 */
+    val history: StateFlow<List<String>> = historyStore.observe()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
+            initialValue = emptyList(),
+        )
+
     /** UI 提交查询（原始输入，含空白）；去抖在下游统一做。 */
     fun onQueryChange(query: String) {
         savedStateHandle[SEARCH_QUERY_KEY] = query
+    }
+
+    /** 长按删除单条搜索历史。 */
+    fun removeHistory(query: String) {
+        viewModelScope.launch { historyStore.remove(query) }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
@@ -60,6 +76,8 @@ class GlobalSearchViewModel @Inject constructor(
                     emit(GlobalSearchState.idle(query))
                     return@flow
                 }
+                // 记录实际执行的搜索（去抖后）；历史写入失败不得影响搜索结果。
+                runCatching { historyStore.record(query) }
                 emitAll(engine.search(buildTargets(), query))
             }
         }
