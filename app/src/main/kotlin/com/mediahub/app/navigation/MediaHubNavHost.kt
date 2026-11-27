@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -22,6 +23,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.app.R
 import com.mediahub.core.common.NavArgCodec
 import com.mediahub.feature.detail.DetailRoute
+import com.mediahub.feature.home.ContinueWatchingRoute
 import com.mediahub.feature.home.HomeRoute
 import com.mediahub.feature.library.LibraryRoute
 import com.mediahub.feature.library.favorites.FavoritesRoute
@@ -81,14 +83,37 @@ fun MediaHubNavHost() {
                 },
                 onAddServer = { navController.navigate(Routes.ADD_SERVER) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                onOpenSearch = { navController.navigate(Routes.SEARCH) },
+                onOpenSearch = { openSearch(navController) },
                 onOpenItem = { progress ->
                     navController.navigate(
                         "detail/${progress.serverId}/${NavArgCodec.encode(progress.itemId)}" +
                             "?title=${Uri.encode(progress.itemTitle ?: "")}"
                     )
                 },
+                onOpenAllContinueWatching = { serverId, label ->
+                    navController.navigate(
+                        "continue?serverId=${Uri.encode(serverId)}&label=${Uri.encode(label)}"
+                    )
+                },
                 forceRestoreId = forceRestoreId,
+            )
+        }
+
+        composable(
+            route = "continue?serverId={serverId}&label={label}",
+            arguments = listOf(
+                navArgument("serverId") { type = NavType.StringType; defaultValue = "" },
+                navArgument("label") { type = NavType.StringType; defaultValue = "" },
+            ),
+        ) {
+            ContinueWatchingRoute(
+                onBack = { navController.popBackStack() },
+                onOpenItem = { progress ->
+                    navController.navigate(
+                        "detail/${progress.serverId}/${NavArgCodec.encode(progress.itemId)}" +
+                            "?title=${Uri.encode(progress.itemTitle ?: "")}"
+                    )
+                },
             )
         }
 
@@ -145,9 +170,13 @@ fun MediaHubNavHost() {
             com.mediahub.feature.settings.backup.BackupRoute(onBack = { navController.popBackStack() })
         }
 
-        composable(Routes.SEARCH) {
+        composable(Routes.SEARCH) { entry ->
+            val focusRequestToken by entry.savedStateHandle
+                .getStateFlow(SEARCH_FOCUS_REQUEST_KEY, 0)
+                .collectAsStateWithLifecycle()
             SearchRoute(
                 onBack = { navController.popBackStack() },
+                focusRequestToken = focusRequestToken,
                 onOpenItem = { item ->
                     // 搜索命中统一进 DetailRoute：Movie/Episode → 详情播放；
                     // Series → Series Detail（季 chips + EpisodeRow，1B-3.1 页面的正式入口）
@@ -230,7 +259,8 @@ fun MediaHubNavHost() {
                             "&type=" + Uri.encode(snapshot.type?.name.orEmpty()) +
                             "&runtime=" + (snapshot.runtimeMs?.toString().orEmpty()) +
                             "&poster=" + Uri.encode(snapshot.posterUrl.orEmpty()) +
-                            "&container=" + Uri.encode(snapshot.container.orEmpty())
+                            "&container=" + Uri.encode(snapshot.container.orEmpty()) +
+                            "&version=" + Uri.encode(snapshot.versionId.orEmpty())
                     )
                 },
                 onOpenItem = { item ->
@@ -254,7 +284,7 @@ fun MediaHubNavHost() {
         }
 
         composable(
-            route = "player/{serverId}/{itemId}?title={title}&type={type}&runtime={runtime}&poster={poster}&container={container}",
+            route = "player/{serverId}/{itemId}?title={title}&type={type}&runtime={runtime}&poster={poster}&container={container}&version={version}",
             arguments = listOf(
                 navArgument("serverId") { type = NavType.StringType },
                 navArgument("itemId") { type = NavType.StringType },
@@ -263,6 +293,7 @@ fun MediaHubNavHost() {
                 navArgument("runtime") { type = NavType.StringType; defaultValue = "" },
                 navArgument("poster") { type = NavType.StringType; defaultValue = "" },
                 navArgument("container") { type = NavType.StringType; defaultValue = "" },
+                navArgument("version") { type = NavType.StringType; defaultValue = "" },
             ),
         ) {
             PlayerRoute(onBack = { navController.popBackStack() })
@@ -278,6 +309,19 @@ private fun Context.findActivity(): Activity? {
         current = current.baseContext
     }
     return null
+}
+
+/** 再次选中搜索入口时递增：搜索页据此重新聚焦输入框并弹出键盘（条目 35/99）。 */
+private const val SEARCH_FOCUS_REQUEST_KEY = "search_focus_request_token"
+
+private fun openSearch(navController: NavHostController) {
+    val current = navController.currentBackStackEntry
+    if (navController.currentDestination?.route == Routes.SEARCH && current != null) {
+        val next = (current.savedStateHandle.get<Int>(SEARCH_FOCUS_REQUEST_KEY) ?: 0) + 1
+        current.savedStateHandle[SEARCH_FOCUS_REQUEST_KEY] = next
+    } else {
+        navController.navigate(Routes.SEARCH) { launchSingleTop = true }
+    }
 }
 
 private object Routes {

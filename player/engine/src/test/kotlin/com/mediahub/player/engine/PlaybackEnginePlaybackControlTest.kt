@@ -2,11 +2,13 @@ package com.mediahub.player.engine
 
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
+import com.mediahub.model.ResumeSeekMode
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
@@ -19,6 +21,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -83,6 +86,20 @@ class PlaybackEnginePlaybackControlTest {
             val ended = events.single { it.kind == PlaybackEvent.Ended }
             assertEquals(original.itemId, ended.progress!!.itemId)
             assertEquals(20_000L, ended.progress!!.positionMs)
+        } finally { engine.release() }
+    }
+
+    /** 条目 124：续播精度必须真实下发到 ExoPlayer，而不是只存在偏好里。 */
+    @Test
+    fun `resume seek mode is handed to ExoPlayer seek parameters`() = runTest {
+        val native = ControlledPlayer()
+        val engine = PlaybackEngine(native.proxy(), PlaybackHeadersHolder(), NoLogger, backgroundScope, PlaybackSpeedMonitor())
+        try {
+            engine.play(session().copy(resumeSeekMode = ResumeSeekMode.EXACT))
+            assertSame(SeekParameters.EXACT, native.seekParameters)
+
+            engine.play(session().copy(resumeSeekMode = ResumeSeekMode.KEYFRAME))
+            assertSame(SeekParameters.CLOSEST_SYNC, native.seekParameters)
         } finally { engine.release() }
     }
 
@@ -232,6 +249,7 @@ class PlaybackEnginePlaybackControlTest {
         var playWhenReady = false
         var playbackState = Player.STATE_READY
         var suppressed = false
+        var seekParameters: SeekParameters? = null
         private var positionMs = 0L
         val isPlaying get() = playWhenReady && playbackState == Player.STATE_READY && !suppressed
         fun advanceBy(durationMs: Long) { if (isPlaying) positionMs += durationMs }
@@ -256,6 +274,7 @@ class PlaybackEnginePlaybackControlTest {
             "pause" -> { requestPlayback(false); null }
             "play" -> { requestPlayback(true); null }
             "seekTo" -> { positionMs = args!![0] as Long; null }
+            "setSeekParameters" -> { seekParameters = args!![0] as SeekParameters; null }
             "getCurrentPosition" -> positionMs
             "getDuration" -> 90_000L
             "getPlaybackState" -> playbackState

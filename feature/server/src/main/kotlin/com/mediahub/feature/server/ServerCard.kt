@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import com.mediahub.model.MediaServer
 import com.mediahub.provider.api.AuthSessionErrorKind
 import com.mediahub.provider.api.AuthSessionState
+import com.mediahub.provider.api.ProviderErrorText
 
 /**
  * 媒体源卡片（首页"媒体库"与详情共用）。
@@ -30,6 +31,8 @@ fun ServerCard(
     authState: AuthSessionState? = null,
     onLogout: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null,
+    isHome: Boolean = false,
+    onSetAsHome: (() -> Unit)? = null,
 ) {
     com.mediahub.core.ui.MediaHubCard(
         onClick = onClick,
@@ -68,6 +71,17 @@ fun ServerCard(
                     )
                 }
                 Column(horizontalAlignment = Alignment.End) {
+                    if (isHome) {
+                        Text(
+                            text = "首页",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    } else if (onSetAsHome != null) {
+                        TextButton(onClick = onSetAsHome) {
+                            Text("设为首页", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
                     if (server.isDefault) {
                         Text(
                             text = "默认",
@@ -92,10 +106,12 @@ fun ServerCard(
                 ) {
                     server.lastError?.let { error ->
                         Text(
-                            text = "上次错误：$error",
+                            // 审计条目 83：历史错误文本经共享映射转成准确文案（403≠密码错误），
+                            // 绝不直接外显原始 message；放手 2 行保留省略号。
+                            text = "上次错误：" + ProviderErrorText.fromStoredLastError(error),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }

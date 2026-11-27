@@ -29,6 +29,10 @@ class PlaybackError(
         DNS_ERROR("无法解析服务器地址"),
         TLS_ERROR("TLS 连接失败，请检查服务器证书"),
         DECODER_ERROR("解码器错误"),
+    /** 渲染表面/共享纹理创建失败（缺陷 47）；可先尝试重绑 Surface，仍失败再降级。 */
+    SURFACE_ERROR("画面渲染失败，已尝试恢复"),
+    /** 媒体数据访问失败（缺陷 87）；通常是权限或文件被移动，降级内核救不回。 */
+    DATA_ACCESS_ERROR("无法访问媒体数据，请重新授权或选择文件"),
         UNSUPPORTED_CODEC("当前设备不支持该编码格式"),
         DRM_ERROR("DRM 错误"),
         TRANSCODE_ERROR("服务器转码失败"),

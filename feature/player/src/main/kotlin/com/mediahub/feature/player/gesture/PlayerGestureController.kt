@@ -65,6 +65,10 @@ class PlayerGestureController(
     /** 竖向亮度/音量指示（null = 未在竖滑）。 */
     val levelPreview: StateFlow<GestureLevelPreview?> = _levelPreview.asStateFlow()
 
+    private val _zoom = MutableStateFlow(1f)
+    /** 画面手动缩放倍率（1.0x..3.0x，缺陷 33）。 */
+    val zoom: StateFlow<Float> = _zoom.asStateFlow()
+
     private var scrubAnchorMs = 0L
     private var savedPermanentSpeed = 1f
     private var brightnessAnchor = 0f
@@ -73,6 +77,8 @@ class PlayerGestureController(
     private var rewindTargetMs = 0L
     /** 长按方向模式：true=rewind，false=正向倍速。 */
     private var longPressIsRewind = false
+    /** 双指缩放开始时锁定的倍率锚点（缺陷 33）。 */
+    private var zoomAnchor = 1f
 
     // ---- 单击 ----
 
@@ -80,25 +86,54 @@ class PlayerGestureController(
         actions.onOverlayToggle()
     }
 
-    // ---- 双击：40% / 20% / 40% 三区 ----
+    // ---- 双击：40% / 20% / 40% 三区（可开启最外侧 10% 显隐，缺陷 34） ----
 
     fun onDoubleTap(xFraction: Float) {
         val g = gestures()
-        val backward = xFraction < DOUBLE_TAP_LEFT
-        val forward = xFraction > DOUBLE_TAP_RIGHT
-        val enabled = when {
-            backward -> g.doubleTapSeekBackwardEnabled
-            forward -> g.doubleTapSeekForwardEnabled
-            else -> false // 中间 20% 永远暂停/继续
+        when (PlayerGestureZonePolicy.doubleTapZone(xFraction, g.doubleTapSidesToggleOverlay)) {
+            DoubleTapZone.TOGGLE_OVERLAY_LEFT,
+            DoubleTapZone.TOGGLE_OVERLAY_RIGHT,
+            -> actions.onOverlayToggle()
+
+            DoubleTapZone.PLAY_PAUSE -> actions.onPlayPauseToggle()
+
+            DoubleTapZone.SEEK_BACKWARD -> {
+                if (g.doubleTapSeekBackwardEnabled) {
+                    val deltaMs = g.doubleTapSeekBackwardSeconds * 1000L
+                    actions.onCommitSeek(clampPosition(positionMs() - deltaMs))
+                } else {
+                    actions.onPlayPauseToggle()
+                }
+            }
+
+            DoubleTapZone.SEEK_FORWARD -> {
+                if (g.doubleTapSeekForwardEnabled) {
+                    val deltaMs = g.doubleTapSeekForwardSeconds * 1000L
+                    actions.onCommitSeek(clampPosition(positionMs() + deltaMs))
+                } else {
+                    actions.onPlayPauseToggle()
+                }
+            }
         }
-        if (enabled) {
-            val seconds = if (backward) g.doubleTapSeekBackwardSeconds else g.doubleTapSeekForwardSeconds
-            val deltaMs = seconds * 1000L * if (backward) -1L else 1L
-            actions.onCommitSeek(clampPosition(positionMs() + deltaMs))
-        } else {
-            // 未启用 seek 的区域（含中间 20%）→ 播放/暂停（不再受已删除的总开关控制）
-            actions.onPlayPauseToggle()
-        }
+    }
+
+    // ---- 双指缩放（缺陷 33） ----
+
+    fun onZoomStart() {
+        zoomAnchor = _zoom.value
+    }
+
+    /** [relativeScale] 为相对手势开始时的累计缩放比（1.0 = 不变）。 */
+    fun onZoomDelta(relativeScale: Float) {
+        _zoom.value = PlayerGestureZonePolicy.clampZoom(zoomAnchor * relativeScale)
+    }
+
+    fun onZoomEnd() = Unit
+
+    /** 恢复 1.0x 原始画面。 */
+    fun resetZoom() {
+        zoomAnchor = 1f
+        _zoom.value = 1f
     }
 
     // ---- 水平拖动 scrub ----

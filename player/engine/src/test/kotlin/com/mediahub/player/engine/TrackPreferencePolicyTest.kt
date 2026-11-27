@@ -49,6 +49,32 @@ class TrackPreferencePolicyTest {
     }
 
     @Test
+    fun `subtitle preference collapses to a single text language`() {
+        assertEquals(listOf("zh"), TrackPreferencePolicy.textLanguages("zh-Hans-CN"))
+        assertEquals(emptyList<String>(), TrackPreferencePolicy.textLanguages(null))
+        assertEquals(emptyList<String>(), TrackPreferencePolicy.textLanguages("  "))
+    }
+
+    @Test
+    fun `audio and subtitle preferences are both written into the selector`() {
+        val selector = TrackPreferencePolicy.prepare(
+            androidx.media3.exoplayer.trackselection.DefaultTrackSelector(appContext),
+            listOf("en"),
+            listOf("zh"),
+        )
+        assertEquals(listOf("en"), selector.parameters.preferredAudioLanguages.toList())
+        assertEquals(listOf("zh"), selector.parameters.preferredTextLanguages.toList())
+    }
+
+    @Test
+    fun `empty subtitle preference clears any previous text preference`() {
+        val selector = androidx.media3.exoplayer.trackselection.DefaultTrackSelector(appContext)
+        TrackPreferencePolicy.prepare(selector, listOf("en"), listOf("zh"))
+        TrackPreferencePolicy.prepare(selector, listOf("en"), emptyList())
+        assertTrue(selector.parameters.preferredTextLanguages.isEmpty())
+    }
+
+    @Test
     fun `production player factory seeds the selector with the system language preference`() {
         val previous = LocaleList.getDefault()
         try {
