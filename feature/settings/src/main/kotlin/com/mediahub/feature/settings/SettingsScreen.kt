@@ -108,7 +108,12 @@ fun SettingsRoute(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.settings_title)) },
+                title = {
+                    Text(
+                        stringResource(R.string.settings_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.settings_back))
@@ -439,15 +444,8 @@ private fun SettingsSection(
     title: String,
     content: @Composable () -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
+    com.mediahub.core.ui.MediaHubCard(modifier = Modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             com.mediahub.core.ui.MediaHubSectionHeader(title = title)
@@ -658,14 +656,8 @@ private fun AboutSection() {
 
     com.mediahub.core.ui.MediaHubSectionHeader(title = stringResource(R.string.settings_about))
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+    com.mediahub.core.ui.MediaHubCard(modifier = Modifier.fillMaxWidth()) {
+        Column {
             Text(
                 stringResource(R.string.settings_product_name),
                 style = MaterialTheme.typography.titleMedium,

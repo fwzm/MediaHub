@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import com.mediahub.core.ui.MediaHubCard
 import com.mediahub.core.ui.MediaHubLabel
 import com.mediahub.core.ui.ThumbImageWithProgress
+import com.mediahub.core.ui.theme.MediaHubSpacing
 import com.mediahub.model.PlaybackProgress
 
 /** 首页与「查看全部」共用的继续观看卡片。 */
@@ -41,7 +42,7 @@ internal fun ContinueWatchingCard(
     MediaHubCard(
         modifier = modifier,
         onClick = onClick,
-        contentPadding = PaddingValues(10.dp),
+        contentPadding = PaddingValues(MediaHubSpacing.s),
     ) {
         Box {
             ThumbImageWithProgress(
@@ -56,7 +57,7 @@ internal fun ContinueWatchingCard(
                     .fillMaxWidth()
                     .background(
                         Brush.verticalGradient(
-                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f)),
+                            listOf(Color.Transparent, MaterialTheme.colorScheme.scrim.copy(alpha = 0.9f)),
                         ),
                     )
                     .padding(start = 12.dp, top = 32.dp, end = 12.dp, bottom = 14.dp),
@@ -64,7 +65,7 @@ internal fun ContinueWatchingCard(
                 Text(
                     text = progress.itemTitle ?: "未命名",
                     style = MaterialTheme.typography.titleSmall,
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -78,13 +79,13 @@ internal fun ContinueWatchingCard(
                         Text(
                             "剩余约 $remainingMinutes 分钟",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.8f),
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                         )
                     }
                     Icon(
                         Icons.Default.PlayArrow,
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = MaterialTheme.colorScheme.onSurface,
                     )
                 }
             }

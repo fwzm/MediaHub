@@ -62,11 +62,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.mediahub.core.ui.MediaHubAccentLine
 import com.mediahub.core.ui.MediaHubCard
 import com.mediahub.core.ui.MediaHubStatus
 import com.mediahub.core.ui.PosterImage
 import com.mediahub.core.ui.ThumbImage
+import com.mediahub.core.ui.theme.MediaHubSpacing
 import com.mediahub.provider.api.ProviderErrorText
 import com.mediahub.model.MediaFilter
 import com.mediahub.model.MediaFilterField
@@ -146,18 +146,15 @@ fun LibraryContent(
         topBar = {
             TopAppBar(
                 title = {
-                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Text(
-                            text = when (val s = state) {
-                                is LibraryUiState.Content -> s.libraryName
-                                else -> fallbackName.ifBlank { "媒体库" }
-                            },
-                            style = MaterialTheme.typography.titleLarge,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        MediaHubAccentLine()
-                    }
+                    Text(
+                        text = when (val s = state) {
+                            is LibraryUiState.Content -> s.libraryName
+                            else -> fallbackName.ifBlank { "媒体库" }
+                        },
+                        style = MaterialTheme.typography.headlineSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -219,7 +216,7 @@ fun LibraryContent(
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize().padding(padding),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                        contentPadding = PaddingValues(horizontal = MediaHubSpacing.l, vertical = MediaHubSpacing.m),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         items(s.libraries, key = { it.id }) { library ->
@@ -283,9 +280,9 @@ fun LibraryContent(
                         state = gridState,
                         columns = GridCells.Fixed(3),
                         modifier = Modifier.fillMaxSize().padding(padding),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(horizontal = MediaHubSpacing.l, vertical = MediaHubSpacing.m),
+                        horizontalArrangement = Arrangement.spacedBy(MediaHubSpacing.m),
+                        verticalArrangement = Arrangement.spacedBy(MediaHubSpacing.m),
                     ) {
                         if (s.canGoUp) {
                             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(3) }) {
@@ -523,7 +520,7 @@ private fun LibraryRow(library: MediaLibrary, onClick: () -> Unit) {
     MediaHubCard(
         modifier = Modifier.fillMaxWidth(),
         onClick = onClick,
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 20.dp),
+        contentPadding = PaddingValues(horizontal = MediaHubSpacing.l, vertical = MediaHubSpacing.l),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,

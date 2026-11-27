@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -59,6 +60,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mediahub.core.ui.BackdropImage
+import com.mediahub.core.ui.MediaHubStatus
 import com.mediahub.core.ui.PosterImage
 import com.mediahub.core.ui.ThumbImage
 import com.mediahub.feature.detail.source.shouldShowSourceSelector
@@ -105,7 +107,12 @@ fun DetailRoute(
             TopAppBar(
                 title = {
                     val displayTitle = (state as? DetailUiState.Content)?.detail?.item?.title ?: title
-                    Text(displayTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        displayTitle,
+                        style = MaterialTheme.typography.headlineSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -151,16 +158,19 @@ fun DetailRoute(
             DetailUiState.Loading -> Box(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center,
-            ) { CircularProgressIndicator() }
+            ) { MediaHubStatus(title = "正在载入详情", loading = true) }
 
             is DetailUiState.Error -> Box(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center,
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(s.message, color = MaterialTheme.colorScheme.error)
-                    TextButton(onClick = viewModel::load) { Text("重试") }
-                }
+                MediaHubStatus(
+                    title = "详情暂时无法载入",
+                    message = s.message,
+                    icon = Icons.Default.Refresh,
+                    retryLabel = "重试",
+                    onRetry = viewModel::load,
+                )
             }
 
             is DetailUiState.Content -> Column(

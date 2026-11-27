@@ -30,13 +30,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.mediahub.core.ui.MediaHubAccentLine
 import com.mediahub.core.ui.MediaHubSectionHeader
 import com.mediahub.core.ui.MediaHubStatus
+import com.mediahub.core.ui.theme.MediaHubSpacing
 import com.mediahub.feature.server.ServerCard
 import com.mediahub.model.MediaServer
 import com.mediahub.model.PlaybackProgress
@@ -132,13 +131,7 @@ fun HomeContent(
         topBar = {
             TopAppBar(
                 title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        MediaHubAccentLine()
-                        Text("MediaHub", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    }
+                    Text("MediaHub", style = MaterialTheme.typography.headlineSmall)
                 },
                 actions = {
                     IconButton(onClick = onOpenSearch) {
@@ -154,7 +147,7 @@ fun HomeContent(
         floatingActionButton = {
             androidx.compose.material3.FloatingActionButton(onClick = onAddServer) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 20.dp),
+                    modifier = Modifier.padding(horizontal = MediaHubSpacing.l),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -166,8 +159,14 @@ fun HomeContent(
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(start = 20.dp, top = 10.dp, end = 20.dp, bottom = 100.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(
+                start = MediaHubSpacing.l,
+                top = MediaHubSpacing.l,
+                end = MediaHubSpacing.l,
+                // 100dp：给悬浮「添加媒体库」按钮留出不被最后一张卡片压住的空间。
+                bottom = 100.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(MediaHubSpacing.m),
         ) {
             item {
                 Text(
@@ -181,7 +180,7 @@ fun HomeContent(
                     MediaHubSectionHeader(
                         title = "继续观看",
                         subtitle = selectedSource?.let { "当前首页：${it.label}" } ?: "从上次离开的地方继续",
-                        modifier = Modifier.padding(top = 12.dp),
+                        modifier = Modifier.padding(top = MediaHubSpacing.m),
                         action = {
                             if (selectedSource != null) {
                                 if (isTemporaryHome) {
@@ -201,7 +200,7 @@ fun HomeContent(
                 if (sourceOptions.isNotEmpty()) {
                     item {
                         // 数据源选择器只显示线路名称（条目 144），点击即临时切换首页（条目 117）。
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(MediaHubSpacing.s)) {
                             items(sourceOptions, key = { it.serverId }) { option ->
                                 FilterChip(
                                     selected = option.serverId == homeServerId,
@@ -222,7 +221,7 @@ fun HomeContent(
                     }
 
                     continueWatching.isNotEmpty() -> item {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(MediaHubSpacing.l)) {
                             items(continueWatching, key = { "${it.serverId}/${it.itemId}" }) { progress ->
                                 ContinueWatchingCard(
                                     progress = progress,
@@ -249,7 +248,7 @@ fun HomeContent(
                 MediaHubSectionHeader(
                     title = "媒体源",
                     subtitle = if (servers.isEmpty()) "连接你的媒体世界" else "${servers.size} 个媒体源",
-                    modifier = Modifier.padding(top = if (showContinueWatching) 24.dp else 16.dp),
+                    modifier = Modifier.padding(top = if (showContinueWatching) MediaHubSpacing.xl else MediaHubSpacing.l),
                 )
             }
             if (!loaded) {

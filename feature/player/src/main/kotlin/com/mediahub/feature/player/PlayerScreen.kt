@@ -125,6 +125,7 @@ import com.mediahub.core.ui.effects.FlowGlowClock
 import com.mediahub.core.ui.effects.rememberFlowGlowClock
 import com.mediahub.core.ui.effects.rememberPowerSaveMode
 import com.mediahub.core.ui.effects.rememberReduceMotion
+import com.mediahub.core.ui.theme.mediaHubSemanticColors
 import com.mediahub.feature.player.danmaku.DanmakuCountBadge
 import com.mediahub.feature.player.danmaku.DanmakuOverlay
 import com.mediahub.feature.player.danmaku.DanmakuSheet
@@ -728,7 +729,7 @@ fun PlayerRoute(
                         } else {
                             stringResource(R.string.player_audio_unsupported)
                         },
-                        color = Color.Yellow,
+                        color = MaterialTheme.mediaHubSemanticColors.warning,
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier
                             .align(Alignment.TopCenter)
