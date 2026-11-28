@@ -142,8 +142,8 @@ class SwitchablePlaybackEngineSurfaceRecoveryTest {
         override fun setPlayWhenReady(play: Boolean) { playWhenReadySet = play }
         override fun seekTo(positionMs: Long, mode: SeekMode) { seekedTo = positionMs }
         override fun setSpeed(speed: Float) = Unit
-        override fun selectAudioTrack(selection: TrackSelection?) = Unit
-        override fun selectSubtitleTrack(selection: TrackSelection?) = Unit
+        override fun selectAudioTrack(selection: TrackSelection?) = true
+        override fun selectSubtitleTrack(selection: TrackSelection?) = true
         override fun setSubtitlePresentation(style: SubtitleStyle, sizeSp: Int) = Unit
         override fun stop(): PlaybackProgress? = null
         override fun release() = Unit
