@@ -331,12 +331,14 @@ class PlayerTrackPreferenceTest {
         override fun togglePlayPause() = Unit
         override fun seekTo(positionMs: Long, mode: SeekMode) = Unit
         override fun setSpeed(speed: Float) = Unit
-        override fun selectAudioTrack(selection: TrackSelection?) {
+        override fun selectAudioTrack(selection: TrackSelection?): Boolean {
             audioSelections += selection
+            return true
         }
 
-        override fun selectSubtitleTrack(selection: TrackSelection?) {
+        override fun selectSubtitleTrack(selection: TrackSelection?): Boolean {
             subtitleSelections += selection
+            return true
         }
 
         fun emitEvent(event: PlaybackEventMessage) {

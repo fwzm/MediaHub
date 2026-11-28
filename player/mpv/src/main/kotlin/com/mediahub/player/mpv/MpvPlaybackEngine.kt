@@ -310,9 +310,11 @@ class MpvPlaybackEngine internal constructor(
                     val desiredPlay = synchronized(stateLock) { run.requestedPlayWhenReady }
                     if (desiredPlay != null) {
                         m.setPropertyBoolean("pause", !desiredPlay)
-                        withCurrent(run) { _uiState.update {
-                            it.copy(isPlaying = it.isPlaying && desiredPlay, playWhenReady = desiredPlay)
-                        } }
+                        withCurrent(run) {
+                            _uiState.update {
+                                it.copy(isPlaying = it.isPlaying && desiredPlay, playWhenReady = desiredPlay)
+                            }
+                        }
                     }
                     // Surface changes made while init was unpublished must not block Main or get lost.
                     val latestSurface = synchronized(stateLock) { attachedSurface }
@@ -345,67 +347,78 @@ class MpvPlaybackEngine internal constructor(
     }
 
     private fun observer(run: Run) = object : MpvInstance.Observer {
-        override fun property(name: String, value: Boolean) = withCurrent(run) {
-            // G3：pause 属性同时表达「是否暂停」，因此它既是实际状态也是用户意图。
-            if (name == "pause") _uiState.update { it.copy(isPlaying = !value, playWhenReady = !value) }
-        }
-        override fun property(name: String, value: Double) = withCurrent(run) {
-            when (name) {
-                "time-pos" -> _uiState.update { it.copy(positionMs = (value * 1000).toLong()) }
-                "duration" -> if (value > 0) _uiState.update { it.copy(durationMs = (value * 1000).toLong()) }
-                "speed" -> _uiState.update { it.copy(speed = value.toFloat()) }
-                "width" -> if (value > 0) _uiState.update { it.copy(videoWidth = value.toInt()) }
-                "height" -> if (value > 0) _uiState.update { it.copy(videoHeight = value.toInt()) }
+        override fun property(name: String, value: Boolean) {
+            withCurrent(run) {
+                // G3：pause 属性同时表达「是否暂停」，因此它既是实际状态也是用户意图。
+                if (name == "pause") _uiState.update { it.copy(isPlaying = !value, playWhenReady = !value) }
             }
         }
-        override fun property(name: String, value: String) = withCurrent(run) {
-            // The session owns a known item title; native media-title can be a bridge transport filename.
-            if (name == "media-title" && run.session.itemTitle.isBlank()) _uiState.update { it.copy(mediaTitle = value) }
-        }
-        override fun event(event: MpvInstance.Event) = withCurrent(run) {
-            val tr = run.session.trace
-            when (event) {
-                MpvInstance.Event.FILE_LOADED -> {
-                tr?.record(PlaybackStartupTrace.Milestone.MPV_FILE_LOADED)
-                // V15-A：文件加载完成即枚举音轨（此前从不发布 audioTracks → 面板恒为空）
-                withNative(run) { _, m -> refreshTracks(run, m) }
+        override fun property(name: String, value: Double) {
+            withCurrent(run) {
+                when (name) {
+                    "time-pos" -> _uiState.update { it.copy(positionMs = (value * 1000).toLong()) }
+                    "duration" -> if (value > 0) _uiState.update { it.copy(durationMs = (value * 1000).toLong()) }
+                    "speed" -> _uiState.update { it.copy(speed = value.toFloat()) }
+                    "width" -> if (value > 0) _uiState.update { it.copy(videoWidth = value.toInt()) }
+                    "height" -> if (value > 0) _uiState.update { it.copy(videoHeight = value.toInt()) }
+                }
             }
-                MpvInstance.Event.VIDEO_RECONFIG -> {
-                    tr?.record(PlaybackStartupTrace.Milestone.MPV_VIDEO_RECONFIG)
-                    tr?.record(PlaybackStartupTrace.Milestone.FIRST_FRAME_RENDERED)
-                    tr?.let { logger.i(LogTag.PLAYER, "StartupTrace ${it.summary()}") }
-                }
-                MpvInstance.Event.AUDIO_RECONFIG -> {
-                    tr?.record(PlaybackStartupTrace.Milestone.AUDIO_INPUT_FORMAT_SEEN)
-                    withNative(run) { _, m -> refreshTracks(run, m) }
-                }
-                MpvInstance.Event.END_FILE -> {
-                    // SEEK-B 真机缺陷修复：到达 EOF 时必须更新 UI 状态。
-                    //
-                    // 此前只发 PlaybackEvent.Ended，**从不更新 _uiState.isEnded**；
-                    // 而进度循环里的 `eof-reached` 在 mpv 结束后不一定可读。
-                    // 结果：画面已冻结在最后一帧，但按钮仍显示「暂停」（isPlaying/playWhenReady 仍为 true），
-                    // 用户无法用播放按钮恢复 —— 真机实测（123e243f）截图 sha256 完全相同。
-                    //
-                    // 修复：EOF 时同时置 isEnded = true、playWhenReady = false，
-                    // 让 UI 的 `showPauseIcon = playWhenReady && !isEnded`（G3 已加）真正生效。
-                    withCurrent(run) {
-                        val progress = progressSnapshot(run, null,
-                            _uiState.value.copy(isEnded = true, playWhenReady = false))
-                        _uiState.update { it.copy(isEnded = true, playWhenReady = false) }
-                        _events.trySend(PlaybackEventSnapshot(PlaybackEvent.Ended, progress))
+        }
+
+        override fun property(name: String, value: String) {
+            withCurrent(run) {
+                // The session owns a known item title; native media-title can be a bridge transport filename.
+                if (name == "media-title" && run.session.itemTitle.isBlank()) _uiState.update { it.copy(mediaTitle = value) }
+            }
+        }
+
+        override fun event(event: MpvInstance.Event) {
+            withCurrent(run) {
+                val tr = run.session.trace
+                when (event) {
+                    MpvInstance.Event.FILE_LOADED -> {
+                        tr?.record(PlaybackStartupTrace.Milestone.MPV_FILE_LOADED)
+                        // V15-A：文件加载完成即枚举音轨（此前从不发布 audioTracks → 面板恒为空）
+                        withNative(run) { _, m -> refreshTracks(run, m) }
+                    }
+                    MpvInstance.Event.VIDEO_RECONFIG -> {
+                        tr?.record(PlaybackStartupTrace.Milestone.MPV_VIDEO_RECONFIG)
+                        tr?.record(PlaybackStartupTrace.Milestone.FIRST_FRAME_RENDERED)
+                        tr?.let { logger.i(LogTag.PLAYER, "StartupTrace ${it.summary()}") }
+                    }
+                    MpvInstance.Event.AUDIO_RECONFIG -> {
+                        tr?.record(PlaybackStartupTrace.Milestone.AUDIO_INPUT_FORMAT_SEEN)
+                        withNative(run) { _, m -> refreshTracks(run, m) }
+                    }
+                    MpvInstance.Event.END_FILE -> {
+                        // SEEK-B 真机缺陷修复：到达 EOF 时必须更新 UI 状态。
+                        //
+                        // 此前只发 PlaybackEvent.Ended，**从不更新 _uiState.isEnded**；
+                        // 而进度循环里的 `eof-reached` 在 mpv 结束后不一定可读。
+                        // 结果：画面已冻结在最后一帧，但按钮仍显示「暂停」（isPlaying/playWhenReady 仍为 true），
+                        // 用户无法用播放按钮恢复 —— 真机实测（123e243f）截图 sha256 完全相同。
+                        //
+                        // 修复：EOF 时同时置 isEnded = true、playWhenReady = false，
+                        // 让 UI 的 `showPauseIcon = playWhenReady && !isEnded`（G3 已加）真正生效。
+                        withCurrent(run) {
+                            val progress = progressSnapshot(run, null,
+                                _uiState.value.copy(isEnded = true, playWhenReady = false))
+                            _uiState.update { it.copy(isEnded = true, playWhenReady = false) }
+                            _events.trySend(PlaybackEventSnapshot(PlaybackEvent.Ended, progress))
+                        }
                     }
                 }
+                logger.i(LogTag.PLAYER, "mpv $event ttff=${elapsedRealtime() - run.requestedAtMs}ms")
             }
-            logger.i(LogTag.PLAYER, "mpv $event ttff=${elapsedRealtime() - run.requestedAtMs}ms")
         }
     }
 
     private fun isCurrent(run: Run) = !released && current === run && generation == run.generation && run.acceptsUpdates
 
-    private inline fun withCurrent(run: Run, action: () -> Unit) {
-        synchronized(stateLock) { if (isCurrent(run)) action() }
-    }
+    private inline fun withCurrent(run: Run, action: () -> Unit): Boolean =
+        synchronized(stateLock) {
+            if (!isCurrent(run)) false else { action(); true }
+        }
 
     override fun setSubtitlePresentation(style: SubtitleStyle, sizeSp: Int) {
         val options = MpvSubtitlePresentation.options(style, sizeSp)
@@ -433,16 +446,20 @@ class MpvPlaybackEngine internal constructor(
         withNative(run, action)
     }
 
-    private fun withNative(run: Run, action: (Run, MpvInstance) -> Unit) {
+    /** 返回 true 表示命令在仍有效的 Run 上真正执行；false = 未生效（调用方须提示）。 */
+    private fun withNative(run: Run, action: (Run, MpvInstance) -> Unit): Boolean {
         // An expected Run is required after suspension; never borrow the newer current Run.
-        if (run.resources == null) return
+        if (run.resources == null) return false
+        var applied = false
         nativeOutsideStateLock {
             synchronized(nativeLock) {
                 val resources = run.resources ?: return@synchronized
                 if (resources.closed || synchronized(stateLock) { !isCurrent(run) }) return@synchronized
                 action(run, resources.mpv)
+                applied = true
             }
         }
+        return applied
     }
 
     override fun attachSurface(surface: Surface?) {
@@ -524,19 +541,18 @@ class MpvPlaybackEngine internal constructor(
      * 需解析成 mpv 的 aid（track id，≠ stream index）；null → aid=no。
      * 选择无效时不下发命令，避免静默把 aid 设成错误值。
      */
-    override fun selectAudioTrack(selection: TrackSelection?) {
-        if (!isTrackSelectionCurrent(selection)) return
-        val run = synchronized(stateLock) { current } ?: return
+    override fun selectAudioTrack(selection: TrackSelection?): Boolean {
+        if (!isTrackSelectionCurrent(selection)) return false
+        val run = synchronized(stateLock) { current } ?: return false
         val trackList = synchronized(stateLock) { run.mpvTrackList.orEmpty() }
         val aid = MpvTrackMapper.nativeAudioId(trackList, selection) ?: run {
-            if (selection != null) return // 无效序号：保持现状，不伪造成功
+            if (selection != null) return false // 无效序号：保持现状，不伪造成功
             "no"
         }
-        withCurrent(run) {
-            withNative { _, m -> m.command(arrayOf("set", "aid", aid)) }
-            // 立即用 native 实际值回填，避免乐观 UI（失败时保持真实状态）
-            withNative(run) { _, m -> refreshTracks(run, m) }
-        }
+        if (!withNative(run) { _, m -> m.command(arrayOf("set", "aid", aid)) }) return false
+        // 立即用 native 实际值回填，避免乐观 UI（失败时保持真实状态）
+        withNative(run) { _, m -> refreshTracks(run, m) }
+        return true
     }
 
     /**
@@ -590,15 +606,15 @@ class MpvPlaybackEngine internal constructor(
             ) }
         }
     }
-    override fun selectSubtitleTrack(selection: TrackSelection?) {
-        if (!isTrackSelectionCurrent(selection)) return
-        val run = synchronized(stateLock) { subtitleOperation++; current } ?: return
+    override fun selectSubtitleTrack(selection: TrackSelection?): Boolean {
+        if (!isTrackSelectionCurrent(selection)) return false
+        val run = synchronized(stateLock) { subtitleOperation++; current } ?: return false
         val rows = synchronized(stateLock) { run.mpvTrackList }
         val sid = MpvTrackMapper.nativeSubtitleId(rows, selection) ?: run {
-            if (selection != null) return
+            if (selection != null) return false
             "no"
         }
-        withNative(run) { _, m ->
+        return withNative(run) { _, m ->
             m.command(arrayOf("set", "sid", sid))
             refreshTracks(run, m)
         }

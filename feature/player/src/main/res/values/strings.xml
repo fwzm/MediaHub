@@ -119,6 +119,8 @@
     <string name="player_info_hdr10_plus" translatable="false">HDR10+</string>
     <string name="player_info_hlg" translatable="false">HLG</string>
     <string name="player_info_dolby_vision" translatable="false">Dolby Vision</string>
+    <string name="player_track_selection_stale">轨道列表已变化，请重新选择</string>
+    <string name="player_track_selection_failed">轨道切换未生效，请重试</string>
     <string name="player_danmaku">弹幕</string>
     <string name="player_danmaku_entry_description">打开弹幕设置</string>
     <string name="player_danmaku_count">%1$s</string>

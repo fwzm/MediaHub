@@ -21,6 +21,7 @@ import com.mediahub.core.download.DownloadedMediaLocator
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.ui.effects.VisualPalette
+import com.mediahub.model.AudioTrack
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
 import com.mediahub.model.MediaTypeGuesser
@@ -33,7 +34,6 @@ import com.mediahub.model.ProfessionalInfoPreferences
 import com.mediahub.model.ResumeSeekMode
 import com.mediahub.model.SubtitleStyle
 import com.mediahub.model.SubtitleFormats
-import com.mediahub.model.AudioTrack
 import com.mediahub.model.SubtitleTrack
 import com.mediahub.model.UpNextResolver
 import com.mediahub.player.engine.EnginePreferenceHistory
@@ -91,6 +91,15 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.coroutines.coroutineContext
+
+/** 轨道选择未生效的原因（#80：UI 必须给出可见反馈）。 */
+enum class TrackSelectionIssue {
+    /** 轨道快照已变化或地址无法映射——按旧列表重选不会命中任何轨道。 */
+    STALE,
+
+    /** 地址有效但引擎未接受（渲染器/原生播放器拒绝或尚未就绪）。 */
+    REJECTED,
+}
 
 /** 播放源解析状态。 */
 sealed interface ResolveState {
@@ -269,6 +278,11 @@ class PlayerViewModel @Inject constructor(
 
     /** 当前内核（UI 徽标/诊断）。 */
     val engineKind: StateFlow<com.mediahub.player.engine.EngineKind> get() = switchableEngine.engineKind
+
+    private val _trackSelectionIssue = MutableSharedFlow<TrackSelectionIssue>(extraBufferCapacity = 1)
+
+    /** 轨道选择未生效的一次性事件（UI 用 Snackbar 提示，不静默吞掉）。 */
+    val trackSelectionIssue: SharedFlow<TrackSelectionIssue> = _trackSelectionIssue
 
 
     /**
@@ -663,14 +677,22 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    /**
-     * 音轨手动选择（清单 6/78）：立即生效并记录身份，供下一集自动继承。
-     */
+    /** 音轨手动选择（清单 6/78）：失败必须可见（#80）；成功则记录身份，供下一集自动继承。 */
     fun onAudioTrackSelected(track: AudioTrack) {
         if (stopped) return
-        val selection = PlayerTrackSelection.addressOf(engine.uiState.value, track, engine.kind) ?: return
-        if (!engine.isTrackSelectionCurrent(selection)) return
-        engine.selectAudioTrack(selection)
+        val selection = PlayerTrackSelection.addressOf(engine.uiState.value, track, engineKind.value)
+        if (selection == null) {
+            reportTrackSelectionIssue(TrackSelectionIssue.STALE)
+            return
+        }
+        if (!engine.isTrackSelectionCurrent(selection)) {
+            reportTrackSelectionIssue(TrackSelectionIssue.STALE)
+            return
+        }
+        if (!engine.selectAudioTrack(selection)) {
+            reportTrackSelectionIssue(TrackSelectionIssue.REJECTED)
+            return
+        }
         explicitAudioChoice = TrackIdentity(track.language, track.title)
     }
 
@@ -681,9 +703,19 @@ class PlayerViewModel @Inject constructor(
      */
     fun onEmbeddedSubtitleSelected(selection: TrackSelection?) {
         if (stopped) return
-        if (!engine.isTrackSelectionCurrent(selection)) return
+        commitEmbeddedSubtitleSelection(selection)
+    }
+
+    private fun commitEmbeddedSubtitleSelection(selection: TrackSelection?) {
+        if (!engine.isTrackSelectionCurrent(selection)) {
+            reportTrackSelectionIssue(TrackSelectionIssue.STALE)
+            return
+        }
+        if (!engine.selectSubtitleTrack(selection)) {
+            reportTrackSelectionIssue(TrackSelectionIssue.REJECTED)
+            return
+        }
         beginManualSubtitleOperation()
-        engine.selectSubtitleTrack(selection)
         _subtitleCenter.update { it.copy(selectedExternalId = null) }
         persistMemory(subtitleId = null)
         if (selection == null) explicitSubtitleChoice = SubtitleChoice.Off
@@ -697,7 +729,10 @@ class PlayerViewModel @Inject constructor(
     fun onSubtitleTrackSelected(track: SubtitleTrack?) {
         if (stopped) return
         val selection = PlayerTrackSelection.addressOf(engine.uiState.value, track, engine.kind)
-        if (track != null && selection == null) return
+        if (track != null && selection == null) {
+            reportTrackSelectionIssue(TrackSelectionIssue.STALE)
+            return
+        }
         onEmbeddedSubtitleSelected(selection)
         if (track != null) {
             explicitSubtitleChoice = SubtitleChoice.Selected(TrackIdentity(track.language, track.title))
@@ -761,6 +796,11 @@ class PlayerViewModel @Inject constructor(
                 ?.let { PlayerTrackSelection.addressOf(state, it, engine.kind) }
                 ?.let(engine::selectSubtitleTrack)
         }
+    }
+
+    private fun reportTrackSelectionIssue(issue: TrackSelectionIssue) {
+        logger.w(LogTag.PLAYER, "轨道选择未生效：$issue", null)
+        _trackSelectionIssue.tryEmit(issue)
     }
 
     /**

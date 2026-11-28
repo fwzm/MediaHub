@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.height
@@ -56,6 +57,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderColors
 import androidx.compose.material3.SliderDefaults
@@ -283,6 +286,24 @@ fun PlayerRoute(
     var showInfoPanel by remember { mutableStateOf(false) }
     var showDanmakuPanel by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    // #80：轨道选择失败不再静默。一次性事件 → Snackbar。
+    val snackbarHostState = remember { SnackbarHostState() }
+    val trackSelectionStaleMessage = stringResource(R.string.player_track_selection_stale)
+    val trackSelectionFailedMessage = stringResource(R.string.player_track_selection_failed)
+    LaunchedEffect(viewModel) {
+        viewModel.trackSelectionIssue.collect { issue ->
+            scope.launch {
+                snackbarHostState.showSnackbar(
+                    message = if (issue == TrackSelectionIssue.STALE) {
+                        trackSelectionStaleMessage
+                    } else {
+                        trackSelectionFailedMessage
+                    },
+                    withDismissAction = true,
+                )
+            }
+        }
+    }
 
     // 字幕中心（P2 切片一）：SAF 导入入口（真实 ACTION_OPEN_DOCUMENT）。
     // 回传即 persist uri（读权限），显示名经 contentResolver 查询后交给 ViewModel 入候选。
@@ -741,6 +762,12 @@ fun PlayerRoute(
                 }
             }
         }
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding(),
+            )
         }
     }
     val audioPermissionDecision = AudioSpectrumPermissionPolicy.resolve(
@@ -855,7 +882,6 @@ fun PlayerRoute(
 
     if (showAudioDialog) {
         val selectionSnapshot = engineState
-        val selectionKind = engineKind
         PlayerVisualTheme(palette = visualState.chromePalette) {
             AudioTrackSheet(
                 tracks = selectionSnapshot.audioTracks,
@@ -878,7 +904,11 @@ fun PlayerRoute(
                 offsetSupported = viewModel.engine.subtitleCapabilities.offsetAdjust,
                 onDismiss = { showSubtitleDialog = false },
                 onSelect = { track: SubtitleTrack? ->
-                    viewModel.onSubtitleTrackSelected(track)
+                    if (track == null) {
+                        viewModel.onEmbeddedSubtitleSelected(null)
+                    } else {
+                        viewModel.onSubtitleTrackSelected(track)
+                    }
                 },
                 onStyleChange = { newStyle -> viewModel.updateSubtitleStyle { newStyle } },
                 onSelectExternal = viewModel::selectExternalSubtitle,

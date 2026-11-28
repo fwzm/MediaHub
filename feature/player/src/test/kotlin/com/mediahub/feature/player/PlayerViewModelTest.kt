@@ -5,6 +5,8 @@ import com.mediahub.core.common.NavArgCodec
 import com.mediahub.core.database.prefs.UserPreferencesRepository
 import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
+import com.mediahub.core.database.repository.SubtitleMemoryEntry
+import com.mediahub.core.database.repository.SubtitleMemoryKeys
 import com.mediahub.core.download.DownloadRecord
 import com.mediahub.core.download.DownloadedMediaLocator
 import com.mediahub.core.logging.LogTag
@@ -16,9 +18,11 @@ import com.mediahub.model.MediaServer
 import com.mediahub.model.MediaType
 import com.mediahub.model.MediaVersion
 import com.mediahub.model.PlaybackOptions
+import com.mediahub.model.AudioTrack
 import com.mediahub.model.PlaybackMode
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
+import com.mediahub.model.SubtitleTrack
 import com.mediahub.model.PlaybackEngineMode
 import com.mediahub.model.ResumeSeekMode
 import com.mediahub.model.ServerType
@@ -29,6 +33,7 @@ import com.mediahub.player.engine.PlaybackEnginePort
 import com.mediahub.player.engine.PlaybackEvent
 import com.mediahub.player.engine.PlaybackSession
 import com.mediahub.player.engine.PlaybackUiState
+import com.mediahub.player.engine.TrackRowMap
 import com.mediahub.player.engine.TrackSelection
 import com.mediahub.player.engine.EngineKind
 import com.mediahub.provider.api.ConnectionStatus
@@ -53,6 +58,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -547,6 +553,165 @@ class PlayerViewModelTest {
         } finally { vm.stopAndFlush(); runCurrent() }
     }
 
+    // ---- #80：轨道选择失败必须可见 ----
+
+    private fun trackVm(
+        engine: FakeEngine,
+        store: FakeSubtitleMemoryStore = FakeSubtitleMemoryStore(),
+        item: MediaItem = mediaItemWithPoster("https://fixture.invalid/poster"),
+    ) = PlayerViewModel(
+        savedStateHandle = savedState("m1"),
+        serverStore = FakeServerStore(embyServer()),
+        progressStore = FakeProgressStore(resume = null),
+        subtitleMemoryStore = store,
+        registry = FakeRegistry(
+            detail = FakeDetail(item),
+            playback = FakePlayback(PlaybackSource("https://fixture.invalid/video.mp4")),
+        ),
+        media3EngineFactory = PlaybackEngineCreator { engine },
+        mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+        engineHistory = InMemoryEnginePreferenceHistory(),
+        userPreferencesRepository = FakeUserPreferences(),
+        artworkPaletteLoader = NoArtworkPalette,
+        logger = noOpLogger,
+    )
+
+    @Test
+    fun `audio track without a mapped address reports stale instead of doing nothing`() = runTest(dispatcher) {
+        val engine = FakeEngine()
+        val vm = trackVm(engine)
+        try {
+            runCurrent()
+            val issues = mutableListOf<TrackSelectionIssue>()
+            val collector = launch { vm.trackSelectionIssue.collect { issues += it } }
+            runCurrent()
+
+            vm.onAudioTrackSelected(AudioTrack(index = 0))
+            runCurrent()
+
+            assertEquals(listOf(TrackSelectionIssue.STALE), issues)
+            assertTrue(engine.audioSelections.isEmpty())
+            collector.cancel()
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `engine rejecting an audio selection reports rejected`() = runTest(dispatcher) {
+        val engine = FakeEngine().apply {
+            setUiState(PlaybackUiState(trackRowMap = TrackRowMap(audio = mapOf(0 to TrackSelection(0, 0)))))
+            audioResult = false
+        }
+        val vm = trackVm(engine)
+        try {
+            runCurrent()
+            val issues = mutableListOf<TrackSelectionIssue>()
+            val collector = launch { vm.trackSelectionIssue.collect { issues += it } }
+            runCurrent()
+
+            vm.onAudioTrackSelected(AudioTrack(index = 0))
+            runCurrent()
+
+            assertEquals(listOf(TrackSelectionIssue.REJECTED), issues)
+            assertEquals(listOf(TrackSelection(0, 0)), engine.audioSelections)
+            collector.cancel()
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `stale subtitle selection reports stale and never reaches the engine`() = runTest(dispatcher) {
+        val engine = FakeEngine().apply { selectionCurrent = false }
+        val vm = trackVm(engine)
+        try {
+            runCurrent()
+            val issues = mutableListOf<TrackSelectionIssue>()
+            val collector = launch { vm.trackSelectionIssue.collect { issues += it } }
+            runCurrent()
+
+            vm.onEmbeddedSubtitleSelected(TrackSelection(0, 0))
+            runCurrent()
+
+            assertEquals(listOf(TrackSelectionIssue.STALE), issues)
+            assertTrue(engine.subtitleSelections.isEmpty())
+            collector.cancel()
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `rejected subtitle selection keeps the remembered subtitle`() = runTest(dispatcher) {
+        val item = mediaItemWithPoster("https://fixture.invalid/poster")
+        val key = SubtitleMemoryKeys.forItem(item)
+        val store = FakeSubtitleMemoryStore().apply {
+            entries[key] = SubtitleMemoryEntry(
+                versionKey = key,
+                serverId = "srv-1",
+                subtitleId = "content://seed",
+                offsetMs = 0,
+                updatedAtEpochMs = 1L,
+            )
+        }
+        val engine = FakeEngine().apply { subtitleResult = false }
+        val vm = trackVm(engine, store, item)
+        try {
+            runCurrent()
+            val issues = mutableListOf<TrackSelectionIssue>()
+            val collector = launch { vm.trackSelectionIssue.collect { issues += it } }
+            runCurrent()
+
+            vm.onEmbeddedSubtitleSelected(TrackSelection(0, 0))
+            runCurrent()
+
+            assertEquals(listOf(TrackSelectionIssue.REJECTED), issues)
+            assertEquals(listOf<TrackSelection?>(TrackSelection(0, 0)), engine.subtitleSelections)
+            assertEquals("content://seed", store.entries[key]?.subtitleId)
+            collector.cancel()
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `successful track selections report no issue`() = runTest(dispatcher) {
+        val engine = FakeEngine().apply {
+            setUiState(
+                PlaybackUiState(
+                    trackRowMap = TrackRowMap(
+                        audio = mapOf(0 to TrackSelection(0, 0)),
+                        subtitle = mapOf(0 to TrackSelection(0, 0)),
+                    )
+                )
+            )
+        }
+        val vm = trackVm(engine)
+        try {
+            runCurrent()
+            val issues = mutableListOf<TrackSelectionIssue>()
+            val collector = launch { vm.trackSelectionIssue.collect { issues += it } }
+            runCurrent()
+
+            vm.onAudioTrackSelected(AudioTrack(index = 0))
+            vm.onSubtitleTrackSelected(SubtitleTrack(index = 0))
+            runCurrent()
+
+            assertTrue(issues.isEmpty())
+            assertEquals(listOf(TrackSelection(0, 0)), engine.audioSelections)
+            assertEquals(listOf<TrackSelection?>(TrackSelection(0, 0)), engine.subtitleSelections)
+            collector.cancel()
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
     /**
      * 条目 21：换源/换集时必须先把进度与缓冲状态清零，再等新源解析。
      * 旧实现在 Resolving 期间继续暴露上一个会话的 position/isBuffering。
@@ -808,12 +973,25 @@ class PlayerViewModelTest {
         override val downloadSpeedBps: StateFlow<Long> = MutableStateFlow(0L)
         override fun attachSurface(surface: android.view.Surface?) = Unit
         override fun play(session: PlaybackSession) { playCount++; presentationOnPlay = presentation; playedSession = session }
+        fun setUiState(state: PlaybackUiState) { ui.value = state }
         fun setState(state: PlaybackUiState) { ui.value = state }
         override fun togglePlayPause() = Unit
         override fun seekTo(positionMs: Long, mode: com.mediahub.player.engine.SeekMode) = Unit
         override fun setSpeed(speed: Float) = Unit
-        override fun selectAudioTrack(selection: TrackSelection?) = Unit
-        override fun selectSubtitleTrack(selection: TrackSelection?) = Unit
+        var audioResult = true
+        var subtitleResult = true
+        var selectionCurrent = true
+        val audioSelections = mutableListOf<TrackSelection>()
+        val subtitleSelections = mutableListOf<TrackSelection?>()
+        override fun isTrackSelectionCurrent(selection: TrackSelection?): Boolean = selectionCurrent
+        override fun selectAudioTrack(selection: TrackSelection?): Boolean {
+            selection?.let(audioSelections::add)
+            return audioResult
+        }
+        override fun selectSubtitleTrack(selection: TrackSelection?): Boolean {
+            subtitleSelections += selection
+            return subtitleResult
+        }
         fun emitProgress(value: PlaybackProgress) { progressFlow.tryEmit(value) }
         override fun stop(): PlaybackProgress? {
             onStop()

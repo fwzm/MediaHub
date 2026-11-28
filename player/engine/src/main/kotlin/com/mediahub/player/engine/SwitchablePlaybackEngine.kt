@@ -201,10 +201,12 @@ class SwitchablePlaybackEngine(
         current?.setSpeed(speed)
     }
 
-    override fun selectAudioTrack(selection: TrackSelection?) {
-        val engine = synchronized(stateLock) { if (released) return; current } ?: return
-        if (!engine.isTrackSelectionCurrent(selection)) return
-        if (synchronized(stateLock) { !released && current === engine }) engine.selectAudioTrack(selection)
+    override fun selectAudioTrack(selection: TrackSelection?): Boolean {
+        val engine = synchronized(stateLock) { if (released) return false; current } ?: return false
+        if (!engine.isTrackSelectionCurrent(selection)) return false
+        return synchronized(stateLock) {
+            if (!released && current === engine) engine.selectAudioTrack(selection) else false
+        }
     }
 
     override fun isTrackSelectionCurrent(selection: TrackSelection?): Boolean {
@@ -225,16 +227,18 @@ class SwitchablePlaybackEngine(
         engine?.setSubtitlePresentation(style, sizeSp)
     }
 
-    override fun selectSubtitleTrack(selection: TrackSelection?) {
-        val expected = synchronized(stateLock) { if (released) return; current }
-        if (selection != null && expected?.isTrackSelectionCurrent(selection) != true) return
+    override fun selectSubtitleTrack(selection: TrackSelection?): Boolean {
+        val expected = synchronized(stateLock) { if (released) return false; current } ?: return false
+        if (selection != null && !expected.isTrackSelectionCurrent(selection)) return false
         val engine = synchronized(stateLock) {
-            if (released || (selection != null && current !== expected)) return
+            if (released || (selection != null && current !== expected)) return false
             subtitleOperation++
             activeExternalSubtitle = null
             current
+        } ?: return false
+        return synchronized(stateLock) {
+            if (!released && current === engine) engine.selectSubtitleTrack(selection) else false
         }
-        engine?.selectSubtitleTrack(selection)
     }
 
     /** 外挂字幕能力 = 当前引擎的能力如实上报；无引擎时双双不支持。 */

@@ -724,8 +724,8 @@ class PlayerRouteVisualEffectsTest {
             uiState.value = uiState.value.copy(positionMs = positionMs)
         }
         override fun setSpeed(speed: Float) = Unit
-        override fun selectAudioTrack(selection: TrackSelection?) { audioSelection = selection }
-        override fun selectSubtitleTrack(selection: TrackSelection?) { subtitleSelection = selection; subtitleOff = selection == null }
+        override fun selectAudioTrack(selection: TrackSelection?): Boolean { audioSelection = selection; return true }
+        override fun selectSubtitleTrack(selection: TrackSelection?): Boolean { subtitleSelection = selection; subtitleOff = selection == null; return true }
         override fun stop(): PlaybackProgress? = null
         override fun release() = Unit
     }
