@@ -40,6 +40,11 @@ data class UserPreferences(
     val playerVisualEffects: PlayerVisualEffectsPreferences = PlayerVisualEffectsPreferences.Default,
     /** 播放专业信息面板（默认专业）：expertMode 只控制面板信息密度，不影响播放本身。 */
     val professionalInfo: ProfessionalInfoPreferences = ProfessionalInfoPreferences.Default,
+    /**
+     * 观影统计开关（条目 122）：关闭后不再产生新记录，并隐藏统计入口；
+     * **已有记录原样保留**，重新打开即可继续查看。
+     */
+    val watchStatsEnabled: Boolean = true,
     /** 弹幕显示、样式与在线源开关。 */
     val danmaku: DanmakuPreferences = DanmakuPreferences(),
     /**

@@ -235,6 +235,7 @@ object AppModule {
                 Migrations.MIGRATION_3_4,
                 Migrations.MIGRATION_4_5,
                 Migrations.MIGRATION_5_6,
+                Migrations.MIGRATION_6_7,
             )
             .build()
 
@@ -430,6 +431,20 @@ abstract class RegistryModule {
     @Binds
     @Singleton
     abstract fun bindProgressStore(impl: ProgressRepository): ProgressStore
+
+    /** 条目 141：观影统计读写面。 */
+    @Binds
+    @Singleton
+    abstract fun bindWatchStatsStore(
+        impl: com.mediahub.core.database.repository.WatchStatsRepository,
+    ): com.mediahub.core.database.repository.WatchStatsStore
+
+    /** 条目 141：播放器侧会话记录器。 */
+    @Binds
+    @Singleton
+    abstract fun bindWatchStatsRecorder(
+        impl: com.mediahub.core.database.repository.DefaultWatchStatsRecorder,
+    ): com.mediahub.core.database.repository.WatchStatsRecorder
 
     @Binds
     @Singleton

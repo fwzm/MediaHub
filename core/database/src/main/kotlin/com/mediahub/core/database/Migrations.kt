@@ -22,6 +22,50 @@ object Migrations {
         }
     }
 
+    /**
+     * 观影统计（条目 141/139）：新增本地观影会话表与隐藏内容标记表。
+     *
+     * 数据库版本 6→7：main 的 v6 已由搜索历史（条目 52/120）占用，本迁移顺延到 7；
+     * 只新增表、不触碰既有表，因此 upgrade 失败也不会回滚既有数据。
+     *
+     * - watch_sessions：一次播放会话一行（同会话 checkpoint 走 Upsert）；
+     * - hidden_content：统计侧无条件过滤的隐藏键（隐藏空间锁定与否不影响过滤）。
+     */
+    val MIGRATION_6_7 = object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS watch_sessions (" +
+                    "id TEXT NOT NULL, " +
+                    "serverId TEXT NOT NULL, " +
+                    "itemId TEXT NOT NULL, " +
+                    "itemType TEXT NOT NULL, " +
+                    "title TEXT NOT NULL, " +
+                    "watchedMs INTEGER NOT NULL, " +
+                    "startedAtEpochMs INTEGER NOT NULL, " +
+                    "endedAtEpochMs INTEGER NOT NULL, " +
+                    "positionStartMs INTEGER NOT NULL, " +
+                    "positionEndMs INTEGER NOT NULL, " +
+                    "durationMs INTEGER NOT NULL, " +
+                    "completed INTEGER NOT NULL, " +
+                    "PRIMARY KEY(id))",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_watch_sessions_startedAtEpochMs " +
+                    "ON watch_sessions(startedAtEpochMs)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_watch_sessions_serverId_itemId " +
+                    "ON watch_sessions(serverId, itemId)",
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS hidden_content (" +
+                    "serverId TEXT NOT NULL, " +
+                    "itemId TEXT NOT NULL, " +
+                    "hiddenAtEpochMs INTEGER NOT NULL, " +
+                    "PRIMARY KEY(serverId, itemId))",
+            )
+        }
+    }
     /** P2 字幕中心切片一：新增 subtitle_memory 表（匹配记忆，键=视频版本指纹）。 */
     /**
      * W6-B：servers 加跨设备来源同步身份（ADR-S001）。
