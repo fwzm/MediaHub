@@ -805,3 +805,44 @@
 
 ### 边界
 - 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；G7 恒 DO_NOT_MERGE。
+
+## Round 43（W6-113ap，2026-11-19）：控制台输出必须命名自己的套件
+
+### 切片动机
+- 第 23 层收 RunInfos 后，ResultSummary/Output/StdOut 仍是脚本里引用计数为 0 的子树；它是 runner 自己写的控制台记录，和 Results/Counters 是同一份报告的不同部分。
+- 真实失败语料（artifact 44120750161，767 行、6 个 Failed）的 StdOut 为 7,084 B，6 个失败 testName 全部出现在 StdOut，761 个 Passed 行的 testName 一个也没有出现；绿色语料 windows 504 B / webdav 556 B，各自都含自己的套件名。
+- 这对应 W6-113ao 的 next_action 第一候选（ResultSummary/Output/StdOut 与执行器诊断自洽），且不需要改基线 JSON。
+
+### 修法（只改 windows/tools/check-test-suite-baseline.ps1；基线零变化）
+- ResultSummary 必须有且只有一个直接子节点 Output，Output 内必须有且只有一个 StdOut。
+- StdOut 文本必须非空白，并且必须包含本套件名（$e.suite，MediaHub.Tests 或 MediaHub.WebDav.Tests）；缺失、重复、空白、错套件都 RED。
+- 读取沿用 ChildNodes + LocalName，避开 PowerShell XML adapter 把带默认命名空间的子元素压平成字符串的坑。
+- throw 位于第 23 层 RunInfos throw 之后，旧文案优先；细节上限 12 条。
+- 台阶行追加 `summaryOutput=<n> stdout=<n> nonBlank=<0|1> suiteNamed=<0|1>`。
+
+### 负向对照（EXECUTED）
+- 同一套 1973+104 行英文语料，old=D:/mh-verify/r44/gate-prev.ps1（第 23 层，2,121 行，sha256 20e3c53cda1cfd8f90ac1057b2819657e1fb3dc5c561bdd3fefe8390bc75826a），new=本层。
+- clean-green OLD=0 NEW=0；stdout-missing、stdout-blank、stdout-duplicate、stdout-wrong-suite、output-missing、output-duplicate 六个变异全部 OLD=0 NEW=1。
+- 六个 RED 的 broken 细节分别点名：0 个 StdOut + 空白、StdOut 空白、2 个 StdOut、StdOut 不命名套件、0 个 Output + 0 个 StdOut + 空白、2 个 Output + 2 个 StdOut。
+- 实现态 sha256 在矩阵前后一致；对照结束后 clean-green 复跑仍 OLD=0 NEW=0。
+
+### 真实语料
+- 本机 dotnet test：MediaHub.Tests 1973 passed / 0 failed / 0 skipped，exit 0；MediaHub.WebDav.Tests 104 / 0 / 0，exit 0（英文 UI）。
+- 新闸门 -ResultsDir ./artifacts/gate-corpus exit 0；两套件台阶行均为 summaryOutput=1 stdout=1 nonBlank=1 suiteNamed=1；combined tests=2077；只有基线增长 warning（1973 > 1959）。
+- 语料必须用英文 UI 生成：默认中文 UI 下 VSTest 写出本地化的 TestList 名，会触发第 20 层 listVocabulary 判据。
+
+### 数据源与规模
+- windows/tools/check-test-suite-baseline.ps1 121,162 B / 2,121 行 → 124,609 B / 2,176 行（+3,447 B / +55 行），0 个非 ASCII；sha256 b9c7e10b59db94e5d0f0c224c4374f26c6208f200e3ed21f9606e5b5e8b4d532。
+- 双 shell 语法：pwsh 7.6.10 与 Windows PowerShell 5.1.26100.10003 均 errors=0。
+
+### 提交与 exact-head CI（EXECUTED，40 位 SHA）
+- 提交 781d102421ea9f8ea322e5e72e9968d48d3e2da5（ci(windows): the console output must name its own suite (W6-113ap)），1 file changed / +55 insertions / 0 deletions，非 force push 到 feature/windows-w6-113ap-summary-output。
+- exact-head windows-ci：44479925035（push）success（push）；44479988695（pull_request）success（pull_request）。
+- 同 head Android CI：44479988666 取证时 in_progress（CI_PENDING；本提交只动 windows/tools，按 ADR-AUTO-001 继承）（本提交只动 windows/tools，android/core/feature/app 子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+- Draft PR #136（base main，stacked 在 #135 第 23 层之上）；G7 恒 DO_NOT_MERGE。
+
+### 锁
+- run-id w6-113-round4-20261119，owner lead，8 把资源锁（3 remote-ref + 5 worktree），本轮结束 release-plan 释放。
+
+### 边界
+- 只钉 TRX 结构；Windows GUI、两机 W6 同步 NOT_RUN；基线 JSON 未刷新（1973 > 1959 仅 warning）。

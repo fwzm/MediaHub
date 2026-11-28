@@ -1503,3 +1503,42 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 
 ### exact-head CI 验收
 - 代码 head c99ac346c8cdb248a55995c0f82d243d5461cd10：windows-ci 44475518066（push）/ 44475570854（pull_request）= success，push 日志台阶行 runInfos=0 … badOutcome=0（两套件）；同 head Android CI 44475570962 在取证时仍 in_progress（CI_PENDING）；本提交只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承。
+
+## 6.29 第二十四层口径：控制台输出必须命名自己的套件（W6-113ap）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| ResultSummary 恰有 1 个直接子节点 Output | ResultSummary | RED |
+| Output 内恰有 1 个 StdOut | ResultSummary/Output | RED |
+| StdOut 文本非空白 | StdOut | RED |
+| StdOut 必须命名本套件（MediaHub.Tests / MediaHub.WebDav.Tests） | StdOut 与 baseline suite | RED |
+
+### 为什么前二十三层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 15 层 | Counters 桶与结果行 outcome | StdOut 不是 outcome 桶 |
+| 第 22 层 | 每行 Output/ErrorInfo 与 verdict | ResultSummary 的控制台输出 |
+| 第 23 层 | ResultSummary/RunInfos 与 Failed/Error 行 | 同一 ResultSummary 下的 Output/StdOut |
+| 全层 | — | ResultSummary/Output/StdOut 在脚本里引用计数为 0 |
+
+### 依据（EXECUTED）
+- 真实失败 767 行语料：StdOut 7,084 B，6 个 Failed testName 全部出现，761 个 Passed testName 0 个出现；绿色 windows/webdav 语料分别 504/556 B，各自含自己的套件名。
+- 七例对照：clean-green 双绿；stdout-missing、stdout-blank、stdout-duplicate、stdout-wrong-suite、output-missing、output-duplicate 六个变异 old=0/new=1，各自触发本层的一个条件。
+
+### 数据源与规模
+- check-test-suite-baseline.ps1 121,162 → 124,609 B，2,121 → 2,176 行，0 非 ASCII，sha256 b9c7e10b59db94e5d0f0c224c4374f26c6208f200e3ed21f9606e5b5e8b4d532。
+- 台阶行：summaryOutput=<n> stdout=<n> nonBlank=<0|1> suiteNamed=<0|1>。
+
+### 负向对照
+- 七例矩阵全按预期；实现态 sha256 在对照前后一致，矩阵后 clean-green 复跑仍绿；旧层在六个变异上保持 PASS，证明新层不是旧层的重复。
+
+### 残留限制
+- 只要求 StdOut 含套件名，不要求 StdOut 必须包含所有失败 testName；message-only failure 没有栈时会出现假红。
+- 不核对 Output/StdOut 与 RunInfos 的文本交叉引用；不要求 StdOut 的发现/完成时间与 Times 精确对齐。
+- 语料必须英文 UI 生成，否则第 20 层的列表词表判据先 RED。
+
+### exact-head CI 验收
+- 代码 head 781d102421ea9f8ea322e5e72e9968d48d3e2da5：windows-ci 44479925035（push）success、44479988695（pull_request）success；同 head Android CI in_progress（CI_PENDING，仅改 windows/tools，按 ADR-AUTO-001 继承）（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。

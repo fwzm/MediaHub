@@ -205,6 +205,15 @@
 #   runInfos=<n> failedRows=<n> matched=<n> passed=<n> unmatched=<n> outside=<n>
 #   blankText=<n> wrongMachine=<n>.
 
+#   The summary also carries the runner's own console output: ResultSummary/Output/
+#   StdOut is what the test host printed while it discovered and ran this suite.
+#   Nothing above reads it, so a file whose output block was dropped, duplicated,
+#   blanked or copied from another suite keeps every count, every ErrorInfo and
+#   every RunInfo identical while the report no longer shows what the host ran.
+#   The gate now requires exactly one Output and one StdOut, a non-blank StdOut,
+#   and a StdOut that names the suite it belongs to; the ladder line records
+#   summaryOutput=<n> stdout=<n> nonBlank=<0|1> suiteNamed=<0|1>.
+
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
 #   total    > baseline -> green + warning (please refresh the baseline)
@@ -235,6 +244,11 @@
 #     Text, a timestamp outside Times, another machine, or an outcome that claims
 #     success - -> red: the failure log and the verdicts are two halves of the same
 #     report and no count above compares them
+#   a ResultSummary/Output/StdOut block that is missing, duplicated, blank, or
+#     whose text does not name the suite the file belongs to -> red: the console
+#     output is the host's record of what it ran, and a summary whose output block
+#     was dropped, copied from another suite, or left stale keeps every count
+#     identical.
 #   an outcome kind the baseline did not have appears, or a baseline outcome
 #     reports fewer rows -> red; an outcome reporting more rows -> green + warning
 #   a test id that is not unique inside one TRX, a definition whose id has no
@@ -1613,6 +1627,46 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): the ResultSummary/RunInfos list in $($e.file) does not describe the Failed/Error rows one for one while the total was $total - the failure log and the verdicts are two halves of the same report, so a file whose log lost an item, kept a stale item, named a passing row, or moved an item outside the run window can keep every count and every ErrorInfo identical. broken: $($runInfoProblems -join ', '). A TRX whose failure log contradicts its own verdicts was hand-merged or patched; regenerate it from a clean test run."
   }
 
+  # ResultSummary/Output/StdOut is the test host's own console text: what the
+  # runner printed while it discovered and executed this suite. No check above
+  # reads it, so a summary whose output was dropped, duplicated, blanked or
+  # copied from another suite keeps every count, every ErrorInfo and every
+  # RunInfo identical while the report no longer shows which suite produced it.
+  # The block is read by local name for the same adapter reason as ErrorInfo.
+  $summaryOutputBlocks = 0
+  $summaryStdOutBlocks = 0
+  $summaryStdOutText = ''
+  foreach ($summaryChild in @($xml.TestRun.ResultSummary.ChildNodes)) {
+    if ([string]$summaryChild.LocalName -ne 'Output') { continue }
+    $summaryOutputBlocks++
+    foreach ($outputChild in @($summaryChild.ChildNodes)) {
+      if ([string]$outputChild.LocalName -ne 'StdOut') { continue }
+      $summaryStdOutBlocks++
+      $summaryStdOutText = [string]$outputChild.InnerText
+    }
+  }
+  $summaryOutputProblems = @()
+  if ($summaryOutputBlocks -ne 1) {
+    $summaryOutputProblems += "the summary declares $summaryOutputBlocks Output block(s)"
+  }
+  if ($summaryStdOutBlocks -ne 1) {
+    $summaryOutputProblems += "the summary declares $summaryStdOutBlocks StdOut block(s)"
+  }
+  if ([string]::IsNullOrWhiteSpace($summaryStdOutText)) {
+    $summaryOutputProblems += 'the StdOut text is blank'
+  }
+  $summaryOutputNonBlank = [int](-not [string]::IsNullOrWhiteSpace($summaryStdOutText))
+  $summaryOutputNamesSuite = 0
+  if ($summaryOutputNonBlank -eq 1 -and $summaryStdOutText.IndexOf([string]$e.suite, [System.StringComparison]::Ordinal) -ge 0) {
+    $summaryOutputNamesSuite = 1
+  }
+  if ($summaryOutputNonBlank -eq 1 -and $summaryOutputNamesSuite -eq 0) {
+    $summaryOutputProblems += "the StdOut text does not name the suite '$($e.suite)'"
+  }
+  if ($summaryOutputProblems.Count -gt 0) {
+    throw "$($e.suite): the ResultSummary/Output/StdOut block in $($e.file) does not belong to this suite while the total was $total - the console output is the host's own record of what it ran, so a file whose output block was dropped, duplicated, blanked or copied from another suite can keep every count identical. broken: $($summaryOutputProblems -join ', '). A TRX whose console output contradicts its own suite was hand-merged or patched; regenerate it from a clean test run."
+  }
+
   # The verdict on top of the counters: ResultSummary/@outcome says how the whole
   # run ended, and no count above reads it. The rows and the buckets can agree with
   # each other while the verdict that summarises both is stale or invented - a file
@@ -1805,6 +1859,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"
   "$($e.suite): failureEvidence=$evidenceRows failed=$failedWithEvidence/$failedRows passed=$passedWithEvidence/$passedRows blankMessages=$blankFailureText duplicates=$duplicateEvidence"
   "$($e.suite): runInfos=$runInfoRows failedRows=$failedRows matched=$($matchedFailedNames.Count) passed=$runInfoForPassed unmatched=$runInfoUnmatched duplicateMatches=$runInfoDuplicates outside=$runInfoOutside blankText=$runInfoBlank wrongMachine=$runInfoWrongMachine badOutcome=$runInfoBadOutcome"
+  "$($e.suite): summaryOutput=$summaryOutputBlocks stdout=$summaryStdOutBlocks nonBlank=$summaryOutputNonBlank suiteNamed=$summaryOutputNamesSuite"
   "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot bound rows=$boundRows header id collisions=$headerCollisions"
   "$($e.suite): assemblyDeclaration=$assemblyPairs storage/codeBase pairs=$($assemblyPairs - $assemblyPairLostCount) same file adapters=$($adapterValues.Count)"
   "$($e.suite): listVocabulary=$listKnown/$listCount canonical names=$listCanonical distinct names=$($listNames.Count - $listNameBlank - $listNameDuplicates.Count) unreferenced lists=$($unreferencedLists.Count)"
