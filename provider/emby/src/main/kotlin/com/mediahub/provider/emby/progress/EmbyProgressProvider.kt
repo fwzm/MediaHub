@@ -10,7 +10,9 @@ import com.mediahub.model.PlaybackProgress
 import com.mediahub.provider.api.MediaProgressProvider
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.emby.EmbyProviderSupport
+import com.mediahub.provider.emby.api.CLIENT_PLAY_SESSION_PREFIX
 import com.mediahub.provider.emby.api.EmbyApiClient
+import com.mediahub.provider.emby.mapper.EmbyMediaItemMapper
 import com.mediahub.provider.emby.session.EmbySessionStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
@@ -51,8 +53,14 @@ import kotlinx.coroutines.sync.withLock
  *   （共享 ProgressSyncCoordinator 的 runCatching 保证不打断播放；401→AuthExpired
  *   交上层重新认证，**进度失败不清理 auth 会话**）；切换补发 Stopped 与 final Stopped
  *   best-effort；cancellation 一律原样透传。
- * - getContinueWatching/getResumePosition：v1 刻意空实现——本地"继续观看/续播"由
- *   Room 快照驱动（ProgressRepository，1B-2.1 真机已证）；远端列表聚合另行决策。
+ * - getContinueWatching/getResumePosition：读**服务端**进度（用户条目 38 / fnOS 兼容）——
+ *   `GET /Users/{userId}/Items/Resume` 与 `GET /Users/{userId}/Items/{itemId}?Fields=UserData`；
+ *   跨设备/重装后仍能续播。Resume 端点 404/405（老服务器/兼容服能力缺失）按空列表处理，
+ *   其它错误照常映射。本地 Room 快照仍是应用内续播的首选来源。
+ * - **兼容回写（fnOS）**：兜底会话 id（`mh-` 前缀，见 [CLIENT_PLAY_SESSION_PREFIX]）在最终
+ *   Stopped 之前 best-effort 补发一次 `/Sessions/Playing/Progress`（最终位置 + IsPaused=true），
+ *   因为部分兼容服只按 Progress 更新续播位置、忽略 Stopped 的 PositionTicks。
+ *   Progress 失败不得阻止 Stopped，也不改变三态收口与 cancellation 透传语义。
  */
 class EmbyProgressProvider(
     private val server: MediaServer,
@@ -176,6 +184,30 @@ class EmbyProgressProvider(
                         throw e
                     }
                 }
+                // 兼容回写（fnOS，用户条目 38）：兜底会话先把最终位置经 Progress 落库，
+                // 再发 Stopped——部分兼容服只按 Progress 更新续播位置、忽略 Stopped 的
+                // PositionTicks。best-effort：失败不得阻止 Stopped，也不改变三态收口。
+                if (sessionId.startsWith(CLIENT_PLAY_SESSION_PREFIX)) {
+                    try {
+                        api.playbackProgress(
+                            token,
+                            userId,
+                            progress.itemId,
+                            sessionId,
+                            ticks,
+                            isPaused = true,
+                            playMethod = playMethod,
+                        )
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        logger.w(
+                            LogTag.PROVIDER,
+                            "Emby 兼容会话最终 Progress 上报失败（best-effort） itemId=${progress.itemId}",
+                            e,
+                        )
+                    }
+                }
                 try {
                     api.playbackStopped(token, userId, progress.itemId, sessionId, ticks)
                 } catch (e: CancellationException) {
@@ -208,11 +240,36 @@ class EmbyProgressProvider(
                 ),
             )
 
-    /** v1 刻意空实现：本地"继续观看"由 Room 快照驱动（1B-2.1 真机已证）。 */
-    override suspend fun getContinueWatching(limit: Int): List<MediaItem> = emptyList()
+    /**
+     * 服务端"继续观看"（`GET /Users/{userId}/Items/Resume`；limit 钳到 1..50）。
+     * 映射失败（缺 Id 等）的条目被过滤，不让单条脏数据毁掉整个列表。
+     */
+    override suspend fun getContinueWatching(limit: Int): List<MediaItem> {
+        val (token, userId) = EmbyProviderSupport.requireSession(server, tokenStore, sessionStore)
+        return try {
+            api.getContinueWatching(token, userId, limit.coerceIn(1, MAX_CONTINUE_WATCHING_LIMIT))
+                .mapNotNull { EmbyMediaItemMapper.map(it, server.id) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw EmbyProviderSupport.mapError(server.id, e)
+        }
+    }
 
-    /** v1 刻意空实现：应用内续播位置由本地快照驱动；远端续播列表聚合另行决策。 */
-    override suspend fun getResumePosition(itemId: String): Long? = null
+    /**
+     * 单条目的服务端续播位置（`GET /Users/{userId}/Items/{itemId}?Fields=UserData`）。
+     * 返回 null = 服务端没有可用位置（缺失 / <= 0），调用方从 0 开始播放。
+     */
+    override suspend fun getResumePosition(itemId: String): Long? {
+        val (token, userId) = EmbyProviderSupport.requireSession(server, tokenStore, sessionStore)
+        return try {
+            api.getResumePosition(token, userId, itemId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw EmbyProviderSupport.mapError(server.id, e)
+        }
+    }
 
     /** Emby PlayMethod wire 值来自真实 PlaybackSource.mode（有据才发，无 mode 则省略）。 */
     private fun playMethod(progress: PlaybackProgress): String? = when (progress.mode) {
@@ -234,5 +291,8 @@ class EmbyProgressProvider(
 
         /** Long.MAX_VALUE / 10_000（≈29,247 年）；超过即钳，防乘法溢出为负。 */
         const val MAX_POSITION_MS = Long.MAX_VALUE / TICKS_PER_MILLIS
+
+        /** 继续观看单次拉取上限（防止误传巨大 Limit 把服务器打满）。 */
+        const val MAX_CONTINUE_WATCHING_LIMIT = 50
     }
 }

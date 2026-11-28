@@ -1,6 +1,5 @@
 package com.mediahub.core.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -137,13 +136,4 @@ fun MediaHubStatus(
             }
         }
     }
-}
-
-@Composable
-fun MediaHubAccentLine(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .size(width = 28.dp, height = 3.dp)
-            .background(MaterialTheme.colorScheme.primary, CircleShape),
-    )
 }

@@ -1,20 +1,29 @@
 package com.mediahub.app.navigation
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mediahub.app.R
 import com.mediahub.core.common.NavArgCodec
 import com.mediahub.feature.detail.DetailRoute
+import com.mediahub.feature.home.ContinueWatchingRoute
 import com.mediahub.feature.home.HomeRoute
 import com.mediahub.feature.library.LibraryRoute
 import com.mediahub.feature.library.favorites.FavoritesRoute
@@ -32,6 +41,21 @@ fun MediaHubNavHost() {
     NavHost(navController = navController, startDestination = Routes.HOME) {
 
         composable(Routes.HOME) {
+            // 首页返回键：首次提示、2s 内再按一次退出（避免用户以为一次返回无响应）。
+            val context = LocalContext.current
+            val activity = remember(context) { context.findActivity() }
+            val doubleBackExit = remember { DoubleBackExitController() }
+            BackHandler {
+                if (doubleBackExit.onBack()) {
+                    activity?.finish()
+                } else {
+                    Toast.makeText(
+                        context,
+                        R.string.home_press_back_again_to_exit,
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
             val homeEntry = navController.currentBackStackEntry
             // re-login 成功后 Home 状态立即刷新：观察导航返回的 auth_changed_server_id（评审 FINAL PATCH 3）
             var forceRestoreId by remember { mutableStateOf<String?>(null) }
@@ -59,14 +83,37 @@ fun MediaHubNavHost() {
                 },
                 onAddServer = { navController.navigate(Routes.ADD_SERVER) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                onOpenSearch = { navController.navigate(Routes.SEARCH) },
+                onOpenSearch = { openSearch(navController) },
                 onOpenItem = { progress ->
                     navController.navigate(
                         "detail/${progress.serverId}/${NavArgCodec.encode(progress.itemId)}" +
                             "?title=${Uri.encode(progress.itemTitle ?: "")}"
                     )
                 },
+                onOpenAllContinueWatching = { serverId, label ->
+                    navController.navigate(
+                        "continue?serverId=${Uri.encode(serverId)}&label=${Uri.encode(label)}"
+                    )
+                },
                 forceRestoreId = forceRestoreId,
+            )
+        }
+
+        composable(
+            route = "continue?serverId={serverId}&label={label}",
+            arguments = listOf(
+                navArgument("serverId") { type = NavType.StringType; defaultValue = "" },
+                navArgument("label") { type = NavType.StringType; defaultValue = "" },
+            ),
+        ) {
+            ContinueWatchingRoute(
+                onBack = { navController.popBackStack() },
+                onOpenItem = { progress ->
+                    navController.navigate(
+                        "detail/${progress.serverId}/${NavArgCodec.encode(progress.itemId)}" +
+                            "?title=${Uri.encode(progress.itemTitle ?: "")}"
+                    )
+                },
             )
         }
 
@@ -123,9 +170,13 @@ fun MediaHubNavHost() {
             com.mediahub.feature.settings.backup.BackupRoute(onBack = { navController.popBackStack() })
         }
 
-        composable(Routes.SEARCH) {
+        composable(Routes.SEARCH) { entry ->
+            val focusRequestToken by entry.savedStateHandle
+                .getStateFlow(SEARCH_FOCUS_REQUEST_KEY, 0)
+                .collectAsStateWithLifecycle()
             SearchRoute(
                 onBack = { navController.popBackStack() },
+                focusRequestToken = focusRequestToken,
                 onOpenItem = { item ->
                     // 搜索命中统一进 DetailRoute：Movie/Episode → 详情播放；
                     // Series → Series Detail（季 chips + EpisodeRow，1B-3.1 页面的正式入口）
@@ -208,7 +259,8 @@ fun MediaHubNavHost() {
                             "&type=" + Uri.encode(snapshot.type?.name.orEmpty()) +
                             "&runtime=" + (snapshot.runtimeMs?.toString().orEmpty()) +
                             "&poster=" + Uri.encode(snapshot.posterUrl.orEmpty()) +
-                            "&container=" + Uri.encode(snapshot.container.orEmpty())
+                            "&container=" + Uri.encode(snapshot.container.orEmpty()) +
+                            "&version=" + Uri.encode(snapshot.versionId.orEmpty())
                     )
                 },
                 onOpenItem = { item ->
@@ -232,7 +284,7 @@ fun MediaHubNavHost() {
         }
 
         composable(
-            route = "player/{serverId}/{itemId}?title={title}&type={type}&runtime={runtime}&poster={poster}&container={container}",
+            route = "player/{serverId}/{itemId}?title={title}&type={type}&runtime={runtime}&poster={poster}&container={container}&version={version}",
             arguments = listOf(
                 navArgument("serverId") { type = NavType.StringType },
                 navArgument("itemId") { type = NavType.StringType },
@@ -241,10 +293,34 @@ fun MediaHubNavHost() {
                 navArgument("runtime") { type = NavType.StringType; defaultValue = "" },
                 navArgument("poster") { type = NavType.StringType; defaultValue = "" },
                 navArgument("container") { type = NavType.StringType; defaultValue = "" },
+                navArgument("version") { type = NavType.StringType; defaultValue = "" },
             ),
         ) {
             PlayerRoute(onBack = { navController.popBackStack() })
         }
+    }
+}
+
+/** 从 Compose 的 Context 向上找到宿主 Activity（首页返回退出需要）。 */
+private fun Context.findActivity(): Activity? {
+    var current: Context = this
+    while (current is ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return null
+}
+
+/** 再次选中搜索入口时递增：搜索页据此重新聚焦输入框并弹出键盘（条目 35/99）。 */
+private const val SEARCH_FOCUS_REQUEST_KEY = "search_focus_request_token"
+
+private fun openSearch(navController: NavHostController) {
+    val current = navController.currentBackStackEntry
+    if (navController.currentDestination?.route == Routes.SEARCH && current != null) {
+        val next = (current.savedStateHandle.get<Int>(SEARCH_FOCUS_REQUEST_KEY) ?: 0) + 1
+        current.savedStateHandle[SEARCH_FOCUS_REQUEST_KEY] = next
+    } else {
+        navController.navigate(Routes.SEARCH) { launchSingleTop = true }
     }
 }
 

@@ -76,6 +76,7 @@ fun SettingsRoute(
 ) {
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
     val diagnosticsState by viewModel.diagnosticsState.collectAsStateWithLifecycle()
+    val historyClearState by viewModel.historyClearState.collectAsStateWithLifecycle()
     var showVisualEffectsSettings by remember { mutableStateOf(false) }
     var showSourceSyncImport by remember { mutableStateOf(false) }
     var showPairing by remember { mutableStateOf(false) }
@@ -107,7 +108,12 @@ fun SettingsRoute(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.settings_title)) },
+                title = {
+                    Text(
+                        stringResource(R.string.settings_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.settings_back))
@@ -175,6 +181,36 @@ fun SettingsRoute(
                 )
             }
 
+            // 条目 63：清空本地播放记录（"继续观看"与续播位置的唯一落点）。
+            // 幂等：空表也能点，结果显示真实清除条数；失败只提示，不把异常抛到界面。
+            SettingsSection(title = "播放记录") {
+                androidx.compose.material3.OutlinedButton(
+                    onClick = { viewModel.clearPlaybackHistory() },
+                    enabled = historyClearState !is PlaybackHistoryClearState.Clearing,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("history.clear"),
+                ) {
+                    Text("清除播放记录")
+                }
+                when (val clearState = historyClearState) {
+                    is PlaybackHistoryClearState.Cleared -> Text(
+                        text = "已清除 ${clearState.count} 条播放记录",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.testTag("history.clear.result"),
+                    )
+
+                    is PlaybackHistoryClearState.Failed -> Text(
+                        text = "清除失败，请重试",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.testTag("history.clear.result"),
+                    )
+
+                    PlaybackHistoryClearState.Idle, PlaybackHistoryClearState.Clearing -> Unit
+                }
+            }
+
             SettingsSection(title = stringResource(R.string.settings_playback)) {
             // 播放内核（U3-A）：默认 AUTO（Media3 快速路径，失败自动切 mpv 兼容内核）
             Text(stringResource(R.string.settings_playback_engine), style = MaterialTheme.typography.bodyLarge)
@@ -228,6 +264,11 @@ fun SettingsRoute(
                 label = stringResource(R.string.settings_auto_play_next_episode),
                 checked = prefs.autoPlayNextEpisode,
                 onCheckedChange = { viewModel.update { p -> p.copy(autoPlayNextEpisode = it) } },
+            )
+            SettingSwitch(
+                label = stringResource(R.string.settings_precise_resume_seek),
+                checked = prefs.preciseResumeSeek,
+                onCheckedChange = { viewModel.update { p -> p.copy(preciseResumeSeek = it) } },
             )
             SettingSwitch(
                 label = stringResource(R.string.settings_show_media_info),
@@ -302,6 +343,17 @@ fun SettingsRoute(
                     },
                 )
             }
+
+            SettingSwitch(
+                label = stringResource(R.string.settings_gesture_double_tap_sides_overlay),
+                checked = prefs.gestures.doubleTapSidesToggleOverlay,
+                onCheckedChange = { viewModel.update { p -> p.copy(gestures = p.gestures.copy(doubleTapSidesToggleOverlay = it)) } },
+            )
+            Text(
+                stringResource(R.string.settings_gesture_double_tap_sides_overlay_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
             SettingSwitch(
                 label = stringResource(R.string.settings_gesture_long_press_speed),
@@ -392,15 +444,8 @@ private fun SettingsSection(
     title: String,
     content: @Composable () -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
+    com.mediahub.core.ui.MediaHubCard(modifier = Modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             com.mediahub.core.ui.MediaHubSectionHeader(title = title)
@@ -611,14 +656,8 @@ private fun AboutSection() {
 
     com.mediahub.core.ui.MediaHubSectionHeader(title = stringResource(R.string.settings_about))
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+    com.mediahub.core.ui.MediaHubCard(modifier = Modifier.fillMaxWidth()) {
+        Column {
             Text(
                 stringResource(R.string.settings_product_name),
                 style = MaterialTheme.typography.titleMedium,

@@ -24,6 +24,15 @@ interface ProviderImageAuthContributor {
     /** 由服务器 baseUrl 推导认证 scope URL（幂等，禁止破坏用户已配置的反代子路径）。 */
     fun authScopeUrl(baseUrl: String): String
 
+    /**
+     * 该服务器在图片鉴权归属表里占据的**全部** scope（默认仅 [authScopeUrl]）。
+     *
+     * 反代部署（baseUrl 带子路径，如图片绝对 URL 落在 `https://h/custom/Items/...`）
+     * 时协议前缀 scope 匹配不到，Provider 可额外声明 baseUrl 自身；裸 origin 必须
+     * **不**声明根路径 scope，否则同 origin 的所有路径都会被它吞并。
+     */
+    fun authScopeUrls(baseUrl: String): List<String> = listOf(authScopeUrl(baseUrl))
+
     /** 为指定本地服务器生成图片请求认证头；凭据缺失返回 null。 */
     suspend fun headersFor(serverId: String): Map<String, String>?
 }

@@ -22,8 +22,9 @@ import java.util.Locale
  * 于是"文件里标了 DEFAULT 的外语轨"会压过用户系统语言（例如系统中文却放英文轨）。
  * 显式传 `preferredAudioLanguages` 把语言放到第一优先级，这是本策略唯一的参数变更。
  *
- * 字幕不在 v1 默认策略内：设置 `preferredTextLanguages` 会让 Media3 自动打开匹配语言的字幕，
- * 属于产品决策（PENDING），因此保持既有行为（不自动开启，除非容器 default/forced 标记）。
+ * 字幕默认选择由用户的首选字幕语言驱动（清单 82）：只有设置了首选语言时才写入
+ * `preferredTextLanguages`，匹配不到时 Media3 不会自动开启字幕；未设置（null）时
+ * 完全不改字幕参数，保持既有行为（不自动开启，除非容器 default/forced 标记）。
  */
 object TrackPreferencePolicy {
 
@@ -53,19 +54,32 @@ object TrackPreferencePolicy {
             .toList()
 
     /**
+     * 把用户首选字幕语言收敛成 Media3 文本偏好语言列表。
+     *
+     * null / 空白 = 未设置偏好，返回空列表（调用方不得据此自动开启字幕）。
+     * 与音频一致，只保留语言级粗匹配（`zh-Hans-CN` → `zh`）。
+     */
+    fun textLanguages(preferredSubtitleLanguage: String?): List<String> =
+        audioLanguages(listOfNotNull(preferredSubtitleLanguage))
+
+    /**
      * 把默认语言偏好写入 selector。
      *
-     * 空列表表示"没有偏好"，此时不改任何参数，保持 Media3 既有默认行为。
+     * - 音频列表为空表示"没有偏好"，不改音频参数，保持 Media3 既有默认行为；
+     * - 字幕列表为空表示"未设置首选字幕语言"，会把文本偏好清空，回到不自动开启的默认行为。
      */
     fun prepare(
         selector: DefaultTrackSelector,
         preferredAudioLanguages: List<String>,
+        preferredTextLanguages: List<String> = emptyList(),
     ): DefaultTrackSelector {
-        if (preferredAudioLanguages.isEmpty()) return selector
-        selector.setParameters(
-            selector.buildUponParameters()
-                .setPreferredAudioLanguages(*preferredAudioLanguages.toTypedArray()),
-        )
+        if (preferredAudioLanguages.isEmpty() && preferredTextLanguages.isEmpty()) return selector
+        val builder = selector.buildUponParameters()
+        if (preferredAudioLanguages.isNotEmpty()) {
+            builder.setPreferredAudioLanguages(*preferredAudioLanguages.toTypedArray())
+        }
+        builder.setPreferredTextLanguages(*preferredTextLanguages.toTypedArray())
+        selector.setParameters(builder)
         return selector
     }
 }

@@ -125,6 +125,9 @@ fun AddServerRoute(
                             resolvedUrl = state.resolvedUrl,
                             errorMessage = state.addressError,
                             enabled = inputsEnabled,
+                            onDetect = viewModel::detectAddress,
+                            isDetecting = state.isDetecting,
+                            detectionMessage = state.detectionMessage,
                         )
                     } else {
                         OutlinedButton(

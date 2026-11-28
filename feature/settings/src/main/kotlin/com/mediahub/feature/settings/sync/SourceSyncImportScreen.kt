@@ -553,15 +553,12 @@ fun SourceSyncImportScreen(
             }
 
             state.applied?.let { applied ->
-                Card(
+                com.mediahub.core.ui.MediaHubCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag(SourceSyncImportTags.RESULT),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    ),
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
+                    Column {
                         Text("导入结果", style = MaterialTheme.typography.titleSmall)
                         // W6-82：这一行是预览里的桶（计划），下一行才是这一轮真正做了什么（结果）。
                         Text(
@@ -787,15 +784,12 @@ private fun EntryCard(
     onDecide: (String, SourceSyncEntryDecision) -> Unit,
     onCopyIdentity: (String) -> Unit,
 ) {
-    Card(
+    com.mediahub.core.ui.MediaHubCard(
         modifier = Modifier
             .fillMaxWidth()
             .testTag(SourceSyncImportTags.entry(entry.key)),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
     ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(entry.title, style = MaterialTheme.typography.bodyLarge)
             entry.detail.takeIf { it.isNotBlank() }?.let { detail ->
                 Text(
@@ -968,16 +962,12 @@ private fun ReceiveSection(
     var form by remember { mutableStateOf(SourceSyncReceiveForm()) }
     val receiving = state == SourceSyncReceiveState.Receiving
     val resultLine = SourceSyncReceiveCopy.lineOf(state)
-    Card(
+    com.mediahub.core.ui.MediaHubCard(
         modifier = Modifier
             .fillMaxWidth()
             .testTag(SourceSyncImportTags.RECEIVE),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(SourceSyncReceiveCopy.TITLE, style = MaterialTheme.typography.titleSmall)
@@ -1112,16 +1102,12 @@ private fun ListenSection(
     val portLine = SourceSyncListenCopy.portLineOf(state)
     // W6-86：取消不是失败，但要有账——否则点完「取消」只见状态跳回「正在监听」。
     val cancelledLine = SourceSyncListenCopy.cancelledLineOf(state)
-    Card(
+    com.mediahub.core.ui.MediaHubCard(
         modifier = Modifier
             .fillMaxWidth()
             .testTag(SourceSyncImportTags.LISTEN),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(SourceSyncListenCopy.TITLE, style = MaterialTheme.typography.titleSmall)
@@ -1362,16 +1348,12 @@ private fun SendSection(
         !form.isSecretAcceptable -> SourceSyncSendCopy.SECRET_REQUIRED
         else -> null
     }
-    Card(
+    com.mediahub.core.ui.MediaHubCard(
         modifier = Modifier
             .fillMaxWidth()
             .testTag(SourceSyncImportTags.SEND),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(SourceSyncSendCopy.TITLE, style = MaterialTheme.typography.titleSmall)
@@ -1579,16 +1561,12 @@ private fun ArchiveExportSection(
         is SourceSyncArchiveExportState.Failed -> SourceSyncArchiveExportCopy.failedLineOf(state.code)
         else -> null
     }
-    Card(
+    com.mediahub.core.ui.MediaHubCard(
         modifier = Modifier
             .fillMaxWidth()
             .testTag(SourceSyncImportTags.EXPORT_CARD),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(SourceSyncArchiveExportCopy.TITLE, style = MaterialTheme.typography.titleSmall)

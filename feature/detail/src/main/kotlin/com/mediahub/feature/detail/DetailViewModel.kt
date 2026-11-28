@@ -4,15 +4,20 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mediahub.core.common.NavArgCodec
+import com.mediahub.core.database.prefs.UserPreferencesRepository
+import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
-import com.mediahub.core.logging.Logger
 import com.mediahub.core.logging.LogTag
+import com.mediahub.core.logging.Logger
 import com.mediahub.feature.detail.source.CanonicalSourceResolver
 import com.mediahub.feature.detail.source.SourceResolution
+import com.mediahub.feature.detail.version.shouldShowVersionPanel
 import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaType
 import com.mediahub.model.PageRequest
+import com.mediahub.model.PlaybackLaunchSnapshot
+import com.mediahub.model.PlaybackProgress
 import com.mediahub.provider.api.MediaProviderRegistry
 import com.mediahub.provider.api.ProviderException
 import com.mediahub.provider.api.ProviderHandle
@@ -22,6 +27,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 /**
@@ -36,6 +42,14 @@ class DetailViewModel @Inject constructor(
     private val registry: MediaProviderRegistry,
     private val sourceResolver: CanonicalSourceResolver,
     private val logger: Logger,
+    private val userPreferencesRepository: UserPreferencesRepository,
+    /**
+     * 条目 72：本地进度回读。
+     *
+     * 已缓存 / 本地内容没有远端 PROGRESS 能力，播放时只有本地快照被写入；
+     * 详情页若不读回来，就会永远显示"立即播放"。这里只读、不写。
+     */
+    private val progressStore: ProgressStore,
 ) : ViewModel() {
 
     val serverId: String = checkNotNull(savedStateHandle["serverId"])
@@ -47,6 +61,12 @@ class DetailViewModel @Inject constructor(
     private val _seriesState = MutableStateFlow(SeriesBrowseState())
     val seriesState: StateFlow<SeriesBrowseState> = _seriesState.asStateFlow()
 
+    /** 条目 72：本地快照里的续播进度；null = 没有记录或本视角不适用。 */
+    private val _localProgress = MutableStateFlow<PlaybackProgress?>(null)
+    val localProgress: StateFlow<PlaybackProgress?> = _localProgress.asStateFlow()
+
+    private var localProgressJob: Job? = null
+
     private val _sourceState = MutableStateFlow<SourceResolutionState>(SourceResolutionState.Idle)
     val sourceState: StateFlow<SourceResolutionState> = _sourceState.asStateFlow()
 
@@ -54,11 +74,42 @@ class DetailViewModel @Inject constructor(
     private val _favoriteState = MutableStateFlow<FavoriteToggleState?>(null)
     val favoriteState: StateFlow<FavoriteToggleState?> = _favoriteState.asStateFlow()
 
+    /** 详情页选中的媒体版本（MediaSourceId）；null = 服务端默认版本（首项）。 */
+    private val _selectedVersionId = MutableStateFlow<String?>(null)
+    val selectedVersionId: StateFlow<String?> = _selectedVersionId.asStateFlow()
+
     private var handle: ProviderHandle? = null
     private var episodeJob: Job? = null
     private var sourceJob: Job? = null
 
-    init { load() }
+    /** 首选音轨/字幕语言（清单 6）：null 字段 = 未设置，保持播放器既有默认策略。 */
+    private val _trackLanguagePreferences = MutableStateFlow<TrackLanguagePreferences?>(null)
+    val trackLanguagePreferences: StateFlow<TrackLanguagePreferences?> =
+        _trackLanguagePreferences.asStateFlow()
+
+    init {
+        load()
+        viewModelScope.launch {
+            userPreferencesRepository.flow.collect { prefs ->
+                _trackLanguagePreferences.value = TrackLanguagePreferences(
+                    preferredAudioLanguage = prefs.preferredAudioLanguage,
+                    preferredSubtitleLanguage = prefs.preferredSubtitleLanguage,
+                )
+            }
+        }
+    }
+
+    fun updatePreferredAudioLanguage(language: String?) {
+        viewModelScope.launch {
+            userPreferencesRepository.update { it.copy(preferredAudioLanguage = language) }
+        }
+    }
+
+    fun updatePreferredSubtitleLanguage(language: String?) {
+        viewModelScope.launch {
+            userPreferencesRepository.update { it.copy(preferredSubtitleLanguage = language) }
+        }
+    }
 
     fun load() {
         _uiState.value = DetailUiState.Loading
@@ -74,6 +125,10 @@ class DetailViewModel @Inject constructor(
                     ?: throw ProviderException.NotYetImplemented(serverId, "该数据源的详情能力尚未接入")
                 val detail = detailProvider.getItemDetail(itemId)
                 _uiState.value = DetailUiState.Content(detail)
+                refreshLocalProgress()
+                // 刷新后版本列表可能变化：旧选中 id 不在新列表里就回到服务端默认版本
+                _selectedVersionId.value = _selectedVersionId.value
+                    ?.takeIf { id -> detail.versions.any { it.id == id } }
                 // 收藏状态取自服务器 UserData（本机无收藏表）；无 favorite 能力的源不显示开关
                 if (h.favorite != null) {
                     _favoriteState.value = FavoriteToggle.fromServerState(detail.item.id, detail.item.isFavorite)
@@ -91,6 +146,29 @@ class DetailViewModel @Inject constructor(
             } catch (e: Exception) {
                 logger.w(LogTag.UI, "详情加载失败 serverId=$serverId itemId=$itemId", e)
                 _uiState.value = DetailUiState.Error(userMessage(e))
+            }
+        }
+    }
+
+    /**
+     * 条目 72：从本地快照回读续播进度。
+     *
+     * 由打开详情页时与页面 ON_RESUME 时调用（从播放器返回后必须刷新，
+     * 否则详情页仍显示播放前的旧状态）。读失败只记录，不影响详情内容。
+     */
+    fun refreshLocalProgress() {
+        localProgressJob?.cancel()
+        localProgressJob = viewModelScope.launch {
+            val progress = try {
+                progressStore.get(serverId, itemId)
+            } catch (e: Exception) {
+                logger.w(LogTag.UI, "读取本地播放进度失败 serverId=$serverId itemId=$itemId", e)
+                null
+            }
+            // 已播完（>=99%）不再提示续播：避免"继续播放"落到片尾。
+            _localProgress.value = progress?.takeIf { p ->
+                p.positionMs > 0L &&
+                    (p.durationMs <= 0L || p.positionMs.toDouble() / p.durationMs < FINISHED_FRACTION)
             }
         }
     }
@@ -123,6 +201,33 @@ class DetailViewModel @Inject constructor(
         if (_seriesState.value.selectedSeasonId == seasonId) return
         _seriesState.value = _seriesState.value.copy(selectedSeasonId = seasonId)
         loadEpisodesForSeason(seasonId)
+    }
+
+    /** 选择媒体版本：只接受当前详情里真实存在的 id，脏值直接忽略。 */
+    fun selectVersion(versionId: String) {
+        val detail = (_uiState.value as? DetailUiState.Content)?.detail ?: return
+        if (detail.versions.none { it.id == versionId }) return
+        _selectedVersionId.value = versionId
+    }
+
+    /**
+     * 详情页 → 播放器的启动快照。版本只在“播放根条目本身 + 至少两个版本”时携带，
+     * 单集播放不继承剧集/电影的版本选择。
+     */
+    fun launchSnapshot(item: MediaItem): PlaybackLaunchSnapshot {
+        val detail = (_uiState.value as? DetailUiState.Content)?.detail
+        val versionId = _selectedVersionId.value?.takeIf {
+            detail != null && item.id == detail.item.id && shouldShowVersionPanel(detail.versions)
+        }
+        return PlaybackLaunchSnapshot(
+            itemId = item.id,
+            type = item.type,
+            title = item.title,
+            runtimeMs = item.runtimeMs,
+            posterUrl = item.posterUrl,
+            container = item.container,
+            versionId = versionId,
+        )
     }
 
     fun retryEpisodes() {
@@ -215,6 +320,9 @@ class DetailViewModel @Inject constructor(
     }
 
     companion object {
+        /** 条目 72：本地进度达到该比例即视为看完，不再提示续播。 */
+        private const val FINISHED_FRACTION = 0.99
+
         /** 季排序：普通季(1,2,3…)→Specials(seasonNumber=0)→未知(seasonNumber=null) */
         fun sortSeasons(seasons: List<MediaItem>): List<MediaItem> {
             val normal = seasons.filter { (it.seasonNumber ?: 0) > 0 }
@@ -226,8 +334,13 @@ class DetailViewModel @Inject constructor(
     }
 }
 
-data class SeriesBrowseState(
-    val seasons: List<MediaItem> = emptyList(),
+/** 详情页可选的首选音轨/字幕语言；null = 未设置（跟随系统 / 不自动开字幕）。 */
+data class TrackLanguagePreferences(
+    val preferredAudioLanguage: String? = null,
+    val preferredSubtitleLanguage: String? = null,
+)
+
+data class SeriesBrowseState(    val seasons: List<MediaItem> = emptyList(),
     val selectedSeasonId: String? = null,
     val episodes: List<MediaItem> = emptyList(),
     val seasonsLoading: Boolean = false,
