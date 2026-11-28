@@ -347,17 +347,21 @@ class MpvPlaybackEngine internal constructor(
     }
 
     private fun observer(run: Run) = object : MpvInstance.Observer {
-        override fun property(name: String, value: Boolean) = withCurrent(run) {
-            // G3：pause 属性同时表达「是否暂停」，因此它既是实际状态也是用户意图。
-            if (name == "pause") _uiState.update { it.copy(isPlaying = !value, playWhenReady = !value) }
+        override fun property(name: String, value: Boolean) {
+            withCurrent(run) {
+                // G3：pause 属性同时表达「是否暂停」，因此它既是实际状态也是用户意图。
+                if (name == "pause") _uiState.update { it.copy(isPlaying = !value, playWhenReady = !value) }
+            }
         }
-        override fun property(name: String, value: Double) = withCurrent(run) {
-            when (name) {
-                "time-pos" -> _uiState.update { it.copy(positionMs = (value * 1000).toLong()) }
-                "duration" -> if (value > 0) _uiState.update { it.copy(durationMs = (value * 1000).toLong()) }
-                "speed" -> _uiState.update { it.copy(speed = value.toFloat()) }
-                "width" -> if (value > 0) _uiState.update { it.copy(videoWidth = value.toInt()) }
-                "height" -> if (value > 0) _uiState.update { it.copy(videoHeight = value.toInt()) }
+        override fun property(name: String, value: Double) {
+            withCurrent(run) {
+                when (name) {
+                    "time-pos" -> _uiState.update { it.copy(positionMs = (value * 1000).toLong()) }
+                    "duration" -> if (value > 0) _uiState.update { it.copy(durationMs = (value * 1000).toLong()) }
+                    "speed" -> _uiState.update { it.copy(speed = value.toFloat()) }
+                    "width" -> if (value > 0) _uiState.update { it.copy(videoWidth = value.toInt()) }
+                    "height" -> if (value > 0) _uiState.update { it.copy(videoHeight = value.toInt()) }
+                }
             }
         }
 
