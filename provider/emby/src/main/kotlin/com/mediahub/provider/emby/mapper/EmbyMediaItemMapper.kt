@@ -70,7 +70,8 @@ object EmbyMediaItemMapper {
             overview = dto.overview,
             genres = dto.genres,
             year = dto.productionYear,
-            runtimeMs = dto.runTimeTicks?.div(TICKS_PER_MILLIS),
+            // 兼容兜底：fnOS 等兼容服的 RunTimeTicks 尺度不一定是 100ns（见 EmbyDuration）。
+            runtimeMs = EmbyDuration.fromRunTimeTicks(dto.runTimeTicks),
             communityRating = dto.communityRating,
             criticRating = dto.criticRating,
             officialRating = dto.officialRating,

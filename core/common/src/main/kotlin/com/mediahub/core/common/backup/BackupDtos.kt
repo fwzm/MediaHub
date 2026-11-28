@@ -94,6 +94,7 @@ object BackupDtos {
         @SerialName("longPressSpeedMax") val longPressSpeedMax: Float,
         @SerialName("longPressDirectionalEnabled") val longPressDirectionalEnabled: Boolean,
         @SerialName("longPressDefaultSpeed") val longPressDefaultSpeed: Float,
+        @SerialName("doubleTapSidesToggleOverlay") val doubleTapSidesToggleOverlay: Boolean = false,
     )
 
     @Serializable

@@ -65,6 +65,37 @@ class MpvTuningOptionsTest {
     }
 
     @Test
+    fun `dolby vision on an unsupported display disables hardware decoding`() {
+        val options = MpvTuningOptions.build(
+            MpvTuningInput(
+                sourceHdr = HdrType.DOLBY_VISION,
+                deviceSupportsSourceHdr = false,
+                softwareDecode = true,
+            ),
+        )
+        assertEquals(
+            listOf(
+                MpvTuningOption("tone-mapping", "bt.2390"),
+                MpvTuningOption("hdr-compute-peak", "yes"),
+                MpvTuningOption("hwdec", "no"),
+            ),
+            options,
+        )
+    }
+
+    @Test
+    fun `software decoding is never forced when capability is unknown`() {
+        val options = MpvTuningOptions.build(
+            MpvTuningInput(
+                sourceHdr = HdrType.DOLBY_VISION,
+                deviceSupportsSourceHdr = null,
+                softwareDecode = false,
+            ),
+        )
+        assertTrue(options.isEmpty())
+    }
+
+    @Test
     fun `every emitted option is backed by binary evidence`() {
         val all = MpvTuningOptions.build(
             MpvTuningInput(

@@ -25,6 +25,8 @@ class LocalSafProviderTest {
     private inner class Roots(val files: List<File> = emptyList()) : LocalRootProvider, SafTreeNavigator.SafSource {
         var granted = true
         var rejectQuery = false
+        /** 模拟部分厂商 DocumentsProvider 抛出的非 SecurityException。 */
+        var queryFailure: Throwable? = null
         val calls = mutableListOf<String>()
         val rows = mapOf(
             "root:media" to listOf(
@@ -39,16 +41,19 @@ class LocalSafProviderTest {
         override fun contentRoots() = if (granted) listOf(Uri.parse(tree)) else emptyList()
         override fun listChildren(childrenUri: String): List<SafTreeNavigator.SafRow> {
             calls += childrenUri
+            queryFailure?.let { throw it }
             if (rejectQuery) throw SecurityException("fixture grant revoked")
             return rows[SafUri.docId(childrenUri.substringBefore("/children"))].orEmpty()
         }
         override fun canOpen(documentUri: String): Boolean {
             calls += "open:$documentUri"
+            queryFailure?.let { throw it }
             return granted && documentUri in setOf(video, subtitle, SafUri.documentUri(tree, "nested-file"))
         }
         // Used by the document-access implementation once the reserved source interface is extended.
         override fun metadata(documentUri: String): SafTreeNavigator.SafRow? {
             calls += "stat:$documentUri"
+            queryFailure?.let { throw it }
             if (!granted) throw SecurityException("fixture grant revoked")
             val id = SafUri.docId(documentUri)
             return if (id == "root:media") SafTreeNavigator.SafRow(id, "Media", "vnd.android.document/directory", null)
@@ -132,6 +137,24 @@ class LocalSafProviderTest {
         val result = runCatching { provider(roots).resolvePlayback(videoItem(source = "another-source"), PlaybackOptions()) }
         assertTrue(result.isFailure)
         assertTrue(roots.calls.isEmpty())
+    }
+
+    @Test fun vendorIllegalArgumentExceptionIsReportedAsDirectoryAccessRequired() = runBlocking {
+        val roots = Roots().also { it.queryFailure = IllegalArgumentException("Unknown document id") }
+        val error = runCatching { provider(roots).getItemDetail(video) }.exceptionOrNull()
+        assertTrue(error is ProviderException.DirectoryAccessRequired)
+    }
+
+    @Test fun vendorFileNotFoundDuringListingIsReportedAsDirectoryAccessRequired() = runBlocking {
+        val roots = Roots().also { it.queryFailure = java.io.FileNotFoundException("document vanished") }
+        val error = runCatching { provider(roots).listFolder(null, PageRequest()) }.exceptionOrNull()
+        assertTrue(error is ProviderException.DirectoryAccessRequired)
+    }
+
+    @Test fun vendorUnsupportedOperationDuringOpenIsReportedAsDirectoryAccessRequired() = runBlocking {
+        val roots = Roots().also { it.queryFailure = UnsupportedOperationException("provider does not support open") }
+        val error = runCatching { provider(roots).resolvePlayback(videoItem(), PlaybackOptions()) }.exceptionOrNull()
+        assertTrue(error is ProviderException.DirectoryAccessRequired)
     }
 
     @Test fun aDeniedQueryIsNotReportedAsAnEmptyDirectory() = runBlocking {
