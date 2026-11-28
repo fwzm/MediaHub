@@ -151,7 +151,8 @@ internal class SafLocalAccess(private val server: MediaServer, private val roots
         return MediaItem(server.id, uri, type,
             title = (if (directory) row.name else row.name.substringBeforeLast('.', row.name)).ifBlank { "未命名" },
             path = uri, parentId = parent, sizeBytes = row.sizeBytes?.takeIf { !directory && it >= 0 },
-            container = extension.takeIf { !directory && it.isNotBlank() }, libraryId = "local")
+            container = extension.takeIf { !directory && it.isNotBlank() },
+            posterUrl = LocalPoster.forItem(type, uri), libraryId = "local")
     }
     private companion object {
         const val DIRECTORY = "vnd.android.document/directory"
