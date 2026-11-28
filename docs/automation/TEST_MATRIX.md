@@ -1459,3 +1459,47 @@ base 一侧在 2026-10-31 新增了 `doc-residue-claims` 守卫（本分支 HEAD
 
 ### exact-head CI 验收
 - 代码 head 1762cd35f40d529f443cdaaaea848f4ac79a1246：windows-ci 44465809330（push）/ 44465888575（pull_request）= success，台阶行 `failureEvidence=0 failed=0/0 passed=0/1973` 与 `…/104`；同 head Android CI 44465888544 = success（只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承）。
+
+## 6.28 第二十三层口径：失败日志必须一一描述失败行（W6-113ao）
+
+### 不变量
+
+| 判据 | 读取位置 | 失败方式 |
+| --- | --- | --- |
+| RunInfo 条数等于 Failed/Error 行数 | ResultSummary/RunInfos 与 Results | RED |
+| 每个 Failed/Error 行恰被一个 RunInfo 的 Text 命名 | RunInfo/Text 与 row testName | RED |
+| RunInfo 不得命名 Passed 行 | 同上 | RED |
+| 同一失败行不得被命名两次 | 同上 | RED |
+| timestamp 可解析且落在 [Times.start, Times.finish] 内 | RunInfo/@timestamp 与 TestRun/Times | RED |
+| computerName 与行一致 | RunInfo/@computerName | RED |
+| outcome 非空且不是成功 verdict | RunInfo/@outcome | RED |
+
+### 为什么前二十二层看不见
+
+| 层 | 它读的 | 它读不到 |
+| --- | --- | --- |
+| 第 15 层 | Counters 桶与结果行 outcome | RunInfos 不是 outcome 桶 |
+| 第 21 层 | Results 与 TestEntries 的位置对应 | 行内容仍只比较 id |
+| 第 22 层 | 每行 Output/ErrorInfo 与 verdict | ResultSummary 的失败日志子树 |
+| 全层 | — | RunInfos 在脚本里引用计数为 0 |
+
+### 依据（EXECUTED）
+- 真实 767 行失败语料：6 个 Failed 行、6 条 RunInfo，Text 都含 [FAIL]，时间戳都在 [start, finish] 内。
+- 十例对照：clean-green 与 fail-with-runinfo 双绿；八个变异 old=0/new=1，各自触发本层的一个条件。
+- duplicate 夹具修正前把第二个 RunInfo 写在包装外，台阶行 runInfos=1，新层保持绿；修正为包装内两个子元素后才 RED。
+
+### 数据源与规模
+- check-test-suite-baseline.ps1 113,800 → 121,162 B，1,987 → 2,121 行，0 非 ASCII，sha256 20e3c53cda1cfd8f90ac1057b2819657e1fb3dc5c561bdd3fefe8390bc75826a。
+- 台阶行：runInfos=<n> failedRows=<n> matched=<n> passed=<n> unmatched=<n> duplicateMatches=<n> outside=<n> blankText=<n> wrongMachine=<n> badOutcome=<n>。
+
+### 负向对照
+- 十例矩阵全按预期；实现态 sha256 在对照前后一致，矩阵后 clean-green 复跑仍绿；旧层在八个变异上保持 PASS，证明新层不是旧层的重复。
+- 负向对照必须同时核对台阶行的 runInfos 计数，确认变异确实进入新层；只看 exit code 会被夹具结构错误骗过。
+
+### 残留限制
+- Text 用 longest-name substring 匹配；若两个测试名互为前后缀且 Text 被截断，可能匹配到较长者。真实 runner 的 [FAIL] 文本是完整 testName，当前语料无此歧义。
+- 不要求 RunInfo 的 outcome 只能是 Error（Warning 等非成功值接受）；不交叉比对 ErrorInfo/StackTrace 文本。
+- 零失败时允许没有 RunInfos；不要求文件必须声明该块。
+
+### exact-head CI 验收
+- 代码 head c99ac346c8cdb248a55995c0f82d243d5461cd10：windows-ci 44475518066（push）/ 44475570854（pull_request）= success，push 日志台阶行 runInfos=0 … badOutcome=0（两套件）；同 head Android CI 44475570962 在取证时仍 in_progress（CI_PENDING）；本提交只动 windows/tools，三子树与 77ef1f2f 逐字相同，按 ADR-AUTO-001 继承。

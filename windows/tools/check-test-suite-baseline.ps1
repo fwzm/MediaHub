@@ -194,6 +194,17 @@
 #   but not required: a producer may report a message without a stack, and
 #   requiring it would accuse a shape this gate cannot prove.
 
+#   The runner also writes ResultSummary/RunInfos: one item per failure, carrying
+#   the failed test's display name in its Text. Nothing above reads it, so a file
+#   whose failure list was dropped, duplicated, or left behind by an earlier green
+#   run keeps every count and every ErrorInfo above identical. The gate now requires
+#   the list to describe the Failed/Error rows one for one: the same number of items
+#   as failed rows, every failed row named exactly once, no item naming a passing
+#   row, a non-blank Text, a timestamp inside the run window, a machine that matches
+#   the rows, and an outcome that does not claim success; the ladder line records
+#   runInfos=<n> failedRows=<n> matched=<n> passed=<n> unmatched=<n> outside=<n>
+#   blankText=<n> wrongMachine=<n>.
+
 # SEMANTICS
 #   total    < baseline -> red      (cases were dropped or skipped)
 #   total    > baseline -> green + warning (please refresh the baseline)
@@ -219,6 +230,11 @@
 #     blank, a Passed row that carries Output/ErrorInfo, or one row carrying more
 #     than one ErrorInfo -> red: the row's own failure evidence contradicts the
 #     verdict it reports, and no count above reads the evidence block
+#   a ResultSummary/RunInfos list that does not describe the Failed/Error rows one
+#     for one - wrong item count, an item naming a passing row or no row, a blank
+#     Text, a timestamp outside Times, another machine, or an outcome that claims
+#     success - -> red: the failure log and the verdicts are two halves of the same
+#     report and no count above compares them
 #   an outcome kind the baseline did not have appears, or a baseline outcome
 #     reports fewer rows -> red; an outcome reporting more rows -> green + warning
 #   a test id that is not unique inside one TRX, a definition whose id has no
@@ -1033,6 +1049,18 @@ foreach ($e in $baseline.suites) {
   $blankFailureText = 0
   $duplicateEvidence = 0
   $evidenceProblems = @()
+  $failedRowNames = @{}
+  $passedRowNames = @{}
+  $runInfoRows = 0
+  $runInfoMatched = 0
+  $runInfoDuplicates = 0
+  $runInfoForPassed = 0
+  $runInfoUnmatched = 0
+  $runInfoOutside = 0
+  $runInfoBlank = 0
+  $runInfoWrongMachine = 0
+  $runInfoBadOutcome = 0
+  $runInfoProblems = @()
   foreach ($res in @($xml.TestRun.Results.UnitTestResult)) {
     if ($null -eq $res) { continue }
     $rowCount++
@@ -1119,6 +1147,14 @@ foreach ($e in $baseline.suites) {
     if ($actualOutcomes.ContainsKey($oc)) { $actualOutcomes[$oc] = $actualOutcomes[$oc] + 1 } else { $actualOutcomes[$oc] = 1 }
     if ($oc -eq 'Passed') { $passedRows++ }
     if ($oc -eq 'Failed' -or $oc -eq 'Error') { $failedRows++ }
+    $rowDisplayName = [string]$res.testName
+    if (-not [string]::IsNullOrWhiteSpace($rowDisplayName)) {
+      if ($oc -eq 'Passed') {
+        $passedRowNames[$rowDisplayName] = $true
+      } elseif ($oc -eq 'Failed' -or $oc -eq 'Error') {
+        $failedRowNames[$rowDisplayName] = $true
+      }
+    }
     $rowEvidence = @()
     foreach ($rowOutput in @($res.ChildNodes)) {
       if ([string]$rowOutput.LocalName -ne 'Output') { continue }
@@ -1480,6 +1516,103 @@ foreach ($e in $baseline.suites) {
     throw "$($e.suite): the failure evidence in $($e.file) does not agree with the verdict each row reports while the total was $total - no count above reads the evidence block, so a file whose failed rows lost their message, whose passed rows carry a stale stack, or whose row carries the same failure twice can keep every count identical. broken: $($evidenceProblems -join ', '). A TRX whose failure evidence contradicts its own outcomes was hand-merged or patched; regenerate it from a clean test run."
   }
 
+  # ResultSummary/RunInfos is the runner's failure log: one item per failed test,
+  # with that test's display name in Text. The rows and the log were written by the
+  # same run, so a log that lost an item, kept a stale one, named a passing row,
+  # carried a blank Text or a time outside the run window, or named another machine
+  # can leave every count and every ErrorInfo identical while the report no longer
+  # says which failures produced the run. The list is read by local name for the
+  # same adapter reason as ErrorInfo.
+  $runInfoNodes = @()
+  foreach ($summaryChild in @($xml.TestRun.ResultSummary.ChildNodes)) {
+    if ([string]$summaryChild.LocalName -ne 'RunInfos') { continue }
+    foreach ($runInfoChild in @($summaryChild.ChildNodes)) {
+      if ([string]$runInfoChild.LocalName -eq 'RunInfo') { $runInfoNodes += $runInfoChild }
+    }
+  }
+  $runInfoRows = @($runInfoNodes).Count
+  $failedRowNameList = @($failedRowNames.Keys)
+  $passedRowNameList = @($passedRowNames.Keys)
+  $runInfoRowMachine = ''
+  if ([int]$attrValues['computerName'].Count -eq 1) {
+    foreach ($rmk in @($attrValues['computerName'].Keys)) { $runInfoRowMachine = [string]$rmk }
+  }
+  $matchedFailedNames = @{}
+  foreach ($runInfo in @($runInfoNodes)) {
+    $runInfoText = ''
+    foreach ($runInfoChild in @($runInfo.ChildNodes)) {
+      if ([string]$runInfoChild.LocalName -eq 'Text') { $runInfoText = [string]$runInfoChild.InnerText; break }
+    }
+    $runInfoStamp = Convert-ToInstant ([string]$runInfo.timestamp)
+    $runInfoMachine = [string]$runInfo.computerName
+    $runInfoOutcome = [string]$runInfo.outcome
+    if ([string]::IsNullOrWhiteSpace($runInfoText)) {
+      $runInfoBlank++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += 'a RunInfo carries no Text' }
+    }
+    if ($null -eq $runInfoStamp) {
+      $runInfoOutside++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += 'a RunInfo carries an unreadable timestamp' }
+    } elseif ($null -ne $tRunStart -and $null -ne $tRunFinish) {
+      if ($runInfoStamp -lt $tRunStart -or $runInfoStamp -gt $tRunFinish) {
+        $runInfoOutside++
+        if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo timestamp '$([string]$runInfo.timestamp)' is outside the run window" }
+      }
+    }
+    if ([string]::IsNullOrWhiteSpace($runInfoMachine)) {
+      $runInfoWrongMachine++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += 'a RunInfo names no machine' }
+    } elseif (-not [string]::IsNullOrWhiteSpace($runInfoRowMachine) -and -not [string]::Equals($runInfoMachine, $runInfoRowMachine, [System.StringComparison]::OrdinalIgnoreCase)) {
+      $runInfoWrongMachine++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo names machine '$runInfoMachine' while the rows ran on '$runInfoRowMachine'" }
+    }
+    if ([string]::IsNullOrWhiteSpace($runInfoOutcome)) {
+      $runInfoBadOutcome++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += 'a RunInfo names no outcome' }
+    } elseif ($runInfoOutcome -in @('Passed', 'Completed', 'Succeeded')) {
+      $runInfoBadOutcome++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo reports success ('$runInfoOutcome') inside the failure log" }
+    }
+    $bestName = ''
+    $bestOutcome = ''
+    foreach ($fn in $failedRowNameList) {
+      if ($runInfoText.IndexOf($fn, [System.StringComparison]::Ordinal) -ge 0 -and $fn.Length -gt $bestName.Length) {
+        $bestName = $fn
+        $bestOutcome = 'Failed'
+      }
+    }
+    foreach ($pn in $passedRowNameList) {
+      if ($runInfoText.IndexOf($pn, [System.StringComparison]::Ordinal) -ge 0 -and $pn.Length -gt $bestName.Length) {
+        $bestName = $pn
+        $bestOutcome = 'Passed'
+      }
+    }
+    if ($bestOutcome -eq 'Failed') {
+      $runInfoMatched++
+      if ($matchedFailedNames.ContainsKey($bestName)) {
+        $runInfoDuplicates++
+        if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo names '$bestName' more than once" }
+      } else {
+        $matchedFailedNames[$bestName] = $true
+      }
+    } elseif ($bestOutcome -eq 'Passed') {
+      $runInfoForPassed++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo names the passing row '$bestName'" }
+    } else {
+      $runInfoUnmatched++
+      if ($runInfoProblems.Count -lt 12) { $runInfoProblems += "a RunInfo names no result row: '$runInfoText'" }
+    }
+  }
+  if ($runInfoRows -ne $failedRows) {
+    $runInfoProblems += "RunInfos carries $runInfoRows item(s) while $failedRows row(s) report Failed/Error"
+  }
+  if ($matchedFailedNames.Count -ne $failedRows) {
+    $runInfoProblems += "RunInfos names $($matchedFailedNames.Count) of $failedRows Failed/Error row(s)"
+  }
+  if ($runInfoProblems.Count -gt 0) {
+    throw "$($e.suite): the ResultSummary/RunInfos list in $($e.file) does not describe the Failed/Error rows one for one while the total was $total - the failure log and the verdicts are two halves of the same report, so a file whose log lost an item, kept a stale item, named a passing row, or moved an item outside the run window can keep every count and every ErrorInfo identical. broken: $($runInfoProblems -join ', '). A TRX whose failure log contradicts its own verdicts was hand-merged or patched; regenerate it from a clean test run."
+  }
+
   # The verdict on top of the counters: ResultSummary/@outcome says how the whole
   # run ended, and no count above reads it. The rows and the buckets can agree with
   # each other while the verdict that summarises both is stale or invented - a file
@@ -1671,6 +1804,7 @@ foreach ($e in $baseline.suites) {
   "$($e.suite): displayNames=$displayNameChecked declared prefixes=$($displayNameChecked - $displayNameLost.Count) mismatched=$($displayNameLost.Count)"
   "$($e.suite): counters=$counterCount attributes required=$($requiredCounterNames.Count) missing=$($missingCounters.Count) malformed=$($malformedCounters.Count) identity=total=executed+notExecuted"
   "$($e.suite): failureEvidence=$evidenceRows failed=$failedWithEvidence/$failedRows passed=$passedWithEvidence/$passedRows blankMessages=$blankFailureText duplicates=$duplicateEvidence"
+  "$($e.suite): runInfos=$runInfoRows failedRows=$failedRows matched=$($matchedFailedNames.Count) passed=$runInfoForPassed unmatched=$runInfoUnmatched duplicateMatches=$runInfoDuplicates outside=$runInfoOutside blankText=$runInfoBlank wrongMachine=$runInfoWrongMachine badOutcome=$runInfoBadOutcome"
   "$($e.suite): runHeader=$headerFacts/3 settings=$settingsCount deployments=$deploymentCount derivedRoot=$derivedRoot bound rows=$boundRows header id collisions=$headerCollisions"
   "$($e.suite): assemblyDeclaration=$assemblyPairs storage/codeBase pairs=$($assemblyPairs - $assemblyPairLostCount) same file adapters=$($adapterValues.Count)"
   "$($e.suite): listVocabulary=$listKnown/$listCount canonical names=$listCanonical distinct names=$($listNames.Count - $listNameBlank - $listNameDuplicates.Count) unreferenced lists=$($unreferencedLists.Count)"
