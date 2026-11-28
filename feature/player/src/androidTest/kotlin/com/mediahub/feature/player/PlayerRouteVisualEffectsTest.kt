@@ -634,6 +634,8 @@ class PlayerRouteVisualEffectsTest {
         override fun observeContinueWatching(limit: Int): Flow<List<PlaybackProgress>> = flowOf(emptyList())
         override suspend fun getResume(serverId: String, itemId: String): Long? = null
         override suspend fun save(progress: PlaybackProgress) = Unit
+        override suspend fun get(serverId: String, itemId: String): PlaybackProgress? = null
+        override suspend fun clearAll(): Int = 0
     }
 
     private class FakeRegistry(

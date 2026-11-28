@@ -7,6 +7,8 @@ import com.mediahub.core.database.repository.ProgressStore
 import com.mediahub.core.database.repository.ServerStore
 import com.mediahub.core.database.repository.SubtitleMemoryEntry
 import com.mediahub.core.database.repository.SubtitleMemoryKeys
+import com.mediahub.core.download.DownloadRecord
+import com.mediahub.core.download.DownloadedMediaLocator
 import com.mediahub.core.logging.LogTag
 import com.mediahub.core.logging.Logger
 import com.mediahub.core.ui.effects.VisualPalette
@@ -14,12 +16,15 @@ import com.mediahub.model.MediaDetail
 import com.mediahub.model.MediaItem
 import com.mediahub.model.MediaServer
 import com.mediahub.model.MediaType
+import com.mediahub.model.MediaVersion
 import com.mediahub.model.PlaybackOptions
 import com.mediahub.model.AudioTrack
+import com.mediahub.model.PlaybackMode
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
 import com.mediahub.model.SubtitleTrack
 import com.mediahub.model.PlaybackEngineMode
+import com.mediahub.model.ResumeSeekMode
 import com.mediahub.model.ServerType
 import com.mediahub.model.UserPreferences
 import com.mediahub.player.engine.InMemoryEnginePreferenceHistory
@@ -46,6 +51,7 @@ import com.mediahub.provider.api.ProviderStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -63,6 +69,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -197,8 +204,54 @@ class PlayerViewModelTest {
         }
     }
 
-    // ---- C：解析失败 → Failed，engine 不 play ----
+    // ---- B2：条目 61 已下载内容 → 本地 file:// 播放，不依赖 Provider playback ----
     @Test
+    fun `downloaded content plays from local file without provider playback`() = runTest(dispatcher) {
+        val local = PlaybackSource(
+            url = "file:///data/user/0/com.mediahub.app/files/downloads/srv-1/movie.mp4",
+            mimeType = "video/mp4",
+            container = "mp4",
+            mode = PlaybackMode.DIRECT_PLAY,
+            supportsSeeking = true,
+        )
+        val registry = FakeRegistry(detail = null, playback = null)
+        val engine = FakeEngine()
+        val downloads = object : DownloadedMediaLocator {
+            override suspend fun resolveLocalPlayback(
+                serverId: String,
+                itemId: String,
+                fileNameHint: String?,
+            ): PlaybackSource = local
+
+            override suspend fun listCompleted(): List<DownloadRecord> = emptyList()
+        }
+        val vm = PlayerViewModel(
+            savedStateHandle = savedState("m1"),
+            serverStore = FakeServerStore(embyServer()),
+            progressStore = FakeProgressStore(resume = 32_000L),
+            subtitleMemoryStore = FakeSubtitleMemoryStore(),
+            registry = registry,
+            media3EngineFactory = PlaybackEngineCreator { engine },
+            mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+            engineHistory = InMemoryEnginePreferenceHistory(),
+            userPreferencesRepository = FakeUserPreferences(),
+            artworkPaletteLoader = NoArtworkPalette,
+            logger = noOpLogger,
+            downloadedMediaLocator = downloads,
+        )
+        try {
+            runCurrent()
+
+            assertEquals(ResolveState.Ready, vm.resolveState.value)
+            assertEquals(local, engine.playedSession?.source)
+            assertEquals(32_000L, engine.playedSession?.resumePositionMs)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    // ---- C：解析失败 → Failed，engine 不 play ----    @Test
     fun `playback failure surfaces as failed state without engine play`() = runTest(dispatcher) {
         val registry = FakeRegistry(
             detail = FakeDetail(
@@ -380,6 +433,48 @@ class PlayerViewModelTest {
                 runCurrent()
             }
         }
+
+    // ---- 条目 72：没有远端 PROGRESS 能力的源（已缓存 / 本地内容）也要写回本地 ----
+    @Test
+    fun `playback without a remote progress provider still writes the local snapshot`() = runTest(dispatcher) {
+        val saved = mutableListOf<PlaybackProgress>()
+        val finalProgress = PlaybackProgress(
+            serverId = "srv-1", itemId = "m1", positionMs = 42_000,
+            durationMs = 60_000, isPaused = true, updatedAtEpochMs = 1,
+        )
+        val engine = FakeEngine(finalProgress = finalProgress)
+        val vm = PlayerViewModel(
+            savedStateHandle = savedState("m1"),
+            serverStore = FakeServerStore(embyServer()),
+            progressStore = FakeProgressStore(resume = null) { saved += it },
+            subtitleMemoryStore = FakeSubtitleMemoryStore(),
+            registry = FakeRegistry(
+                detail = FakeDetail(mediaItemWithPoster(null)),
+                // 已缓存/本地内容：有播放源，但没有 progress 能力。
+                playback = FakePlayback(PlaybackSource(url = "file:///cache/m1.mkv")),
+                progress = null,
+            ),
+            media3EngineFactory = PlaybackEngineCreator { engine },
+            mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+            engineHistory = InMemoryEnginePreferenceHistory(),
+            userPreferencesRepository = FakeUserPreferences(),
+            artworkPaletteLoader = NoArtworkPalette,
+            logger = noOpLogger,
+        )
+        try {
+            runCurrent()
+            vm.stopAndFlush()
+            runCurrent()
+            assertEquals(
+                "没有远端进度能力时，本地快照仍必须回写（详情页/继续观看靠它）",
+                listOf(finalProgress),
+                saved,
+            )
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
 
     // ---- D：播放源暴露给专业信息面板 + 专业/精简开关持久化 ----
     @Test
@@ -617,6 +712,125 @@ class PlayerViewModelTest {
         }
     }
 
+    /**
+     * 条目 21：换源/换集时必须先把进度与缓冲状态清零，再等新源解析。
+     * 旧实现在 Resolving 期间继续暴露上一个会话的 position/isBuffering。
+     */
+    @Test fun switchingSourceClearsStaleProgressWhileTheNewSourceResolves() = runTest(dispatcher) {
+        val gate = Channel<Unit>(Channel.UNLIMITED)
+        val playback = FakePlayback(
+            source = PlaybackSource("https://fixture.invalid/video.mp4"),
+            gate = gate,
+        )
+        val engine = FakeEngine()
+        val vm = PlayerViewModel(
+            savedStateHandle = savedState("m1"),
+            serverStore = FakeServerStore(embyServer()),
+            progressStore = FakeProgressStore(resume = null),
+            subtitleMemoryStore = FakeSubtitleMemoryStore(),
+            registry = FakeRegistry(
+                detail = FakeDetail(mediaItemWithPoster("https://fixture.invalid/poster")),
+                playback = playback,
+            ),
+            media3EngineFactory = PlaybackEngineCreator { engine },
+            mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+            engineHistory = InMemoryEnginePreferenceHistory(),
+            userPreferencesRepository = FakeUserPreferences(),
+            artworkPaletteLoader = NoArtworkPalette,
+            logger = noOpLogger,
+        )
+        backgroundScope.launch { vm.uiState.collect { } }
+        try {
+            runCurrent()
+            assertEquals(ResolveState.Resolving, vm.resolveState.value)
+            gate.send(Unit); runCurrent()
+            assertEquals(ResolveState.Ready, vm.resolveState.value)
+
+            engine.setState(
+                PlaybackUiState(
+                    positionMs = 90_000,
+                    durationMs = 120_000,
+                    isBuffering = true,
+                    playWhenReady = true,
+                )
+            )
+            runCurrent()
+            assertEquals(90_000L, vm.uiState.value.positionMs)
+            assertTrue(vm.uiState.value.isBuffering)
+
+            vm.resolve()
+            runCurrent()
+            assertEquals(ResolveState.Resolving, vm.resolveState.value)
+            assertEquals("换源后进度必须清零", 0L, vm.uiState.value.positionMs)
+            assertFalse("换源后缓冲状态必须清零", vm.uiState.value.isBuffering)
+            assertEquals("换源后时长必须重新计算", 0L, vm.uiState.value.durationMs)
+            assertFalse(vm.uiState.value.playWhenReady)
+
+            gate.send(Unit); runCurrent()
+            assertEquals(ResolveState.Ready, vm.resolveState.value)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    /** 条目 124：设置里的精确续播开关必须随 PlaybackSession 传到引擎。 */
+    @Test fun preciseResumePreferenceReachesThePlaybackSession() = runTest(dispatcher) {
+        val prefs = FakeUserPreferences()
+        prefs.state.value = UserPreferences(preciseResumeSeek = true)
+        val engine = FakeEngine()
+        val vm = PlayerViewModel(
+            savedStateHandle = savedState("m1"),
+            serverStore = FakeServerStore(embyServer()),
+            progressStore = FakeProgressStore(resume = 15_000L),
+            subtitleMemoryStore = FakeSubtitleMemoryStore(),
+            registry = FakeRegistry(
+                detail = FakeDetail(mediaItemWithPoster("https://fixture.invalid/poster")),
+                playback = FakePlayback(PlaybackSource("https://fixture.invalid/video.mp4")),
+            ),
+            media3EngineFactory = PlaybackEngineCreator { engine },
+            mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+            engineHistory = InMemoryEnginePreferenceHistory(),
+            userPreferencesRepository = prefs,
+            artworkPaletteLoader = NoArtworkPalette,
+            logger = noOpLogger,
+        )
+        try {
+            runCurrent()
+            assertEquals(ResolveState.Ready, vm.resolveState.value)
+            assertEquals(ResumeSeekMode.EXACT, engine.playedSession?.resumeSeekMode)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test fun aspectModeIsRestoredPerItemAndCyclePersistsMemory() = runTest(dispatcher) {
+        val prefs = FakeUserPreferences()
+        val key = com.mediahub.model.VideoAspectMemory.key("srv-1", "m1")
+        prefs.state.value = UserPreferences(
+            videoAspectOverrides = mapOf(key to com.mediahub.model.VideoAspectMode.RATIO_16_9),
+        )
+        val vm = PlayerViewModel(savedState("m1"), FakeServerStore(embyServer()), FakeProgressStore(null),
+            FakeSubtitleMemoryStore(), FakeRegistry(detail = FakeDetail(mediaItemWithPoster("https://fixture.invalid/poster")),
+                playback = FakePlayback(PlaybackSource("https://fixture.invalid/video.mp4"))),
+            PlaybackEngineCreator { FakeEngine() }, PlaybackEngineCreator { FakeEngine() },
+            InMemoryEnginePreferenceHistory(), prefs, NoArtworkPalette, noOpLogger)
+        try {
+            runCurrent()
+            assertEquals(com.mediahub.model.VideoAspectMode.RATIO_16_9, vm.videoAspectMode.value)
+
+            vm.cycleVideoAspectMode(); runCurrent()
+
+            assertEquals(com.mediahub.model.VideoAspectMode.RATIO_4_3, vm.videoAspectMode.value)
+            assertEquals(
+                com.mediahub.model.VideoAspectMode.RATIO_4_3,
+                prefs.state.value.videoAspectOverrides[key],
+            )
+        } finally { vm.stopAndFlush(); runCurrent() }
+
+    }
+
     // ---- fakes ----
     private val NoArtworkPalette = ArtworkPaletteLoader { _, _ -> null }
 
@@ -650,10 +864,16 @@ class PlayerViewModelTest {
         override fun observeContinueWatching(limit: Int): Flow<List<PlaybackProgress>> = flowOf(emptyList())
         override suspend fun getResume(serverId: String, itemId: String): Long? = resume
         override suspend fun save(progress: PlaybackProgress) = onSave(progress)
+        override suspend fun get(serverId: String, itemId: String): PlaybackProgress? = null
+        override suspend fun clearAll(): Int = 0
     }
 
-    private class FakeDetail(private val item: MediaItem) : MediaDetailProvider {
-        override suspend fun getItemDetail(itemId: String): MediaDetail = MediaDetail(item = item)
+    private class FakeDetail(
+        private val item: MediaItem,
+        private val versions: List<MediaVersion> = emptyList(),
+    ) : MediaDetailProvider {
+        override suspend fun getItemDetail(itemId: String): MediaDetail =
+            MediaDetail(item = item, versions = versions)
     }
 
     private class SequencedDetail(items: List<MediaItem>) : MediaDetailProvider {
@@ -682,15 +902,21 @@ class PlayerViewModelTest {
     private class FakePlayback(
         private val source: PlaybackSource? = null,
         private val error: ProviderException? = null,
+        private val gate: Channel<Unit>? = null,
     ) : MediaPlaybackProvider {
         var receivedItem: MediaItem? = null
         var receivedStartMs: Long? = null
+        var receivedVersionId: String? = null
+        var calls: Int = 0
         override suspend fun resolvePlayback(
             item: MediaItem,
             options: PlaybackOptions,
         ): PlaybackSource {
+            calls++
             receivedItem = item
             receivedStartMs = options.startPositionMs
+            gate?.receive()
+            receivedVersionId = options.versionId
             error?.let { throw it }
             return checkNotNull(source)
         }
@@ -736,6 +962,7 @@ class PlayerViewModelTest {
         private val eventsFlow = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 8)
         override val events: Flow<PlaybackEvent> get() = eventsFlow
         var playedSession: PlaybackSession? = null
+        var playCount: Int = 0
         var presentation: Pair<com.mediahub.model.SubtitleStyle, Int>? = null
         var presentationOnPlay: Pair<com.mediahub.model.SubtitleStyle, Int>? = null
         override fun setSubtitlePresentation(style: com.mediahub.model.SubtitleStyle, sizeSp: Int) {
@@ -745,8 +972,9 @@ class PlayerViewModelTest {
         override val subtitleCues: StateFlow<androidx.media3.common.text.CueGroup?> = MutableStateFlow(null)
         override val downloadSpeedBps: StateFlow<Long> = MutableStateFlow(0L)
         override fun attachSurface(surface: android.view.Surface?) = Unit
-        override fun play(session: PlaybackSession) { presentationOnPlay = presentation; playedSession = session }
+        override fun play(session: PlaybackSession) { playCount++; presentationOnPlay = presentation; playedSession = session }
         fun setUiState(state: PlaybackUiState) { ui.value = state }
+        fun setState(state: PlaybackUiState) { ui.value = state }
         override fun togglePlayPause() = Unit
         override fun seekTo(positionMs: Long, mode: com.mediahub.player.engine.SeekMode) = Unit
         override fun setSpeed(speed: Float) = Unit
@@ -790,7 +1018,7 @@ class PlayerViewModelTest {
         override fun e(tag: LogTag, message: String, throwable: Throwable?) = Unit
     }
 
-    private fun mediaItemWithPoster(url: String) = MediaItem(
+    private fun mediaItemWithPoster(url: String?) = MediaItem(
         serverId = "srv-1",
         id = "m1",
         type = MediaType.MOVIE,
@@ -805,4 +1033,130 @@ class PlayerViewModelTest {
         secondary = 0xFF334455.toInt(),
         accent = 0xFFCCDDEE.toInt(),
     )
+
+    // ---- 多版本闭环：路由 version → PlaybackOptions.versionId → 播放器内切换 ----
+
+    private fun twoVersions() = listOf(
+        MediaVersion(id = "v1", name = "1080P"),
+        MediaVersion(id = "v2", name = "4K"),
+    )
+
+    private fun versionViewModel(
+        handle: SavedStateHandle,
+        engine: FakeEngine,
+        playback: FakePlayback,
+        versions: List<MediaVersion> = twoVersions(),
+    ): PlayerViewModel = PlayerViewModel(
+        savedStateHandle = handle,
+        serverStore = FakeServerStore(embyServer()),
+        progressStore = FakeProgressStore(resume = 30_000L),
+        subtitleMemoryStore = FakeSubtitleMemoryStore(),
+        registry = FakeRegistry(
+            detail = FakeDetail(mediaItemWithPoster("http://img/poster.jpg"), versions),
+            playback = playback,
+        ),
+        media3EngineFactory = PlaybackEngineCreator { engine },
+        mpvEngineFactory = PlaybackEngineCreator { FakeEngine() },
+        engineHistory = InMemoryEnginePreferenceHistory(),
+        userPreferencesRepository = FakeUserPreferences(),
+        artworkPaletteLoader = NoArtworkPalette,
+        logger = noOpLogger,
+    )
+
+    @Test
+    fun `launch version flows into playback options`() = runTest(dispatcher) {
+        val playback = FakePlayback(PlaybackSource(url = "http://media/stream.mkv"))
+        val engine = FakeEngine()
+        val vm = versionViewModel(
+            savedState("m1").apply { this["version"] = "v2" },
+            engine,
+            playback,
+        )
+        try {
+            runCurrent()
+            assertEquals(ResolveState.Ready, vm.resolveState.value)
+            assertEquals("v2", playback.receivedVersionId)
+            assertTrue(vm.versionSwitchAvailable.value)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `without launch version playback options stay versionless`() = runTest(dispatcher) {
+        val playback = FakePlayback(PlaybackSource(url = "http://media/stream.mkv"))
+        val vm = versionViewModel(savedState("m1"), FakeEngine(), playback)
+        try {
+            runCurrent()
+            assertEquals(ResolveState.Ready, vm.resolveState.value)
+            assertNull(playback.receivedVersionId)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `load versions exposes detail versions`() = runTest(dispatcher) {
+        val playback = FakePlayback(PlaybackSource(url = "http://media/stream.mkv"))
+        val vm = versionViewModel(savedState("m1"), FakeEngine(), playback)
+        try {
+            runCurrent()
+            assertTrue("真实 detail 能力存在时版本面板可用", vm.versionSwitchAvailable.value)
+            vm.loadVersions()
+            runCurrent()
+            assertEquals(listOf("v1", "v2"), vm.versions.value.map { it.id })
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `switch version re-resolves with requested version and replays`() = runTest(dispatcher) {
+        val playback = FakePlayback(PlaybackSource(url = "http://media/stream.mkv"))
+        val engine = FakeEngine()
+        val vm = versionViewModel(savedState("m1"), engine, playback)
+        try {
+            runCurrent()
+            assertEquals(1, engine.playCount)
+            assertNull(playback.receivedVersionId)
+
+            vm.loadVersions()
+            runCurrent()
+            vm.switchVersion("v1")
+            runCurrent()
+
+            assertEquals("v1", playback.receivedVersionId)
+            assertEquals("切换版本必须重新起播", 2, engine.playCount)
+            assertEquals("v1", vm.selectedVersionId.value)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `switch to unknown or same version does not re-resolve`() = runTest(dispatcher) {
+        val playback = FakePlayback(PlaybackSource(url = "http://media/stream.mkv"))
+        val engine = FakeEngine()
+        val vm = versionViewModel(savedState("m1"), engine, playback)
+        try {
+            runCurrent()
+            vm.loadVersions()
+            runCurrent()
+            vm.switchVersion("missing")
+            runCurrent()
+            assertEquals(1, playback.calls)
+            vm.switchVersion("v1")
+            runCurrent()
+            vm.switchVersion("v1")
+            runCurrent()
+            assertEquals(2, playback.calls)
+        } finally {
+            vm.stopAndFlush()
+            runCurrent()
+        }
+    }
 }

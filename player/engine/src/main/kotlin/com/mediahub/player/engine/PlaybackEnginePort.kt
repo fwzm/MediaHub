@@ -14,6 +14,10 @@ import kotlinx.coroutines.flow.asStateFlow
 private val UnavailableAudioBands: StateFlow<AudioBandLevels?> =
     MutableStateFlow<AudioBandLevels?>(null).asStateFlow()
 
+private val NoCacheReadSpeed: StateFlow<Long> = MutableStateFlow(0L).asStateFlow()
+
+private val NotReadingFromCache: StateFlow<Boolean> = MutableStateFlow(false).asStateFlow()
+
 /** 播放内核种类（U2：Media3 快速路径 / mpv 兼容兜底）。 */
 enum class EngineKind { MEDIA3, MPV }
 
@@ -44,6 +48,15 @@ interface PlaybackEnginePort {
     val subtitleCues: StateFlow<CueGroup?>
     /** 真实媒体下载速度（B/s，TransferListener 统计；Overlay 展示）。 */
     val downloadSpeedBps: StateFlow<Long>
+    /**
+     * 最近一秒从本地缓存读取的速率（B/s）。条目 19：缓存命中 seek 时网络速度为 0，
+     * UI 用本值区分「缓存读取」而不是网络加载。
+     */
+    val cacheReadSpeedBps: StateFlow<Long>
+        get() = NoCacheReadSpeed
+    /** 当前是否正在从本地缓存读取（缓存命中 seek 期间为 true）。 */
+    val isReadingFromCache: StateFlow<Boolean>
+        get() = NotReadingFromCache
     /**
      * 可选的归一化音频频段。null 表示采样不可用，UI 应使用 baseline 动画；
      * 非 null 的 [AudioBandLevels.ZERO] 表示后端可用但当前静音。

@@ -76,6 +76,7 @@ core/                核心层（无业务）
   model/             统一领域模型（纯 Kotlin，无 Android 依赖）
   network/           ApiClient（API）+ MediaHttpClient（媒体流）+ 结构化错误
   database/          Room（服务器/账号/进度）+ DataStore（偏好）+ Repository
+  download/          离线下载内核（状态机 / 断点续传 / 索引清理 / 本地播放关联；纯 Kotlin）
   security/          Android Keystore 加密存储（SecretStorage / TokenStore）
   logging/           统一日志（分类、脱敏、内存缓冲）
 player/
@@ -86,7 +87,7 @@ provider/
   base/              BaseMediaServerProvider + Provider 注册表
   emby/ jellyfin/ webdav/ local/   具体数据源；真实能力以各 Provider 的声明与验证记录为准
   smb/ aliyun/ baidu/ quark/ china-mobile/ tianyi/   规划占位（README）
-metadata/            媒体元数据（刮削）抽象
+metadata/            媒体元数据（刮削）：TMDB 客户端（搜索/详情/季集），API Key 由调用方注入
 feature/
   home/ server/ library/ detail/ search/ settings/ player/    UI 模块
 docs/                providers / player / api 设计文档
@@ -116,15 +117,49 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
 ### Emby（Phase 1A–1B-2.4）
 1. 首页 → 添加媒体库 → Emby → 填服务器地址 / 用户名 / 密码 → 登录并添加。
 2. 点 Emby 服务器卡片 → 浏览 Views → 电影库 / 剧集库 → 海报墙（电影/剧集 2:3 海报，单集 16:9 剧照）。
+   地址只填主机、不确定协议或端口时，可点地址框旁「自动识别」：依次尝试 https/http ×
+   8096/8920/443/80（最多 6 个候选），成功后回填完整地址并显示识别结果；全部失败会列出
+   实际尝试过的地址，不会静默改用猜测值。显式写了协议/端口时只探测该组合。
 3. 点 Movie / Episode → 详情页（backdrop + 海报 + 元信息 + 简介）→ 播放。
 4. 播放（无转码 Direct Stream）：Token 只走请求头不进 URL（ADR-026）；
    跨 origin 重定向剥离凭据（ADR-030）；图片加载同源注入鉴权、跨 origin 剥离（ADR-031）。
 5. 播放器：音轨/字幕 Bottom Sheet（codec / 声道 / 采样率 / 解码器诊断），
    字幕默认白字透明背景（黑底关闭），字号/颜色/描边/位置可调并持久化；
+   画面比例可循环切换（自适应 / 填满 / 16:9 / 4:3），**按内容记忆**，再次播放同一内容时自动恢复；
+   视频按真实宽高比布局（含首帧），Media3 与 mpv 字幕字号统一按 720p 基准换算；
    全部音轨不被设备支持时显式提示而非静默无声。
-   未手动选轨时按"系统语言 → 容器 DEFAULT → 设备支持 → 码率/声道 → 首轨兜底"选默认音轨
-   （ADR-048，待产品确认；字幕默认不自动开启）。
-6. 播放进度自动写入本地快照 → 首页"继续观看"（缩略图 + 进度条）。
+   未手动选轨时按"用户首选音频语言 → 系统语言 → 容器 DEFAULT → 设备支持 → 码率/声道 → 首轨兜底"选默认音轨
+   （ADR-048）。详情页右上角「音轨与字幕偏好」可选首选音频语言和首选字幕语言（中文/英语/日语/韩语，或跟随系统/不自动开启），
+   选择持久化到 DataStore；设置首选字幕语言后，只有匹配到该语言的字幕轨才默认开启，匹配不到不自动开启；
+   未设置首选语言时保持既有默认策略（字幕不自动开启）。
+6. 手动选中的音轨/字幕轨只在本播放会话内记录：自动连播下一集时按语言/标题继承同一条轨；
+   用户显式关闭字幕后，下一集保持关闭，不会被首选字幕语言重新打开。
+7. 播放进度自动写入本地快照 → 首页"继续观看"（缩略图 + 进度条）；服务端支持时
+   同时读取 `/Users/{id}/Items/Resume` 与 `UserData.PlaybackPositionTicks` 做跨设备续播，
+   退出时先补发最终 Progress 再发 Stopped（兼容只认 Progress 落库位置的服务器）。
+   外挂字幕兼容 `S_TEXT/UTF8` 等 MediaBrowser codec 别名，以及只给 `DeliveryUrl`、
+   不置 `IsExternal` 的服务；请求仍走官方字幕端点并只在请求头带 Token（ADR-026）。
+8. 播放期保屏与续播精度：播放中持有 `FLAG_KEEP_SCREEN_ON`，暂停、解析失败或退出播放页立即恢复系统锁屏；
+   换源/换集时进度、缓冲、时长与播放意图先清零，等新源解析后再重算。
+   设置 → 播放 →「精确续播」默认关闭：EXO 用 `SeekParameters.CLOSEST_SYNC`、mpv 用 `hr-seek=no`，
+   从邻近关键帧快速起播；开启后 EXO 用 `SeekParameters.EXACT`、mpv 用 `hr-seek=yes` 按精确时间定位，首帧更慢。
+
+### 播放画面与手势
+1. **双击分区**：默认保持 `左 40% 快退 / 中 20% 播放暂停 / 右 40% 快进`；
+   在设置里开启「双击两侧显隐控制栏」后，最外侧各 10% 改为显隐控制栏，10%–40% 快退、40%–60% 播放暂停、
+   60%–90% 快进（`PlayerGestureZonePolicy`，有坐标单测钉住，快进快退不被覆盖）。
+2. **双指缩放**：1×–3× 手动缩放画面，`player_zoom_reset`「还原画面」一键回到 1×。
+3. **安全边距**：控制栏顶部取状态栏与 `displayCutout` 较大者，底部取导航栏与 `systemGestures` 较大者，
+   左右加 cutout 内边距（`PlayerInsetPolicy`，有 insets 单测）。
+4. **底部系统手势区**：落在导航/系统手势保留区的上滑不再被播放器当作亮度/音量调节，直接交给系统返回桌面。
+5. **音频偏小**：多声道编码（AC3/EAC3/DTS/TrueHD/FLAC 等）启用 mpv `audio-normalize-downmix`，修正下混增益而不是抬高音量上限。
+6. **杜比视界**：设备明确不支持 `HdrType.DOLBY_VISION` 时路由到 mpv，并置 `hwdec=no` + 色调映射兜底，避免黑屏。
+7. **共享纹理失败**：`SURFACE_ERROR` 先摘除并重挂 Surface 在原位置续播（每 session 一次），仍失败才降级 mpv，并给出可读提示。
+8. **本地数据访问失败**：SAF 在 `SecurityException` 之外的厂商异常（`IllegalStateException` / `UnsupportedOperationException` 等）
+   统一归类为「目录授权失效」，引导重新授权而不是崩溃或显示空目录。
+
+以上手势 / 缩放 / insets / 错误归类均以 JVM 单测覆盖；杜比硬解失败、真实共享纹理失败、刘海屏与底部手势区、
+厂商 SAF 异常仍需真机验证，当前 `NOT_RUN`。
 
 ### WebDAV（只读）
 1. 首页 → 添加媒体库 → WebDAV → 填服务器地址（目录 URL，保存时统一补结尾 `/`）/ 用户名 / 密码 → 登录并添加。
@@ -149,6 +184,16 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
 
 本轮验证和仍待完成的系统撤权 UI 验收见 [SAF 接入记录](docs/reviews/saf-directory-content-2026-10-26.md)。
 
+### 首页聚合与详情页来源选择
+1. 首页「继续观看」按当前首页来源展示；数据源选择器显示**线路名称**（如「主线路」），不再显示服务器地址或内部 ID。
+2. 媒体源卡片可点「设为首页」**临时**切换首页；该选择只存在内存，进程重启后回到 `isDefault` 的默认首页，
+   也可用「恢复默认」立即还原（不新增持久首页字段）。
+3. 单资源「继续观看」标题栏提供「查看全部」，进入该来源的完整继续观看列表。
+4. 所选来源没有可播放记录时，该分区明确显示「暂无可播放资源」，不再复用通用空态文案。
+5. 首页「媒体源」与「继续观看」两个分区独立加载：任一分区失败只影响自身并显示分区错误，
+   不会连带整页空白或闪退。
+6. 详情页的多来源选择器同样以线路名称标注来源；不同服务器线路同名时追加服务器名消歧，不使用地址或内部 ID。
+
 ### Jellyfin 静态播放
 
 本分支仍只交付无需转码的静态媒体流，ISO 不支持。字幕策略阻止播放时的协商、显式字幕偏好保护和
@@ -156,7 +201,20 @@ $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
 
 设置页可改默认倍速、字幕大小等（DataStore 持久化）。mpv 同样接收字幕大小与字幕面板中的颜色、
 描边、背景、位置偏好，并在播放中更新、退出重进及内核降级时保留；默认尊重内嵌 ASS 样式。
+跨内核字号一致性：Media3 的 SubtitleView 与视频画面同尺寸，字号用 `38/720` 视高比例；
+mpv 的 `sub-font-size` 使用同一常量，因此两种内核在同一视频高度下字号一致。
 验证范围见 [字幕外观接线记录](docs/reviews/subtitle-presentation-and-local-audit-2026-10-27.md)。
+
+### 元数据（TMDB，第 1 段）
+
+`metadata` 模块已提供 TMDB v3 客户端与 Provider（`TmdbMetadataProvider`）：
+搜索（`/search/multi`）、详情（`/movie|tv/{id}`，含 credits / external_ids）、
+季集（`/tv/{id}/season/{n}`，含未入库与未播出季集）。
+
+- 配置：API Key 由调用方注入（`TmdbMetadataProvider.create(apiKey = ...)`），仓库不保存任何真实密钥；
+  `baseUrl` / `language` 可覆盖，测试用 MockWebServer 注入本地地址，不访问真实 TMDB。
+- ID 约定：`movie/550`、`tv/1396`；裸数字 ID 会被拒绝（TMDB 电影与剧集 ID 空间重叠）。
+- 限制：尚未接入 UI 与持久化；多源评分聚合、片头片尾标记、排序与匹配率优化在后续段交付。
 
 > 真机、真实 Emby/Jellyfin 服务器和旧版本数据库升级不属于上述 JVM 路径的自动保证范围；
 > 当前验证边界、尚未完成项和每个 Provider 的能力以 [TASKS.md](TASKS.md)、[ROADMAP.md](ROADMAP.md)
@@ -183,7 +241,7 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 - 技术栈：C# / .NET 10 + WinUI 3（Windows App SDK 1.8）+ libmpv（`--wid` 嵌入，D3D11 硬解），自包含部署
 - 代码位置：`windows/`；客户端自身说明见 [windows/README.md](windows/README.md)
 - 现状：本章状态取自 `main`（Windows 代码于 2026-11-11 随 PR #33 合并，merge commit `c22f85a9`），**未提供任何安装包**；
-  `feature/windows-client` 分支仍保留（PR #39 等 stacked 工作以它为 base），其上的 Windows 工作不在本章范围内
+  `feature/windows-client` 分支仍在（stacked 工作的历史落点；W6 的 [PR #39](https://github.com/fwzm/MediaHub/pull/39) 已于 2026-11-14 关闭、未合并），其上的 Windows 工作不在本章范围内
 
 > **读法**：本章只写有执行证据的结论。完整逐项状态（含 `UNVERIFIED` / `NOT_RUN` 标记）见
 > [windows/docs/CAPABILITY-MAP.md](windows/docs/CAPABILITY-MAP.md) 与 `windows/docs/W*-EVIDENCE.md`；
@@ -235,6 +293,13 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 
 ### 已知缺陷与未验证项
 
+- **保屏（条目 104）只有 JVM 策略测试**：`KeepScreenOnPolicy` 的判定矩阵已单测覆盖，但真实熄屏行为取决于
+  系统屏幕超时与窗口标志，本地无法自动化；状态 `NOT_RUN`。验证条件：Xiaomi 14 Ultra（serial `123e243f`）
+  将「屏幕超时」设为 15 s，播放 ≥1 分钟不熄屏；暂停后 15 s 内正常熄屏；退出播放页后恢复系统行为。
+- **精确续播（条目 124）的实际起播位置未上真机**：EXO `SeekParameters` 与 mpv `hr-seek` 的映射有单测，
+  但「关闭时落在邻近关键帧、开启时精确到记录位置」及首帧耗时差异，需用关键帧间隔 ≥2 s 的夹具在真机逐项记录；
+  当前 `NOT_RUN`。验证条件：同一夹具分别在两种模式下从同一记录位置起播，记录 `positionMs` 与首帧耗时。
+
 - **进度回写的服务端语义**：中断位置写入与「完全重启后恢复」已在 Jellyfin 12.2 与 Emby 4.10.x 实测
   （W8 S2 43/43：中断回写 304.33 s，完全重启后从 306 s 恢复）；W4 记录的「中断恢复 FAILED」已更正为
   **夹具片长低于服务端阈值**（`MinResumeDurationSeconds`=300 s），不是客户端缺陷。
@@ -262,6 +327,8 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   但未在真实老 NAS 上验证；Digest / NTLM 等非 Basic 认证不在支持范围（会按认证失败处理）。
   含 ISO-8859-1 无法表示字符的凭据遇到只认旧编码的服务器时不会降级重试——这是有意的 fail-closed，不是遗漏。
 - **搜索**：多源搜索已有模拟服务器与单测（`Search_sends_the_term_and_returns_only_matching_items` 断言 `SearchTerm=Star%20Wars` 与服务端过滤结果）；Emby / Jellyfin 共用的 `/Users/{id}/Items?SearchTerm=` 服务端搜索已接入。真服路径未测，验证条件是真实 Emby / Jellyfin 服务器；WebDAV / 本地源没有服务端搜索能力，按「不支持搜索」处理。
+  搜索历史已本地持久化（Room `search_history` 表：主键去重、重复搜索置顶、上限 20 条）；历史列表固定显示两行高度、超出滚动，长按单条删除；进入搜索页或再次选中搜索入口时聚焦输入框并弹出键盘。
+  上述历史与交互有 `core:database` / `feature:search` 的 JVM / Robolectric 用例覆盖（`--rerun-tasks --no-build-cache` 实测）；输入法是否真正弹出未在真机断言，属 `NOT_RUN`。
 - **体验缺口与覆盖缺口**：「继续观看」卡片海报懒加载已修（W10；页面调用 `MediaCardViewModel.RequestPoster`，U1 P2.6 两服 PASS）；永久播放列表拖拽排序已接线（`ListView.CanReorderItems` → `PlaylistStore.ReorderItems`，存储层与置换校验有单测），WinUI 拖拽手势本身仍需 GUI 验收（`NOT_RUN`；条件：Windows 客户端 + 至少 3 条目的播放列表）。
 - **NOT_RUN / IMPLEMENTED_UNVERIFIED（缺的是可判定的执行条件，其中 HDR 是产品边界而非缺陷）**：
   - **HDR 与色彩管理**：产品边界 —— 不声称任何 HDR 能力，杜比视界 `NOT_SUPPORTED`；若将来要宣称，需 HDR 显示器 + HDR
@@ -274,6 +341,29 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   - **真实第二 Windows 账户下的凭据库行为**：DPAPI 按用户隔离，需在同一台机器上建第二个 Windows 账户并登录，
     当前 `NOT_RUN`（不改系统账户无法自动化）。
   - **Intel / AMD / NVIDIA 硬件兼容矩阵**：需三类 GPU 真机，当前 `NOT_RUN`。
+- **已解决（2026-11-14，JVM 验证）**：清空播放记录与已缓存 / 本地内容的进度回显。
+  设置页新增「播放记录 → 清除播放记录」入口（单飞、幂等；空表返回 0，失败只提示不抛错），
+  `PlaybackProgressDao.deleteAll()` + `ProgressStore.clearAll()` 返回真实删除条数；
+  详情页通过新增的 `ProgressStore.get(serverId, itemId)` 回读本地快照，在服务器无 `UserData`
+  进度时（已缓存 / 本地内容）把主按钮显示为「继续播放 · mm:ss」并给出进度条，
+  页面 `ON_RESUME` 时刷新。`ProgressRepositoryClearTest`、`SettingsViewModelTest`、
+  `DetailViewModelTest`、`PlayerViewModelTest` 覆盖清空幂等、失败降级、详情回读、
+  以及无远端 `PROGRESS` 能力时本地快照仍回写。真机清空与详情回显为 `NOT_RUN`。
+- **已解决（2026-11-14，JVM 验证）**：缓存区间 seek 误报网络加载态、无扩展名 HLS 识别与 EXO 解析错误重试上限。
+  `PlaybackSpeedMonitor` 同时监听 `CacheDataSource`（`onCachedBytesRead`），`BufferingIndicatorPolicy`
+  在缓存读取期间抑制网络加载态（400 ms 宽限；网络速度 0 且缓存读取中显示「本地缓存」）；
+  `HlsContentDetector` 按 `Content-Type` 或 `#EXTM3U` 前缀识别，WebDAV 在容器未知时做一次
+  短超时 `Range` 探测（失败只退回 null，不阻断起播）；`Media3RateLimitBackoffPolicy` 给
+  `ParserException` / `UnrecognizedInputFormatException` 单独的次数预算，用尽返回 `C.TIME_UNSET`。
+  `BufferingIndicatorPolicyTest`、`PlaybackSpeedMonitorTest`、`HlsContentDetectorTest`、
+  `WebDavHlsProbeTest`、`Media3RateLimitBackoffPolicyTest` 覆盖（先红后绿：临时移除解析上限时
+  2 例失败，恢复后过滤套件 13/13 通过）。真机「缓存 seek 转圈」与无扩展名 HLS 起播为 `NOT_RUN`。
+- **已解决（2026-11-14，JVM 验证）**：画面比例记忆与首帧拉伸 / 跨内核字幕字号。新增
+  `VideoAspectMode`（自适应 / 填满 / 16:9 / 4:3）与 `VideoAspectMemory`（按 `serverId/itemId`
+  记忆、上限 200 条），播放器按视频真实宽高比布局（未知尺寸回退 16:9，不再铺满拉伸）；
+  Media3 字幕层与画面同尺寸，字号常量与 mpv 的 720p 基准共用 `SubtitleStyle.BASE_FONT_SIZE_AT_720P`。
+  `VideoAspectModeTest`、`VideoContentSizingTest`、`UserPreferencesStoreTest`、`PlayerViewModelTest`
+  覆盖模式循环、记忆序列化、尺寸计算与偏好恢复。真机首帧/字幕目视效果为 `NOT_RUN`。
 - **已解决（2026-11-12）**：季 / 集导航已从 `NOT_RUN` 移出。U2 的 P1.1 在真实 Emby / Jellyfin 上执行
   「媒体库 → 库 → 剧 → 第 1 季 → S01E01 详情页与播放入口」，Jellyfin 侧 35/35；Emby 侧 W9 曾 35/35，
   W12 复核产物中的 12 条失败均为窗口未到前台导致的非产品失败，详见
@@ -285,7 +375,7 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
 - **已解决（2026-11-12）**：图片缓存的磁盘上限与磁盘 TTL 已从 `NOT_RUN` 移出。磁盘缓存抽成
   `ArtworkDiskCache`，256 MiB 上限、30 天 TTL、覆盖写与清空后的计量、以及孤儿 `.tmp` 清理
   由 `ArtworkDiskCacheTests` 覆盖；内存条目上限与在途去重仍无独立自动化证据。
-- **W6 跨设备来源同步**（[PR #39](https://github.com/fwzm/MediaHub/pull/39)，stacked 在 `feature/windows-client` 上，仍为 Draft）：
+- **W6 跨设备来源同步**（[PR #39](https://github.com/fwzm/MediaHub/pull/39) 已于 2026-11-14 关闭、未合并；但 Windows 侧代码已在 `main` 上 —— PR #33 的合并 `c22f85a9`（第一父 `8826d9a1`）带入了 `windows/src/MediaHub.Sync`（93 个文件）、`windows/src/MediaHub.SyncCli` 与 `windows/tests` 的同步/配对/归档用例，随 windows-ci 一起执行；`windows/docs` 内没有 W6 证据文档，同步页 GUI 仍 `GUI_UNVERIFIED`）：
   契约层、配对载荷/状态机/传输层（回环）、双向增量与设备注册表、凭据迁移（DPAPI 重封）、加密离线归档、同步 CLI、
   同步页「预览 → 逐条审批 → 应用 → 推进基线」、基线落盘与重启幂等、已配对设备登记与指纹钉扎、
   已配对设备清单与「忘记」、同步 CLI 的 `baseline` / `pair` 命令组（离线查询与预览，
@@ -405,6 +495,23 @@ MediaHub 的 **Windows 原生桌面客户端**：与 Android 版本共享同一�
   - **便携 zip**：本机可从复制出来的目录启动；安装器 / MSIX 在缺少 Windows App Runtime 时的具体行为见
     [windows/docs/licensing/PACKAGING.md](windows/docs/licensing/PACKAGING.md)。
 
+#### 服务器兼容与登录（2026-11-15 批次，Draft PR，未合并）
+
+- 已在本地门禁验证（`EXECUTED_PASS`，`--rerun-tasks --no-build-cache`）：服务器地址协议/端口自动识别；
+  Provider 错误码 → 中文文案（403 明确标注不是密码错误）；播放期 HTTP 403/404/429/5xx 结构化映射；
+  Emby/fnOS 续播读取（Resume 端点 404/405 按能力缺失处理）与退出前最终 Progress；
+  `RunTimeTicks` 标准/毫秒/秒三尺度归一（不可信值不显示）；反代子路径图片鉴权 scope；
+  外挂字幕 `S_TEXT/*` codec 别名与仅给 `DeliveryUrl` 的判定；首页/媒体库重复或缺失 id 的响应去重并转错误态；
+  SAF 访问异常统一转「重新授权目录」。
+- `NOT_RUN`（需外部条件，不得视为通过）：
+  - 真实 fnOS / Emby / Jellyfin 服务器的继续观看回写、Resume 读取与 403/404 行为：条件为可用测试服务器；
+    本批次只用 MockWebServer 与本地夹具，未访问任何真实服务器。
+  - 真实反代子路径（如 `https://host/custom`）图片加载：条件为部署一台带子路径的反代并观察是否仍 401。
+  - fnOS 真机跨设备续播、外挂字幕实际加载、授权失效设备上的 SAF 重新授权：条件为真机与真实目录授权。
+  - 缺 `PlaySessionId` 的兼容服：按 ADR-040 补充走 `mh-<uuid>` 末级兜底，服务端接受性待真实样本复核。
+- 已知残留：未处理真实服务器的转码/直连策略差异；媒体库「闪退」目前只收敛了重复/缺失 id 路径，
+  其它服务端畸形字段若仍触发 Compose 约束，需按新样本追加回归。
+
 ### 构建与测试
 
 ```powershell
@@ -417,7 +524,7 @@ dotnet test  MediaHub.Windows.sln -c Debug
 CI 见 [`.github/workflows/windows-ci.yml`](.github/workflows/windows-ci.yml)：仅在 `windows/**` 变更时运行，
 与 Android 流水线互相独立（Windows 改动不会拖慢 Android 验证，Android 改动也不消耗 Windows runner）。
 （实测补充：workflow 申报的 `paths` 只含 `windows/**`，但在 PR #33 上（该 PR 已于 2026-11-11 合并）「只改 README 的提交」是否触发 CI 并不稳定 —— 11-06 的 `d65bcda`/`1d1456d2` 没有产生任何 run，11-08 的 `09c088a6` 与 11-09 的 `e02d0877` 则各触发 windows-ci + Android CI、`check-runs=4`；因此 PR 的必需检查以最近一次确实产生 run 的 head 为准。）
-截至 `7740c01f`（2026-11-12；其 `windows/` 子树与 `main` 当前 head `06c16d2b` 逐字节相同 —— `git diff --stat 7740c01f origin/main -- windows/` 为空，因此这是 `main` 上那棵树的真实测量；`windows-ci` 的 `push` 只接 `feature/windows-*`，`main` 上的合并不会触发它，`main` 分支的 run 列表里只有 Android CI）：`MediaHub.Tests` **1973** + `MediaHub.WebDav.Tests` **104** = **2077 通过 / 0 失败 / 0 跳过**（windows-ci run **43249334935** 日志实测：`MediaHub.Tests: total=1973 baseline=1959 failed=0 notExecuted=0`、`MediaHub.WebDav.Tests: total=104 baseline=104`、`combined tests=2077`；比 W6 分支合入前的 1952 多 21 例 —— 12 例来自 `1ebd9ee2` 的 `ArtworkDiskCacheTests`（磁盘缓存上限与 TTL）与 `699a1f34` 的 `MpvSubtitleStyleTests`，另 9 例的归属未逐条核对）
+截至 `7740c01f`（2026-11-12；其 `windows/` 子树与 `main` 当前 head `fecabdd5` 逐字节相同 —— `git diff --stat 7740c01f origin/main -- windows/` 为空，因此这是 `main` 上那棵树的真实测量；`windows-ci` 的 `push` 只接 `feature/windows-*`，`main` 上的合并不会触发它，`main` 分支的 run 列表里只有 Android CI）：`MediaHub.Tests` **1973** + `MediaHub.WebDav.Tests` **104** = **2077 通过 / 0 失败 / 0 跳过**（windows-ci run **43249334935** 日志实测：`MediaHub.Tests: total=1973 baseline=1959 failed=0 notExecuted=0`、`MediaHub.WebDav.Tests: total=104 baseline=104`、`combined tests=2077`；比 W6 分支合入前的 1952 多 21 例 —— 12 例来自 `1ebd9ee2` 的 `ArtworkDiskCacheTests`（磁盘缓存上限与 TTL）与 `699a1f34` 的 `MpvSubtitleStyleTests`，另 9 例的归属未逐条核对）
 （合并前的历史锚点：`e02d0877` 上 `478 + 104 = 582`，windows-ci run **42650762907**；`478 = 469 + 9`，9 例由 W14 诊断日志落盘带来，W35–W65 都是文档/脚本门禁、未再加 C# 用例）
 （469 = 438 既有 + 31 例续播下限契约；历史口径 542 = 438 + 104 曾在 PR #33 里写过）。
 这不是本地口径而是 CI 实测：`windows-ci` 现在把两个套件**分两步**跑并各自产出 trx，再按套件名断言下限
@@ -430,7 +537,7 @@ W6-1…W6-14 合计 583（其中 W6-10 的接线 14、W6-13 的清单 UI 17）�
 W6-16 的回环传输 34、W6-17 的双向编排 22，另加 W12b 的对抗性回归 66、W6-18 的 transfer 命令组 19、
 W6-19 的 presenter 35、W6-21 的 skip 语义 9、W6-20 的 `--root`/导出路径 18、W6-24 的传输对端认证 45、W6-26 的 TLS 与指纹钉扎 37、W6-30 的投递确认 19、W6-31 的恶意帧回归 36、W6-33 的传输卡片 presenter 29、W6-37 的回执帧与握手超时分类修正 35、W6-39 的同步页回执接线 27、W6-43 的回执控件与结果行 3、W6-50 的 `transfer serve` 预算 19、W6-51 的显式主机入口 40、W6-66 的归档默认名 3、W6-67 的跨语言文本边界 11、W6-68 的 8 MiB 上限 5、W6-69 的配对文本边界 10、W6-70 的配对设备登记 14、W6-71 的配对卡片与登记 21、W6-72 的同步基线契约与接线 22
 —— 上列明细是历史累计口径，逐项相加与总数有出入，勿据此反推；总数以 CI 实测为准（W6 分支 `b937e39c` 的 windows-ci run 41873260398：`MediaHub.Tests: total=1952` + WebDav `104` = **2056**；主线 `e02d0877` 的 windows-ci run **42650762907**：`MediaHub.Tests: total=478 failed=0 notExecuted=0` + `MediaHub.WebDav.Tests: total=104` = **582**；`main` 血统 `7740c01f` 的 run 43249334935：`total=1973` + `104` = **2077**（更早的 `3d95c1d8`/run 43201950250 为 `total=1961` + `104` = `2065`））。
-> **CI 现状（截至 `7740c01f`，其 `windows/` 与 `main` head `06c16d2b` 相同）**：主干 `windows-ci` 全覆盖 success；主干 Android CI 在 `95fff582` 上首跑失败（visual-instrumentation API 32 的 `Run production visual paths on emulator` 报 `Error on ZipFile unknown archive`——装 Android Emulator 时下载包损坏，模拟器未起来 → `Require executed visual assertions` 退出码 1；同 run 的 API 36 为 success）——**已用重跑（attempt 2）证实为 CI 基础设施偶发失败：三个 job 全部 success，不是产品回归**。
+> **CI 现状（截至 `7740c01f`，其 `windows/` 与 `main` head `fecabdd5` 相同）**：`7740c01f` 上的 `windows-ci` 全部 job success（`main` 自身没有 windows-ci run，这是按树相同性借用的测量）；`main` head `fecabdd5` 的 Android CI run **45881609723** 的 attempt 2 三个 job 全部 success（attempt 1 因模拟器未起来、`Enforce visual instrumentation gate` 下游失败，重跑后通过）；主干 Android CI 在 `95fff582` 上首跑失败（visual-instrumentation API 32 的 `Run production visual paths on emulator` 报 `Error on ZipFile unknown archive`——装 Android Emulator 时下载包损坏，模拟器未起来 → `Require executed visual assertions` 退出码 1；同 run 的 API 36 为 success）——**已用重跑（attempt 2）证实为 CI 基础设施偶发失败：三个 job 全部 success，不是产品回归**。
 `MediaHub.WebDav.Tests` 的 104 例同样适用于该分支（见 [PR #39](https://github.com/fwzm/MediaHub/pull/39) 正文的验证表）。
 
 Android 侧（[`.github/workflows/android-ci.yml`](.github/workflows/android-ci.yml)）的单元门禁按模块、套件和方法核对。

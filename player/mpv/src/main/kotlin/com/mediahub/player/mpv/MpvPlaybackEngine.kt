@@ -9,6 +9,7 @@ import com.mediahub.core.logging.Logger
 import com.mediahub.core.network.HttpClientFactory
 import com.mediahub.core.network.OriginScopedCredentialInterceptor
 import com.mediahub.core.network.PlaybackError
+import com.mediahub.model.HdrType
 import com.mediahub.model.PlaybackProgress
 import com.mediahub.model.PlaybackSource
 import com.mediahub.model.SubtitleStyle
@@ -249,11 +250,17 @@ class MpvPlaybackEngine internal constructor(
                     }
                     // M2（ADR-044）：只下发有二进制证据的选项；证据缺失（null）时不干预。
                     // 任何异常都不得影响起播——降级为空选项集。
+                    val deviceSupportsSourceHdr = runCatching { hdrEvidence.supports(src.hdrType) }.getOrNull()
                     runCatching {
                         MpvTuningOptions.build(
                             MpvTuningInput(
                                 sourceHdr = src.hdrType,
-                                deviceSupportsSourceHdr = hdrEvidence.supports(src.hdrType),
+                                deviceSupportsSourceHdr = deviceSupportsSourceHdr,
+                                // 缺陷 7：多声道下混归一化，避免立体声输出上声音偏小。
+                                normalizeDownmix = MpvAudioGainPolicy.shouldNormalizeDownmix(src.audioCodec),
+                                // 缺陷 46：杜比视界且设备明确不支持时，硬解初始化会失败 → 软解兜底。
+                                softwareDecode = src.hdrType == HdrType.DOLBY_VISION &&
+                                    deviceSupportsSourceHdr == false,
                             ),
                         )
                     }.getOrDefault(emptyList()).forEach { tuning ->
@@ -261,6 +268,8 @@ class MpvPlaybackEngine internal constructor(
                         logger.i(LogTag.PLAYER, "mpv tuning " + tuning.name + "=" + tuning.value)
                     }
                     val startMs = s.startPositionMs ?: s.resumePositionMs
+                    // 条目 124：按会话精度设置起播 seek（必须在 init 之前）。
+                    m.setOptionString(MpvResumeSeekOption.NAME, MpvResumeSeekOption.value(s.resumeSeekMode))
                     if (startMs != null && startMs > 0) m.setOptionString("start", (startMs / 1000.0).toString())
                     logger.i(LogTag.PLAYER, "mpv container=$container video=${src.videoCodec} audio=${src.audioCodec} startMs=$startMs")
                     checkCurrent()
@@ -274,6 +283,9 @@ class MpvPlaybackEngine internal constructor(
                     m.observeProperty("duration", MpvInstance.Format.DOUBLE)
                     m.observeProperty("pause", MpvInstance.Format.FLAG)
                     m.observeProperty("speed", MpvInstance.Format.DOUBLE)
+                    // 条目 137：向 UI 提供视频尺寸，让画面容器与 mpv 内部宽高比一致。
+                    m.observeProperty("width", MpvInstance.Format.DOUBLE)
+                    m.observeProperty("height", MpvInstance.Format.DOUBLE)
                     m.observeProperty("media-title", MpvInstance.Format.STRING)
                     checkCurrent()
                     tr?.record(PlaybackStartupTrace.Milestone.MPV_LOADFILE)
@@ -335,20 +347,17 @@ class MpvPlaybackEngine internal constructor(
     }
 
     private fun observer(run: Run) = object : MpvInstance.Observer {
-        override fun property(name: String, value: Boolean) {
-            withCurrent(run) {
-                // G3：pause 属性同时表达「是否暂停」，因此它既是实际状态也是用户意图。
-                if (name == "pause") _uiState.update { it.copy(isPlaying = !value, playWhenReady = !value) }
-            }
+        override fun property(name: String, value: Boolean) = withCurrent(run) {
+            // G3：pause 属性同时表达「是否暂停」，因此它既是实际状态也是用户意图。
+            if (name == "pause") _uiState.update { it.copy(isPlaying = !value, playWhenReady = !value) }
         }
-
-        override fun property(name: String, value: Double) {
-            withCurrent(run) {
-                when (name) {
-                    "time-pos" -> _uiState.update { it.copy(positionMs = (value * 1000).toLong()) }
-                    "duration" -> if (value > 0) _uiState.update { it.copy(durationMs = (value * 1000).toLong()) }
-                    "speed" -> _uiState.update { it.copy(speed = value.toFloat()) }
-                }
+        override fun property(name: String, value: Double) = withCurrent(run) {
+            when (name) {
+                "time-pos" -> _uiState.update { it.copy(positionMs = (value * 1000).toLong()) }
+                "duration" -> if (value > 0) _uiState.update { it.copy(durationMs = (value * 1000).toLong()) }
+                "speed" -> _uiState.update { it.copy(speed = value.toFloat()) }
+                "width" -> if (value > 0) _uiState.update { it.copy(videoWidth = value.toInt()) }
+                "height" -> if (value > 0) _uiState.update { it.copy(videoHeight = value.toInt()) }
             }
         }
 

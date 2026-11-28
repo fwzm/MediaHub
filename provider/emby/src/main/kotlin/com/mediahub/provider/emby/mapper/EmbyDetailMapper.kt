@@ -21,7 +21,15 @@ object EmbyDetailMapper {
 
     /** 条目映射失败（如 Id 缺失）返回 null，由调用方报错。 */
     fun mapDetail(dto: EmbyUserItemDto, serverId: String): MediaDetail? {
-        val item = EmbyMediaItemMapper.map(dto, serverId) ?: return null
+        val mapped = EmbyMediaItemMapper.map(dto, serverId) ?: return null
+        // 兼容兜底（用户条目 79）：部分兼容服条目级 RunTimeTicks 缺失/不可信，
+        // 但 MediaSources[0] 仍带可用时长——回退它，避免详情显示"未知时长"。
+        val item = if (mapped.runtimeMs == null) {
+            val fallbackMs = EmbyDuration.fromRunTimeTicks(dto.mediaSources.firstOrNull()?.runTimeTicks)
+            if (fallbackMs != null) mapped.copy(runtimeMs = fallbackMs) else mapped
+        } else {
+            mapped
+        }
         return MediaDetail(
             item = item,
             versions = dto.mediaSources.map { mapVersion(it) },

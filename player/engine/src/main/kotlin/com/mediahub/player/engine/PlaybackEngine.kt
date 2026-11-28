@@ -100,6 +100,8 @@ class PlaybackEngine(
 
     /** 真实媒体下载速度（B/s，TransferListener 统计）。 */
     override val downloadSpeedBps: StateFlow<Long> = speedMonitor.bytesPerSecond
+    override val cacheReadSpeedBps: StateFlow<Long> = speedMonitor.cacheBytesPerSecond
+    override val isReadingFromCache: StateFlow<Boolean> = speedMonitor.isReadingFromCache
 
     private val _subtitleCues = MutableStateFlow<CueGroup?>(null)
     override val subtitleCues: StateFlow<CueGroup?> = _subtitleCues.asStateFlow()
@@ -198,8 +200,12 @@ class PlaybackEngine(
 
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
+                // 条目 137：像素宽高比（变形视频）也要计入显示宽高比，否则首帧仍会拉伸。
+                val displayWidth = (videoSize.width * videoSize.pixelWidthHeightRatio)
+                    .toInt()
+                    .coerceAtLeast(videoSize.width)
                 _uiState.update {
-                    it.copy(videoWidth = videoSize.width, videoHeight = videoSize.height)
+                    it.copy(videoWidth = displayWidth, videoHeight = videoSize.height)
                 }
             }
 
@@ -264,6 +270,12 @@ class PlaybackEngine(
         externalSubtitles.clear()
         lastSelectedSubtitle = null
         clearTextSelectionOverrides()
+        // 音轨/字幕语言偏好（清单 6/82）：空字幕偏好会清空文本偏好，回到不自动开启的默认行为。
+        TrackPreferencePolicy.prepare(
+            trackSelector,
+            session.preferredAudioLanguages,
+            session.preferredTextLanguages,
+        )
         session.trace?.record(PlaybackStartupTrace.Milestone.MEDIA_REQUEST_STARTED)
         session.trace?.record(PlaybackStartupTrace.Milestone.ENGINE_PREPARE_STARTED)
         headersHolder.setHeaders(buildRequestHeaders(session.source))
@@ -274,6 +286,7 @@ class PlaybackEngine(
         // G3：降级重播必须尊重暂停意图（默认 null = 沿用既有「起播即播放」行为）。
         player.playWhenReady = session.startPaused != true
         val startPosition = session.startPositionMs ?: session.resumePositionMs
+        player.setSeekParameters(ResumeSeekParameters.forMode(session.resumeSeekMode))
         if (startPosition != null && startPosition > 0) {
             player.seekTo(startPosition)
         }
@@ -687,31 +700,7 @@ class PlaybackEngine(
             .setMimeType(mimeType)
             .build()
 
-    private fun mapPlayerError(e: PlaybackException): PlaybackError {
-        val details = mapOf(
-            "media3ErrorCode" to e.errorCode.toString(),
-            "message" to (e.message ?: ""),
-        )
-        return when (e.errorCode) {
-            PlaybackException.ERROR_CODE_DECODING_FAILED,
-            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
-            PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
-            -> PlaybackError(PlaybackError.Code.DECODER_ERROR, details = details, cause = e)
-
-            PlaybackException.ERROR_CODE_DRM_CONTENT_ERROR,
-            PlaybackException.ERROR_CODE_DRM_LICENSE_ACQUISITION_FAILED,
-            PlaybackException.ERROR_CODE_DRM_PROVISIONING_FAILED,
-            PlaybackException.ERROR_CODE_DRM_SYSTEM_ERROR,
-            PlaybackException.ERROR_CODE_DRM_UNSPECIFIED,
-            -> PlaybackError(PlaybackError.Code.DRM_ERROR, details = details, cause = e)
-
-            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
-            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
-            -> PlaybackError(PlaybackError.Code.NETWORK_TIMEOUT, details = details, cause = e)
-
-            else -> PlaybackError(PlaybackError.Code.UNKNOWN, details = details, cause = e)
-        }
-    }
+    private fun mapPlayerError(e: PlaybackException): PlaybackError = mapPlaybackException(e)
 
     private companion object {
         const val EXTERNAL_SUBTITLE_CONFIRM_ATTEMPTS = 41

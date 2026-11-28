@@ -8,6 +8,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +36,10 @@ fun ServerAddressField(
     placeholder: String = "media.example:8920",
     httpsSwitchEnabled: Boolean = true,
     enabled: Boolean = true,
+    /** 自动识别协议/端口（null = 不展示入口，如线路编辑）。 */
+    onDetect: (() -> Unit)? = null,
+    isDetecting: Boolean = false,
+    detectionMessage: String? = null,
 ) {
     Column(modifier = modifier) {
         OutlinedTextField(
@@ -71,6 +76,30 @@ fun ServerAddressField(
         if (!preferHttps) {
             Text(
                 text = "连接未加密",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        onDetect?.let { detect ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = detect, enabled = enabled && !isDetecting) {
+                    Text(if (isDetecting) "识别中…" else "自动识别")
+                }
+                if (isDetecting) {
+                    Text(
+                        text = "正在尝试常见协议与端口…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        detectionMessage?.let { message ->
+            Text(
+                text = message,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

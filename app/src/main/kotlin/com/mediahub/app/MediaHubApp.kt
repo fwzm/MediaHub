@@ -3,6 +3,7 @@ package com.mediahub.app
 import android.app.Application
 import coil.ImageLoader
 import coil.ImageLoaderFactory
+import coil.decode.VideoFrameDecoder
 import coil.disk.DiskCache
 import com.mediahub.app.image.ProviderImageAuthInterceptor
 import com.mediahub.app.image.ProviderImageAuthStore
@@ -52,6 +53,7 @@ class MediaHubApp : Application(), ImageLoaderFactory {
         ImageLoader.Builder(this)
             .callFactory(imageHttpClient())
             .crossfade(true)
+            .components { add(VideoFrameDecoder.Factory()) }
             .respectCacheHeaders(false)
             .diskCache {
                 DiskCache.Builder()
